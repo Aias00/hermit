@@ -852,6 +852,72 @@ struct TmuxSessionControllerTests {
         }, "returning to our width must trigger the gap repaint")
     }
 
+    /// The 2026-09-16 report: a Claude Code window with subagent panes, pinned
+    /// to the phone and zoomed. tmux unzooms the window for every split, kill
+    /// or pane exit, leaving the phone on the squashed layout underneath — a
+    /// one-column pane. The controller must re-zoom when the pane count moved,
+    /// and leave a person's own unzoom (same count) alone.
+    @Test("a split or a pane exit that unzooms the window re-zooms the active pane")
+    func splitUnzoomRezooms() async throws {
+        let transport = MockTmuxTransport()
+        let controller = TmuxSessionController(sshSession: transport)
+        controller.setInitialClientSize(cols: 47, rows: 40)
+        await controller.attach()
+        transport.pushText("%begin 100 0 0\n%end 100 0 0\n\n")
+        _ = await waitUntil { await transport.recordedCommands().count >= 3 }
+        let three = "3992,47x40,0,0{45x40,0,0,0,1x40,46,0[1x20,46,0,1,1x19,46,21,2]}"
+        transport.pushText("""
+        %begin 1 1 0
+        $0 1 main
+        %end 1 1 0
+        %begin 2 2 0
+        $0 @0 0 \(three) 1 3 claude
+        %end 2 2 0
+        %begin 3 3 0
+        %0 @0 0 45 40 0 0 0 claude
+        %1 @0 1 1 20 1 0 0 claude
+        %2 @0 2 1 19 0 0 0 claude
+        %end 3 3 0
+
+        """)
+        #expect(await waitUntil { controller.snapshot.activePaneId == "%1" })
+        var answered = await settleControlChatter(transport, answered: 3)
+        // Our immersive zoom landed: the window reports zoomed.
+        transport.pushText("%layout-change @0 \(three) 3992,47x40,0,0,1 *Z\n")
+        try? await Task.sleep(for: .milliseconds(50))
+        answered = await settleControlChatter(transport, answered: answered)
+        let zoomsBefore = await transport.recordedCommands().filter { $0.hasPrefix("resize-pane -Z") }.count
+
+        // A subagent pane appears: tmux splits the main pane, which unzooms
+        // the window. The controller probes the window and zooms it again.
+        let four = "1c2d,47x40,0,0{45x40,0,0[45x20,0,0,0,45x19,0,21,3],1x40,46,0[1x20,46,0,1,1x19,46,21,2]}"
+        transport.pushText("%layout-change @0 \(four) \(four)\n")
+        #expect(await waitUntil {
+            await transport.recordedCommands().suffix(from: answered)
+                .contains { $0.hasPrefix("display-message -p -t '@0'") }
+        }, "an unzoom that changed the pane count is probed")
+        answered = await answerPending(transport, answered: answered) { cmd, n in
+            cmd.hasPrefix("display-message -p -t '@0'")
+                ? block(500 + n, "4 0 %1 \(four)")
+                : block(500 + n, "")
+        }
+        #expect(await waitUntil {
+            await transport.recordedCommands().filter { $0.hasPrefix("resize-pane -Z") }.count == zoomsBefore + 1
+        }, "the probe found the split window unzoomed: it is zoomed again")
+        transport.pushText("%layout-change @0 \(four) 1c2d,47x40,0,0,1 *Z\n")
+        try? await Task.sleep(for: .milliseconds(50))
+        answered = await settleControlChatter(transport, answered: answered)
+
+        // A person unzooms from another client: the pane count is unchanged,
+        // so this is theirs — no probe, no zoom.
+        transport.pushText("%layout-change @0 \(four) \(four)\n")
+        try? await Task.sleep(for: .milliseconds(150))
+        let after = await transport.recordedCommands().suffix(from: answered)
+        #expect(!after.contains { $0.hasPrefix("display-message -p -t '@0'") },
+                "an unzoom that kept the pane count is left alone")
+        #expect(await transport.recordedCommands().filter { $0.hasPrefix("resize-pane -Z") }.count == zoomsBefore + 1)
+    }
+
     @Test("a resync frame captured at a foreign size is rejected, not painted")
     func foreignSizeFrameRejected() async throws {
         let transport = MockTmuxTransport()
@@ -2635,6 +2701,17 @@ struct TmuxLayoutWidthTests {
     func malformed() {
         #expect(C.windowWidth(fromLayout: "") == nil)
         #expect(C.windowWidth(fromLayout: "justchecksum") == nil)
+    }
+
+    @Test("counts the panes: one per leaf, containers excluded")
+    func paneCount() {
+        #expect(C.paneCount(fromLayout: "bb62,355x62,0,0,1") == 1)
+        #expect(C.paneCount(fromLayout: "34de,80x24,0,0{40x24,0,0,1,39x24,41,0,2}") == 2)
+        // The phone-pinned three-pane window of the 2026-09-16 report: a
+        // main pane and a column of two one-column panes.
+        #expect(C.paneCount(fromLayout: "3992,47x40,0,0{45x40,0,0,167,1x40,46,0[1x20,46,0,168,1x19,46,21,169]}") == 3)
+        #expect(C.paneCount(fromLayout: "") == nil)
+        #expect(C.paneCount(fromLayout: "justchecksum") == nil)
     }
 }
 

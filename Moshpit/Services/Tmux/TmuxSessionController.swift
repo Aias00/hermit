@@ -3412,15 +3412,35 @@ final class TmuxSessionController: MultiplexerControlling {
     }
 
     private func handleLayoutChange(windowId: String, layout: String, zoomed: Bool) {
+        let panes = Self.paneCount(fromLayout: layout)
+        var previousPanes: Int?
         if var window = snapshot.windows[windowId] {
+            previousPanes = Self.paneCount(fromLayout: window.layout) ?? window.paneCount
             window.layout = layout
             window.isZoomed = zoomed
+            if let panes { window.paneCount = panes }
             snapshot.windows[windowId] = window
         } else {
             // Live notifications are for the attached session.
             snapshot.windows[windowId] = WindowInfo(
                 id: windowId, sessionId: snapshot.activeSessionId ?? "",
-                layout: layout, isZoomed: zoomed)
+                layout: layout, paneCount: panes ?? 1, isZoomed: zoomed)
+        }
+        // tmux unzooms a window before it splits it, kills a pane in it or
+        // reaps a pane whose process exited — and the phone is then looking
+        // at the layout the pin squashed underneath the zoom, as often as not
+        // a side pane crushed to one column (Claude Code's subagent panes,
+        // 真机 2026-09-16: the screen one character wide). Moshpit shows one
+        // pane at a time, so put the zoom back. Only when the pane count
+        // moved: an unzoom that keeps the count is a person's prefix-z from
+        // another client, and theirs to make. Probe-then-zoom rather than a
+        // blind `resize-pane -Z` (a toggle): the FIFO orders the probe behind
+        // anything that re-zoomed meanwhile, and the holder of the window's
+        // size lease is the one device that acts.
+        if rendersOutput, !pinsReleased, !zoomed, windowId == snapshot.activeWindowId,
+           let panes, panes > 1, panes != previousPanes,
+           sizeFollow == nil, !isHeldByAnotherLiveDevice(sizeLeases[windowId]) {
+            ensureImmersiveZoom()
         }
         // Reclaim the window to OUR width if another client (or `window-size
         // latest`) sized it differently — otherwise a window a wide desktop tmux
@@ -3659,6 +3679,14 @@ final class TmuxSessionController: MultiplexerControlling {
         let fields = layout.split(separator: ",")
         guard fields.count >= 2 else { return nil }
         return fields[1].split(separator: "x").first.flatMap { Int($0) }
+    }
+
+    /// How many panes a `#{window_layout}` string describes: one per leaf
+    /// `WxH,X,Y,ID`. A container stops after `WxH,X,Y` and opens a bracket,
+    /// so it never matches. nil when the string holds no pane at all.
+    nonisolated static func paneCount(fromLayout layout: String) -> Int? {
+        let leaves = layout.matches(of: #/[0-9]+x[0-9]+,[0-9]+,[0-9]+,[0-9]+/#).count
+        return leaves > 0 ? leaves : nil
     }
 
     private func handleWindowAdd(_ windowId: String) {
