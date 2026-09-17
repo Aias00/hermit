@@ -64,4 +64,13 @@ struct FeedbackMailTests {
         #expect(body.hasSuffix("row 1999\n"))
         #expect(body.count < FeedbackMail.inlineLogLimit + 40)
     }
+
+    /// The public channel next to the mail one: the app's own repository,
+    /// on the template chooser so a report starts in shape.
+    @Test("the GitHub channel points at the app's own issue templates")
+    func gitHubChannel() {
+        let url = FeedbackChannels.newIssueURL
+        #expect(url.host() == "github.com")
+        #expect(url.path() == "/Cluas/moshpit/issues/new/choose")
+    }
 }

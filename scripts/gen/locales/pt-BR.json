@@ -686,7 +686,6 @@
   "Drag toward a direction to send an arrow key": "Arraste em uma direção para enviar a tecla de seta correspondente",
   "FEEDBACK": "FEEDBACK",
   "Feedback": "Feedback",
-  "Goes to support@cluas.eu.org through your own Mail app. Nothing is sent until you tap Send there.": "Vai para support@cluas.eu.org pelo seu próprio app Mail. Nada é enviado até você tocar em Enviar lá.",
   "Hide keyboard": "Ocultar teclado",
   "INCLUDE": "INCLUIR",
   "Install mosh": "Instalar mosh",
@@ -741,5 +740,8 @@
   "NSMicrophoneUsageDescription": "A entrada de voz usa o microfone para você ditar comandos e prompts direto no terminal. O áudio é transcrito neste aparelho, com o modelo de voz da Apple ou com um modelo Whisper que você baixou, e não é enviado para lugar nenhum.",
   "NSSpeechRecognitionUsageDescription": "O ditado reconhece a fala no próprio aparelho. Nem sua voz nem a transcrição saem dele; o Moshpit não usa reconhecimento em servidor.",
   "NSLocalNetworkUsageDescription": "O Moshpit conecta por SSH e mosh (UDP) aos servidores da sua rede local. Sem esta permissão, conexões a hosts como 192.168.x.x falham.",
-  "NSCameraUsageDescription": "A câmera serve para fotografar quadros brancos, rascunhos ou telas e anexar a uma sessão de terminal. As fotos perdem os dados de localização neste aparelho e só são enviadas ao seu próprio servidor."
+  "NSCameraUsageDescription": "A câmera serve para fotografar quadros brancos, rascunhos ou telas e anexar a uma sessão de terminal. As fotos perdem os dados de localização neste aparelho e só são enviadas ao seu próprio servidor.",
+  "Open a GitHub Issue": "Abrir uma issue no GitHub",
+  "Bug reports and feature requests, in the open": "Bugs e pedidos de recurso, às claras",
+  "Mail goes to support@cluas.eu.org through your own Mail app and leaves only when you tap Send there. Issues are public and sit next to the code; keep security reports to mail.": "O e-mail vai para support@cluas.eu.org pelo seu próprio app Mail e só sai quando você toca em Enviar lá. Issues são públicas e ficam ao lado do código; problemas de segurança, por e-mail."
 }

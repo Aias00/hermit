@@ -83,3 +83,11 @@ struct FeedbackMail: Equatable {
         return components.url
     }
 }
+
+/// Where feedback goes besides mail. The public channel is GitHub Issues on
+/// the app's own repository — the site's Support page already sends people
+/// there, and Settings should agree with it. `/new/choose` opens the template
+/// chooser, so a bug report and a feature request each start in shape.
+enum FeedbackChannels {
+    static let newIssueURL = URL(string: "https://github.com/Cluas/moshpit/issues/new/choose")!
+}

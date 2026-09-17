@@ -211,6 +211,9 @@ struct ChevronRow: View {
     var subtitle: LocalizedStringKey?
     /// Dynamic, pre-formatted display value (kept `String` on purpose).
     var value: String?
+    /// The row leaves the app (Safari, Mail): the trailing glyph is ↗ rather
+    /// than a chevron, so the row does not promise a push it will not make.
+    var external = false
     var action: () -> Void = {}
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -243,7 +246,13 @@ struct ChevronRow: View {
                     }
                 }
                 if stacked { Spacer(minLength: 8) }
-                MiniChevron()
+                if external {
+                    Image(systemName: "arrow.up.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Ink.meta)
+                } else {
+                    MiniChevron()
+                }
             }
         }
     }

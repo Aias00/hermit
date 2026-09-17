@@ -686,7 +686,6 @@
   "Drag toward a direction to send an arrow key": "Glissez dans une direction pour envoyer la touche fléchée correspondante",
   "FEEDBACK": "COMMENTAIRES",
   "Feedback": "Commentaires",
-  "Goes to support@cluas.eu.org through your own Mail app. Nothing is sent until you tap Send there.": "Part vers support@cluas.eu.org via votre propre app Mail. Rien n’est envoyé avant que vous touchiez Envoyer là-bas.",
   "Hide keyboard": "Masquer le clavier",
   "INCLUDE": "INCLURE",
   "Install mosh": "Installer mosh",
@@ -741,5 +740,8 @@
   "NSMicrophoneUsageDescription": "La saisie vocale utilise le micro pour que vous puissiez dicter commandes et prompts directement dans le terminal. L’audio est transcrit sur cet appareil, avec le modèle vocal d’Apple ou un modèle Whisper que vous avez téléchargé, et n’est envoyé nulle part.",
   "NSSpeechRecognitionUsageDescription": "La dictée reconnaît la parole sur l’appareil. Ni votre voix ni la transcription ne quittent cet appareil ; Moshpit n’utilise aucune reconnaissance côté serveur.",
   "NSLocalNetworkUsageDescription": "Moshpit se connecte en SSH et mosh (UDP) aux serveurs de votre réseau local. Sans cette autorisation, les connexions à des hôtes comme 192.168.x.x échouent.",
-  "NSCameraUsageDescription": "L’appareil photo sert à photographier un tableau blanc, un croquis ou un écran pour le joindre à une session de terminal. Les photos sont débarrassées de leurs données de localisation sur cet appareil et ne sont envoyées qu’à votre propre serveur."
+  "NSCameraUsageDescription": "L’appareil photo sert à photographier un tableau blanc, un croquis ou un écran pour le joindre à une session de terminal. Les photos sont débarrassées de leurs données de localisation sur cet appareil et ne sont envoyées qu’à votre propre serveur.",
+  "Open a GitHub Issue": "Ouvrir une issue sur GitHub",
+  "Bug reports and feature requests, in the open": "Bugs et demandes de fonctionnalités, au grand jour",
+  "Mail goes to support@cluas.eu.org through your own Mail app and leaves only when you tap Send there. Issues are public and sit next to the code; keep security reports to mail.": "Le courrier part vers support@cluas.eu.org via votre propre app Mail et n’est envoyé que lorsque vous touchez Envoyer là-bas. Les issues sont publiques, juste à côté du code ; pour les problèmes de sécurité, préférez le courrier."
 }

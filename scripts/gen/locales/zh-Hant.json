@@ -686,7 +686,6 @@
   "Drag toward a direction to send an arrow key": "朝一個方向拖移，就送出對應的方向鍵",
   "FEEDBACK": "意見回饋",
   "Feedback": "意見回饋",
-  "Goes to support@cluas.eu.org through your own Mail app. Nothing is sent until you tap Send there.": "透過你自己的郵件 App 寄到 support@cluas.eu.org。在郵件裡按下傳送之前，什麼都不會送出。",
   "Hide keyboard": "收起鍵盤",
   "INCLUDE": "附上",
   "Install mosh": "安裝 mosh",
@@ -741,5 +740,8 @@
   "NSMicrophoneUsageDescription": "語音輸入需要使用麥克風，這樣你可以把指令和提示詞直接說進終端機。音訊會在這部裝置上轉寫，用 Apple 的語音模型或你下載的 Whisper 模型，不會上傳到任何地方。",
   "NSSpeechRecognitionUsageDescription": "聽寫在裝置上進行語音辨識。你的語音和轉寫文字都不會離開這部裝置，Moshpit 不使用伺服器端辨識。",
   "NSLocalNetworkUsageDescription": "Moshpit 透過 SSH 和 mosh（UDP）連線到你區域網路裡的伺服器。沒有這個權限，連 192.168.x.x 這類內網主機會失敗。",
-  "NSCameraUsageDescription": "相機用來拍點東西，比如白板、草圖、螢幕，然後附加到終端機工作階段。照片會在這部裝置上移除位置資訊，只上傳到你自己的伺服器。"
+  "NSCameraUsageDescription": "相機用來拍點東西，比如白板、草圖、螢幕，然後附加到終端機工作階段。照片會在這部裝置上移除位置資訊，只上傳到你自己的伺服器。",
+  "Open a GitHub Issue": "到 GitHub 開 Issue",
+  "Bug reports and feature requests, in the open": "bug 回報和功能建議都可以，公開可見",
+  "Mail goes to support@cluas.eu.org through your own Mail app and leaves only when you tap Send there. Issues are public and sit next to the code; keep security reports to mail.": "郵件會透過你自己的郵件 App 寄到 support@cluas.eu.org，在郵件裡按下傳送之前什麼都不會送出。Issue 是公開的，就在程式碼旁邊；安全性問題請改用郵件。"
 }

@@ -7,6 +7,7 @@ import MoshpitKit
 struct SettingsScreen: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Environment(AppSettings.self) private var settings
     @Environment(ShortcutStore.self) private var shortcutStore
     @Environment(SSHKeyStore.self) private var keyStore
@@ -180,13 +181,23 @@ struct SettingsScreen: View {
 
                 FormGroup(
                     title: "FEEDBACK",
-                    footer: "Goes to support@cluas.eu.org through your own Mail app. Nothing is sent until you tap Send there."
+                    footer: "Mail goes to support@cluas.eu.org through your own Mail app and leaves only when you tap Send there. Issues are public and sit next to the code; keep security reports to mail."
                 ) {
                     ChevronRow(label: "Send Feedback",
                                subtitle: "A bug, an idea, a screen that reads wrong") {
                         showFeedback = true
                     }
                     .accessibilityIdentifier("settings-feedback")
+                    // The public channel — the site's Support page already
+                    // points at it, and Settings should agree. Opens GitHub's
+                    // template chooser in Safari, so a bug report and a
+                    // feature request each start in shape.
+                    ChevronRow(label: "Open a GitHub Issue",
+                               subtitle: "Bug reports and feature requests, in the open",
+                               external: true) {
+                        openURL(FeedbackChannels.newIssueURL)
+                    }
+                    .accessibilityIdentifier("settings-github-issue")
                 }
 
                 // Build identity — long-press to copy (for bug reports) — and,

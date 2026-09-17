@@ -6959,6 +6959,58 @@
         }
       }
     },
+    "Bug reports and feature requests, in the open": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fehlerberichte und Feature-Wünsche, öffentlich"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Errores y peticiones de funciones, a la vista de todos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bugs et demandes de fonctionnalités, au grand jour"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "バグ報告も機能の要望も、公開の場で"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "버그 신고와 기능 제안, 공개된 자리에서"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bugs e pedidos de recurso, às claras"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "bug 和功能建议都可以，公开可见"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "bug 回報和功能建議都可以，公開可見"
+          }
+        }
+      }
+    },
     "Built for coding agents — agent status needs no hooks": {
       "localizations": {
         "de": {
@@ -13979,58 +14031,6 @@
         }
       }
     },
-    "Goes to support@cluas.eu.org through your own Mail app. Nothing is sent until you tap Send there.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Geht über deine eigene Mail-App an support@cluas.eu.org. Gesendet wird erst, wenn du dort auf „Senden“ tippst."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Va a support@cluas.eu.org a través de tu propia app Mail. No se envía nada hasta que toques Enviar allí."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Part vers support@cluas.eu.org via votre propre app Mail. Rien n’est envoyé avant que vous touchiez Envoyer là-bas."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "お使いのメールアプリから support@cluas.eu.org に送ります。メールで送信するまで、何も送られません。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "사용 중인 Mail 앱을 통해 support@cluas.eu.org로 보냅니다. 거기서 보내기를 탭하기 전까지는 아무것도 전송되지 않습니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Vai para support@cluas.eu.org pelo seu próprio app Mail. Nada é enviado até você tocar em Enviar lá."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "通过你自己的邮件 app 发到 support@cluas.eu.org。在邮件里点发送之前，什么都不会发出。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "透過你自己的郵件 App 寄到 support@cluas.eu.org。在郵件裡按下傳送之前，什麼都不會送出。"
-          }
-        }
-      }
-    },
     "Good balance of accuracy and speed.": {
       "localizations": {
         "de": {
@@ -18031,6 +18031,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "我的主題"
+          }
+        }
+      }
+    },
+    "Mail goes to support@cluas.eu.org through your own Mail app and leaves only when you tap Send there. Issues are public and sit next to the code; keep security reports to mail.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mail geht über deine eigene Mail-App an support@cluas.eu.org und wird erst gesendet, wenn du dort auf „Senden“ tippst. Issues sind öffentlich und liegen direkt neben dem Code; Sicherheitsprobleme bitte per Mail."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El correo va a support@cluas.eu.org a través de tu propia app Mail y no se envía hasta que toques Enviar allí. Los issues son públicos y están junto al código; los problemas de seguridad, mejor por correo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le courrier part vers support@cluas.eu.org via votre propre app Mail et n’est envoyé que lorsque vous touchez Envoyer là-bas. Les issues sont publiques, juste à côté du code ; pour les problèmes de sécurité, préférez le courrier."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メールはお使いのメールアプリから support@cluas.eu.org に送られ、そこで送信するまで何も送られません。Issue は公開され、コードのすぐ隣にあります。セキュリティの問題はメールでお知らせください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메일은 사용 중인 Mail 앱을 통해 support@cluas.eu.org로 보내지며, 거기서 보내기를 탭하기 전까지는 아무것도 전송되지 않습니다. 이슈는 공개되고 코드 바로 옆에 있습니다. 보안 문제는 메일로 보내세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O e-mail vai para support@cluas.eu.org pelo seu próprio app Mail e só sai quando você toca em Enviar lá. Issues são públicas e ficam ao lado do código; problemas de segurança, por e-mail."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "邮件通过你自己的邮件 app 发到 support@cluas.eu.org，在邮件里点发送之前什么都不会发出。Issue 是公开的，就在代码旁边；安全问题请走邮件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "郵件會透過你自己的郵件 App 寄到 support@cluas.eu.org，在郵件裡按下傳送之前什麼都不會送出。Issue 是公開的，就在程式碼旁邊；安全性問題請改用郵件。"
           }
         }
       }
@@ -22555,6 +22607,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "打開設定"
+          }
+        }
+      }
+    },
+    "Open a GitHub Issue": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein GitHub-Issue eröffnen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir un issue en GitHub"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir une issue sur GitHub"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub で Issue を立てる"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub에 이슈 열기"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir uma issue no GitHub"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "去 GitHub 提 Issue"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "到 GitHub 開 Issue"
           }
         }
       }

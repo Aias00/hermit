@@ -686,7 +686,6 @@
   "Drag toward a direction to send an arrow key": "In eine Richtung ziehen, um die Pfeiltaste zu senden",
   "FEEDBACK": "FEEDBACK",
   "Feedback": "Feedback",
-  "Goes to support@cluas.eu.org through your own Mail app. Nothing is sent until you tap Send there.": "Geht über deine eigene Mail-App an support@cluas.eu.org. Gesendet wird erst, wenn du dort auf „Senden“ tippst.",
   "Hide keyboard": "Tastatur ausblenden",
   "INCLUDE": "MITSENDEN",
   "Install mosh": "mosh installieren",
@@ -741,5 +740,8 @@
   "NSMicrophoneUsageDescription": "Die Spracheingabe nutzt das Mikrofon, damit du Befehle und Prompts direkt ins Terminal sprechen kannst. Audio wird auf diesem Gerät in Text umgewandelt, mit Apples Sprachmodell oder einem geladenen Whisper-Modell, und nirgendwohin hochgeladen.",
   "NSSpeechRecognitionUsageDescription": "Das Diktat erkennt Sprache auf dem Gerät. Weder deine Stimme noch der erkannte Text verlassen dieses Gerät; Moshpit nutzt keine serverseitige Erkennung.",
   "NSLocalNetworkUsageDescription": "Moshpit verbindet sich per SSH und mosh (UDP) mit Servern in deinem lokalen Netzwerk. Ohne diese Berechtigung schlagen Verbindungen zu Hosts wie 192.168.x.x fehl.",
-  "NSCameraUsageDescription": "Mit der Kamera fotografierst du etwa Whiteboards, Skizzen oder Bildschirme und hängst sie an eine Terminalsitzung an. Fotos werden auf diesem Gerät von Ortsdaten befreit und nur auf deinen eigenen Server geladen."
+  "NSCameraUsageDescription": "Mit der Kamera fotografierst du etwa Whiteboards, Skizzen oder Bildschirme und hängst sie an eine Terminalsitzung an. Fotos werden auf diesem Gerät von Ortsdaten befreit und nur auf deinen eigenen Server geladen.",
+  "Open a GitHub Issue": "Ein GitHub-Issue eröffnen",
+  "Bug reports and feature requests, in the open": "Fehlerberichte und Feature-Wünsche, öffentlich",
+  "Mail goes to support@cluas.eu.org through your own Mail app and leaves only when you tap Send there. Issues are public and sit next to the code; keep security reports to mail.": "Mail geht über deine eigene Mail-App an support@cluas.eu.org und wird erst gesendet, wenn du dort auf „Senden“ tippst. Issues sind öffentlich und liegen direkt neben dem Code; Sicherheitsprobleme bitte per Mail."
 }

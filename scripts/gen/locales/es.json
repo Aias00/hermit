@@ -686,7 +686,6 @@
   "Drag toward a direction to send an arrow key": "Arrastra en una dirección para enviar esa tecla de flecha",
   "FEEDBACK": "COMENTARIOS",
   "Feedback": "Comentarios",
-  "Goes to support@cluas.eu.org through your own Mail app. Nothing is sent until you tap Send there.": "Va a support@cluas.eu.org a través de tu propia app Mail. No se envía nada hasta que toques Enviar allí.",
   "Hide keyboard": "Ocultar teclado",
   "INCLUDE": "INCLUIR",
   "Install mosh": "Instalar mosh",
@@ -741,5 +740,8 @@
   "NSMicrophoneUsageDescription": "La entrada de voz usa el micrófono para que puedas dictar comandos y prompts directamente al terminal. El audio se transcribe en este dispositivo, con el modelo de voz de Apple o con un modelo Whisper que hayas descargado, y no se sube a ningún sitio.",
   "NSSpeechRecognitionUsageDescription": "El dictado reconoce la voz en el propio dispositivo. Ni tu voz ni la transcripción salen de él; Moshpit no usa reconocimiento en servidores.",
   "NSLocalNetworkUsageDescription": "Moshpit se conecta por SSH y mosh (UDP) a los servidores de tu red local. Sin este permiso, las conexiones a hosts como 192.168.x.x fallan.",
-  "NSCameraUsageDescription": "La cámara sirve para fotografiar pizarras, bocetos o pantallas y adjuntarlos a una sesión de terminal. Las fotos pierden los datos de ubicación en este dispositivo y solo se suben a tu propio servidor."
+  "NSCameraUsageDescription": "La cámara sirve para fotografiar pizarras, bocetos o pantallas y adjuntarlos a una sesión de terminal. Las fotos pierden los datos de ubicación en este dispositivo y solo se suben a tu propio servidor.",
+  "Open a GitHub Issue": "Abrir un issue en GitHub",
+  "Bug reports and feature requests, in the open": "Errores y peticiones de funciones, a la vista de todos",
+  "Mail goes to support@cluas.eu.org through your own Mail app and leaves only when you tap Send there. Issues are public and sit next to the code; keep security reports to mail.": "El correo va a support@cluas.eu.org a través de tu propia app Mail y no se envía hasta que toques Enviar allí. Los issues son públicos y están junto al código; los problemas de seguridad, mejor por correo."
 }
