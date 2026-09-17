@@ -1928,6 +1928,57 @@ struct ShortcutBarView: View {
         return min(0, max(minOffset, proposed)).rounded()
     }
 
+    /// How far the edge fade reaches into the row. Narrow on purpose: the
+    /// default row is one chip wider than a 402pt viewport, so at rest a chip
+    /// always straddles the trailing edge, and the fade lands on it.
+    private static let chipRowFadeWidth: CGFloat = 20
+
+    /// The chip row's mask: opaque, except it fades out over an edge that has
+    /// chips hidden past it — the standard "there's more this way" cue, and
+    /// the only affordance this hand-rolled pan has (user ask, 2026-09-18).
+    ///
+    /// This is the second time the row has had a fade. The first one (26pt,
+    /// linear) went out with the 2026-08-16 blur report: the drag was also
+    /// parking chips on half-pixels, and the two compounded into "the keys
+    /// are blurry". The half-pixel is gone (`clampedChipRowOffset` rounds),
+    /// and this fade is shaped so a chip under it still reads as a chip:
+    /// a quadratic curve that keeps most of its reach near full opacity and
+    /// drops to clear only in the last few points at the very edge.
+    ///
+    /// Each side's fade grows in over its own width as content disappears
+    /// past it, so the fade eases in and out at the ends of the pan instead
+    /// of snapping on and off. When everything fits, both sides are opaque
+    /// and the mask is a plain rectangle — full-opacity tap targets, and it
+    /// still gates hit-testing (see the mask comment below).
+    private func chipRowFade(viewportWidth: CGFloat) -> some View {
+        let offset = clampedChipRowOffset(chipRowOffset + chipRowDragTranslation,
+                                          viewportWidth: viewportWidth)
+        let leading = min(Self.chipRowFadeWidth, max(0, -offset))
+        let trailing = min(Self.chipRowFadeWidth,
+                           max(0, chipRowContentWidth + offset - viewportWidth))
+        return HStack(spacing: 0) {
+            chipRowEdgeFade(width: leading, edge: .leading)
+            Rectangle().fill(.black)
+            chipRowEdgeFade(width: trailing, edge: .trailing)
+        }
+    }
+
+    /// One edge of `chipRowFade`: opaque on the row's side, clear at `edge`.
+    /// Stops follow 1 − t², t running towards the edge — three quarters of
+    /// the way in the mask still passes 44%, and nearly everything inside
+    /// the first quarter is untouched.
+    private func chipRowEdgeFade(width: CGFloat, edge: HorizontalEdge) -> some View {
+        let curve: [(CGFloat, Double)] = [(0, 1), (0.25, 0.94), (0.5, 0.75), (0.75, 0.44), (1, 0)]
+        let stops = curve.map { location, alpha in
+            Gradient.Stop(color: .black.opacity(alpha), location: location)
+        }
+        return LinearGradient(
+            stops: stops,
+            startPoint: edge == .trailing ? .leading : .trailing,
+            endPoint: edge == .trailing ? .trailing : .leading)
+            .frame(width: width)
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             chipRow
@@ -2082,21 +2133,13 @@ struct ShortcutBarView: View {
                                                      viewportWidth: viewport.size.width))
             }
             .frame(width: viewport.size.width, height: viewport.size.height, alignment: .leading)
-            // A hard clip, deliberately — this used to be a 26pt edge fade.
-            // With the default row one chip wider than a 402pt viewport, the
-            // fade sat ON the straddling chip's glyph at rest, permanently,
-            // and half-transparent keys read as a rendering bug, not as
-            // "there's more this way" (user report: "快捷键模糊"). A partially
-            // clipped chip is itself the standard scroll affordance — same as
-            // every horizontally scrolling chip row in iOS.
-            //
             // A mask, not `.clipped()`: clipped() trims only the drawing, and
             // the offset row's hidden tail would still HIT-TEST beyond the
             // viewport — stealing taps under the pinned keyboard toggle. A
-            // mask gates hit-testing along with the pixels (the property the
-            // old fade relied on); a full-opacity rectangle keeps that and
-            // drops only the glyph-blurring gradient.
-            .mask(Rectangle())
+            // mask gates hit-testing along with the pixels. The mask is a
+            // rectangle that fades at whichever edge has chips past it; see
+            // `chipRowFade` for the shape and for why it is this narrow.
+            .mask(chipRowFade(viewportWidth: viewport.size.width))
             .contentShape(Rectangle())
             .gesture(
                 // minimumDistance keeps a plain tap from ever engaging this
