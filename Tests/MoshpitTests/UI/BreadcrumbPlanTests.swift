@@ -26,19 +26,20 @@ struct BreadcrumbPlanTests {
     func plainPane() {
         let plan = BreadcrumbPlan.make(snapshot: snapshot(), hooks: [:])
         #expect(plan == BreadcrumbPlan(
-            sessionTitle: "moshpit", sessionIconOnly: false,
+            sessionTitle: "moshpit", sessionSqueezable: false,
             windowTitle: "2:fix-scroll", paneTitle: "zsh", paneSignal: nil))
     }
 
-    @Test("Agent in the pane: its name takes the crumb, the session yields its text")
+    @Test("Agent in the pane: its name takes the crumb, the session may yield its text")
     func agentPane() {
         let plan = BreadcrumbPlan.make(
             snapshot: snapshot(),
             hooks: ["w1:p1": AgentHook(state: "attention", agent: "Claude Code")])
         #expect(plan?.paneTitle == "Claude Code")
         #expect(plan?.paneSignal == .attention)
-        #expect(plan?.sessionIconOnly == true)
-        // Still there for the tap target / VoiceOver, just not spelled out.
+        #expect(plan?.sessionSqueezable == true)
+        // Still there: for the tap target, VoiceOver, and the bar itself
+        // whenever the three segments fit.
         #expect(plan?.sessionTitle == "moshpit")
     }
 
@@ -49,7 +50,7 @@ struct BreadcrumbPlanTests {
             hooks: ["w1:p1": AgentHook(state: "working")])
         #expect(plan?.paneTitle == "zsh")
         #expect(plan?.paneSignal == .working)
-        #expect(plan?.sessionIconOnly == true)
+        #expect(plan?.sessionSqueezable == true)
     }
 
     @Test("A hook on some OTHER pane changes nothing here")
@@ -59,7 +60,7 @@ struct BreadcrumbPlanTests {
             hooks: ["w1:p2": AgentHook(state: "attention", agent: "Codex")])
         #expect(plan?.paneTitle == "zsh")
         #expect(plan?.paneSignal == nil)
-        #expect(plan?.sessionIconOnly == false)
+        #expect(plan?.sessionSqueezable == false)
     }
 
     /// herdr 0.7.3: no command field on panes — the number keeps the crumb
@@ -103,7 +104,7 @@ struct BreadcrumbPlanTests {
         snap.panes["w1:p1"]?.command = "2.1.269"
         let plan = BreadcrumbPlan.make(snapshot: snap, hooks: [:])
         #expect(plan?.paneTitle == "claude")
-        #expect(plan?.sessionIconOnly == false, "no hook, no dot, no squeeze — just the right word")
+        #expect(plan?.sessionSqueezable == false, "no hook, no dot, nothing to squeeze — just the right word")
     }
 
     // ─────────────────────────────────────────────────────────────

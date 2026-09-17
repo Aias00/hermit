@@ -8,11 +8,15 @@ import Foundation
 /// command, which under herdr 0.7.3 is nothing at all (`pane N`).
 ///
 /// Fitting the agent in is a width problem before it is anything else: three
-/// full segments don't fit 402pt, which was discovered by drawing it (see the
-/// flow prototype's stage-⑤ sketch). The answer here: when the pane carries an
-/// agent, the session crumb gives up its text and keeps only its icon — still
-/// tappable, still discoverable, but no longer spending ~90pt saying a
-/// workspace name that the Sessions sheet repeats anyway.
+/// full segments don't always fit 402pt, which was discovered by drawing it
+/// (see the flow prototype's stage-⑤ sketch). The answer here: when the pane
+/// carries an agent, the session crumb is ALLOWED to give up its text and
+/// keep only its icon — still tappable, still discoverable, but no longer
+/// spending ~90pt saying a workspace name that the Sessions sheet repeats
+/// anyway. Whether it actually has to is the view's call, measured against
+/// the bar: this used to squeeze unconditionally, and a session called "0"
+/// lost its one character to make room that was already there (真机
+/// 2026-09-18).
 ///
 /// Pure — the snapshot and hooks go in, the strings come out — so the
 /// squeeze rule and the fallback chain are testable without a connection.
@@ -25,9 +29,11 @@ import Foundation
 /// (真机 2026-09-16). The view keeps the previous plan until this one is whole.
 struct BreadcrumbPlan: Equatable {
     var sessionTitle: String
-    /// True when the pane segment carries an agent and needs the room: the
-    /// session crumb renders icon-only.
-    var sessionIconOnly: Bool
+    /// True when the pane segment carries an agent and may need the room: the
+    /// view tries the full session name first and falls back to the icon
+    /// alone only if three full segments overflow the bar. False = the name
+    /// is always spelled out and the window crumb truncates instead.
+    var sessionSqueezable: Bool
     var windowTitle: String
     /// nil = no pane crumb at all (no active pane in the snapshot).
     var paneTitle: String?
@@ -71,7 +77,7 @@ struct BreadcrumbPlan: Equatable {
 
         return BreadcrumbPlan(
             sessionTitle: sessionTitle,
-            sessionIconOnly: agentName != nil || signal != nil,
+            sessionSqueezable: agentName != nil || signal != nil,
             windowTitle: windowTitle,
             paneTitle: paneTitle,
             paneSignal: signal,

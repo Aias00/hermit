@@ -839,8 +839,8 @@ struct TerminalScreen: View {
     /// A breadcrumb segment: a small SF Symbol + mono label, in Signal Room citron.
     ///
     /// `text: nil` renders icon-only — the squeezed form the session crumb
-    /// takes when the pane crumb is carrying an agent name (three full
-    /// segments don't fit the bar; see `BreadcrumbPlan`).
+    /// falls back to when the pane crumb is carrying an agent name and three
+    /// full segments do not fit the bar (see `BreadcrumbPlan` and `crumbs`).
     private func crumbLabel(_ symbol: String, _ text: String?) -> some View {
         HStack(spacing: 3) {
             Image(systemName: symbol)
@@ -941,6 +941,46 @@ struct TerminalScreen: View {
         }
     }
 
+    /// The three segments as one row. `sessionText: nil` is the squeezed
+    /// form — session icon only — that `breadcrumb` falls back to when the
+    /// full row does not fit.
+    private func crumbs(_ plan: BreadcrumbPlan, sessionText: String?) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                presentSheet { showSessionsSheet = true }
+            } label: {
+                crumbLabel(connection.multiplexer.vocabulary.sessionIcon, sessionText)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(plan.sessionTitle)
+
+            crumbSep
+
+            Button {
+                presentSheet { showWindowsSheet = true }
+            } label: {
+                crumbLabel(connection.multiplexer.vocabulary.windowIcon, plan.windowTitle)
+            }
+            .buttonStyle(.plain)
+
+            if let paneTitle = plan.paneTitle {
+                crumbSep
+                // The pane (command / agent) segment opens the Select Pane
+                // sheet — switch panes or split a new one. It carries the
+                // name that matters most, so it truncates last.
+                Button {
+                    presentSheet { showPaneSheet = true }
+                } label: {
+                    paneCrumbLabel(paneTitle, signal: plan.paneSignal)
+                }
+                .buttonStyle(.plain)
+                .layoutPriority(1)
+                .accessibilityLabel(
+                    paneCrumbAccessibilityLabel(paneTitle, signal: plan.paneSignal))
+            }
+        }
+    }
+
     private var breadcrumb: some View {
         HStack(spacing: 6) {
             // Read the snapshot through concrete types (not the existential) so
@@ -948,38 +988,19 @@ struct TerminalScreen: View {
             // The strings and the squeeze rule live in `BreadcrumbPlan` — pure,
             // tested — this just lays the segments out.
             if let plan = livePlan ?? retainedPlan {
-                Button {
-                    presentSheet { showSessionsSheet = true }
-                } label: {
-                    crumbLabel(connection.multiplexer.vocabulary.sessionIcon,
-                               plan.sessionIconOnly ? nil : plan.sessionTitle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(plan.sessionTitle)
-
-                crumbSep
-
-                Button {
-                    presentSheet { showWindowsSheet = true }
-                } label: {
-                    crumbLabel(connection.multiplexer.vocabulary.windowIcon, plan.windowTitle)
-                }
-                .buttonStyle(.plain)
-
-                if let paneTitle = plan.paneTitle {
-                    crumbSep
-                    // The pane (command / agent) segment opens the Select Pane
-                    // sheet — switch panes or split a new one. It carries the
-                    // name that matters most, so it truncates last.
-                    Button {
-                        presentSheet { showPaneSheet = true }
-                    } label: {
-                        paneCrumbLabel(paneTitle, signal: plan.paneSignal)
+                if plan.sessionSqueezable {
+                    // The session name first; the icon alone only if the
+                    // three full segments overflow the bar. `ViewThatFits`
+                    // measures each row's ideal (untruncated) width against
+                    // what the bar offers, so a one-character session like
+                    // "0" keeps its name beside "11:moshpit › claude" (真机
+                    // 2026-09-18) while a long one still yields.
+                    ViewThatFits(in: .horizontal) {
+                        crumbs(plan, sessionText: plan.sessionTitle)
+                        crumbs(plan, sessionText: nil)
                     }
-                    .buttonStyle(.plain)
-                    .layoutPriority(1)
-                    .accessibilityLabel(
-                        paneCrumbAccessibilityLabel(paneTitle, signal: plan.paneSignal))
+                } else {
+                    crumbs(plan, sessionText: plan.sessionTitle)
                 }
             } else {
                 // mosh / plain SSH / herdr: no -CC control stream, so no live
