@@ -2,8 +2,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Screen 9 — Add Key modal. Generate / Import / Hardware methods,
-/// algorithm choice with REC badge, passphrase strength, Face ID + Secure
-/// Enclave toggles, optional host binding with fingerprint preview.
+/// algorithm choice with REC badge, Face ID + Secure Enclave toggles,
+/// optional host binding with fingerprint preview.
+///
+/// No passphrase field: the private half is only ever stored in the Keychain
+/// (behind Face ID when asked) — that is the key's at-rest protection, and
+/// `SSHKeyFactory.generate` writes it with cipher `none`.
 struct AddKeyView: View {
     enum Method: String, CaseIterable { case generate, importKey, hardware }
     /// Which text field a picked file's contents should land in — one
@@ -25,8 +29,6 @@ struct AddKeyView: View {
     @State private var name = ""
     @State private var algorithm: SSHKeyAlgorithm = .ed25519
     @State private var comment = ""
-    @State private var passphrase = ""
-    @State private var confirmPassphrase = ""
     @State private var requireFaceID = true
     @State private var storeInSecureEnclave = false
     @State private var boundHosts: Set<String> = []
@@ -55,7 +57,7 @@ struct AddKeyView: View {
         guard !name.isEmpty, !working else { return false }
         switch method {
         case .generate:
-            return passphrase == confirmPassphrase
+            return true
         case .importKey:
             return !importPEM.isEmpty
         case .hardware:
@@ -164,8 +166,9 @@ struct AddKeyView: View {
                     .foregroundStyle(Ink.primary)
                 PillSegmentedControl(
                     items: [
+                        // No ECDSA-sk: that key lives on a hardware token and
+                        // can't be generated here (see the Hardware method).
                         SegItem(value: SSHKeyAlgorithm.ed25519, label: "ED25519", trailingBadge: "REC"),
-                        SegItem(value: SSHKeyAlgorithm.ecdsaSK, label: "ECDSA-sk"),
                         SegItem(value: SSHKeyAlgorithm.rsa4096, label: "RSA-4096"),
                     ],
                     selection: $algorithm)
@@ -179,12 +182,6 @@ struct AddKeyView: View {
             title: "PROTECTION",
             footer: "Secure Enclave keys are limited to ECDSA-P256; the algorithm adjusts automatically when SE is enabled."
         ) {
-            FieldRow(placeholder: "Passphrase", text: $passphrase, secure: true)
-            FieldRow(placeholder: "Confirm Passphrase", text: $confirmPassphrase, secure: true)
-            StrengthMeter(strength: SSHKeyFactory.passphraseStrength(passphrase))
-                // The row has no leading text, so the separator would otherwise
-                // align to the trailing "WEAK" label and show as a stub.
-                .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
             ToggleRow(label: "Require Face ID", subtitle: "Face ID confirmation before every signature", isOn: $requireFaceID)
             ToggleRow(label: "Store in Secure Enclave", subtitle: "Hardware-backed · private key cannot be exported", isOn: $storeInSecureEnclave)
         }
@@ -321,6 +318,7 @@ struct AddKeyView: View {
                 keychainRef: ref,
                 requireBiometry: requireFaceID)
             keyStore.add(record)
+            onCreated?(record)
             dismiss()
         } catch {
             errorMessage = error.localizedDescription

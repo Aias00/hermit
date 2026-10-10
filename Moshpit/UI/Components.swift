@@ -684,41 +684,6 @@ struct WarnBox: View {
     }
 }
 
-// MARK: - Strength meter (§3.8)
-
-struct StrengthMeter: View {
-    /// 0…1
-    let strength: Double
-
-    private var label: LocalizedStringKey {
-        switch strength {
-        case ..<0.34: return "WEAK"
-        case ..<0.67: return "FAIR"
-        default: return "STRONG"
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Ink.faintFill)
-                    Capsule()
-                        .fill(Ink.strengthFill)
-                        .frame(width: geo.size.width * strength)
-                        .shadow(color: Ink.mosh.opacity(0.6), radius: 4)
-                }
-            }
-            .frame(height: 4)
-            Text(label)
-                .font(Face.mono(10.5))
-                .kerning(0.84)
-                .foregroundStyle(Ink.strengthLabel)
-        }
-        .padding(EdgeInsets(top: 10, leading: 0, bottom: 8, trailing: 0))
-    }
-}
-
 // MARK: - Key hint chip (sheet footers)
 
 struct KeyHintChip: View {

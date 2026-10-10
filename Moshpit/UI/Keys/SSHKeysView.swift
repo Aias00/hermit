@@ -7,6 +7,10 @@ struct SSHKeysView: View {
     @Environment(SSHKeyStore.self) private var keyStore
 
     @State private var showAdd = false
+    /// The key whose delete is awaiting confirmation. Deleting is not
+    /// undoable — a Secure Enclave key's private half never existed anywhere
+    /// else — so a long-press menu item alone is too easy to hit.
+    @State private var deleting: SSHKeyRecord?
 
     var body: some View {
         NavigationStack {
@@ -22,7 +26,7 @@ struct SSHKeysView: View {
                     } else {
                         ForEach(keyStore.deviceKeys) { key in
                             SSHKeyRow(record: key)
-                                .contextMenu { keyRowMenu(key, store: keyStore) }
+                                .contextMenu { keyRowMenu(key) { deleting = key } }
                         }
                     }
                 }
@@ -35,7 +39,7 @@ struct SSHKeysView: View {
                     } else {
                         ForEach(keyStore.importedKeys) { key in
                             SSHKeyRow(record: key)
-                                .contextMenu { keyRowMenu(key, store: keyStore) }
+                                .contextMenu { keyRowMenu(key) { deleting = key } }
                         }
                     }
                 }
@@ -59,7 +63,23 @@ struct SSHKeysView: View {
                             .background(Ink.accent.opacity(0.11), in: Circle())
                             .overlay(Circle().strokeBorder(Ink.accent.opacity(0.24), lineWidth: 1))
                     }
+                    .accessibilityLabel("Add Key")
+                    .accessibilityIdentifier("ssh-keys-add")
                 }
+            }
+            .moshpitCard(item: $deleting) { key in
+                MoshpitModalCard(
+                    icon: "trash.fill", tone: .danger,
+                    title: "Delete \(key.name)?",
+                    message: Text("It leaves this list for good: its public key can't be copied again or picked for a new connection. Connections already using it keep working."),
+                    buttons: [
+                        ModalButton("Cancel", kind: .secondary) { deleting = nil },
+                        ModalButton("Delete", kind: .danger) {
+                            keyStore.remove(id: key.id)
+                            deleting = nil
+                        },
+                    ]
+                ) { EmptyView() }
             }
         }
         .preferredColorScheme(.dark)
@@ -75,7 +95,7 @@ struct SSHKeysView: View {
 /// UNREACHABLE anywhere in the app — you could generate a device key but
 /// never install it on a server.
 @MainActor
-private func keyRowMenu(_ key: SSHKeyRecord, store: SSHKeyStore) -> some View {
+private func keyRowMenu(_ key: SSHKeyRecord, onDelete: @escaping () -> Void) -> some View {
     Group {
         Button {
             UIPasteboard.general.string = key.publicKey
@@ -92,9 +112,7 @@ private func keyRowMenu(_ key: SSHKeyRecord, store: SSHKeyStore) -> some View {
         ShareLink(item: key.publicKey) {
             Label("Share Public Key", systemImage: "square.and.arrow.up")
         }
-        Button(role: .destructive) {
-            store.remove(id: key.id)
-        } label: {
+        Button(role: .destructive, action: onDelete) {
             Label("Delete Key", systemImage: "trash")
         }
     }

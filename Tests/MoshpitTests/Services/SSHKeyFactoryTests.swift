@@ -185,37 +185,4 @@ struct SSHKeyFactoryTests {
             _ = try SSHKeyFactory.decodeImportedText(binary)
         }
     }
-
-    // MARK: - Passphrase strength heuristic
-
-    @Test("empty passphrase scores exactly 0")
-    func strengthEmpty() {
-        #expect(SSHKeyFactory.passphraseStrength("") == 0)
-    }
-
-    @Test("strength is clamped to the 0…1 range")
-    func strengthClamped() {
-        let strong = SSHKeyFactory.passphraseStrength("Corr3ctH0rse!BatteryStaple#Longer$Still")
-        #expect(strong <= 1.0)
-        #expect(strong > 0)
-    }
-
-    @Test("adding character classes raises the score for equal-length inputs")
-    func strengthRewardsVariety() {
-        // Same length, widening alphabet each step → strictly increasing entropy.
-        let lower = SSHKeyFactory.passphraseStrength("aaaaaaaa")
-        let mixed = SSHKeyFactory.passphraseStrength("aaaaAAAA")
-        let withDigits = SSHKeyFactory.passphraseStrength("aaAA1234")
-        let withSymbols = SSHKeyFactory.passphraseStrength("aA1!aA1!")
-        #expect(lower < mixed)
-        #expect(mixed < withDigits)
-        #expect(withDigits < withSymbols)
-    }
-
-    @Test("a longer passphrase from the same alphabet scores higher")
-    func strengthRewardsLength() {
-        let short = SSHKeyFactory.passphraseStrength("abc")
-        let long = SSHKeyFactory.passphraseStrength("abcabcabc")
-        #expect(long > short)
-    }
 }

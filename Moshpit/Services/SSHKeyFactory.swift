@@ -214,20 +214,6 @@ enum SSHKeyFactory {
             fingerprint: fp)
     }
 
-    // MARK: - Passphrase strength (prototype §3.8)
-
-    /// Rough entropy heuristic mapped to 0…1 for the strength meter.
-    static func passphraseStrength(_ s: String) -> Double {
-        guard !s.isEmpty else { return 0 }
-        var classes = 0.0
-        if s.rangeOfCharacter(from: .lowercaseLetters) != nil { classes += 26 }
-        if s.rangeOfCharacter(from: .uppercaseLetters) != nil { classes += 26 }
-        if s.rangeOfCharacter(from: .decimalDigits) != nil { classes += 10 }
-        if s.rangeOfCharacter(from: CharacterSet.alphanumerics.inverted) != nil { classes += 32 }
-        let entropy = Double(s.count) * log2(max(classes, 1))
-        return min(entropy / 80.0, 1.0)
-    }
-
     // MARK: - Wire helpers
 
     private static func uint32(_ value: UInt32) -> Data {

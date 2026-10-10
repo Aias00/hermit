@@ -94,7 +94,6 @@ enum Ink {
     static let seBadgeBG = success.opacity(0.14)
     static let seBadgeText = Color(hex: "B7F5C0")
     static let seBadgeBorder = success.opacity(0.30)
-    static let strengthLabel = Color(hex: "F0FFB8")
     static let fpPreviewText = Color(hex: "DFF89A")
     static let predictOnText = Color(hex: "DFF89A")
     static let warnBoxTitle = Color(hex: "FFD39A")
@@ -133,9 +132,6 @@ enum Ink {
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
-    static var strengthFill: LinearGradient {
-        LinearGradient(colors: [accentPressed, accent], startPoint: .leading, endPoint: .trailing)
-    }
     static let roamBanner = LinearGradient(
         colors: [warn.opacity(0.20), Color(hex: "22160B").opacity(0.86)],
         startPoint: .topLeading,
