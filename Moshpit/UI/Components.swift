@@ -715,27 +715,37 @@ struct CompactSheet<Content: View>: View {
     let footerHint: LocalizedStringKey
     /// Keyboard glyph chips (⌃, b s, …) — never localized.
     let footerKeys: [String]
+    /// The `.id` of the row you're on. The list opens scrolled to it — with
+    /// twenty windows the current one is usually below the fold, and the
+    /// first thing anyone did was scroll looking for the checkmark.
+    var focus: AnyHashable?
     @ViewBuilder var content: Content
+    @State private var revealed = false
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    content
-                        .moshpitRows()
-                } footer: {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(footerHint)
-                            .moshpitFooter()
-                        Spacer()
-                        HStack(spacing: 4) {
-                            ForEach(footerKeys, id: \.self) { KeyHintChip(label: $0) }
+            ScrollViewReader { proxy in
+                List {
+                    Section {
+                        content
+                            .moshpitRows()
+                    } footer: {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(footerHint)
+                                .moshpitFooter()
+                            Spacer()
+                            HStack(spacing: 4) {
+                                ForEach(footerKeys, id: \.self) { KeyHintChip(label: $0) }
+                            }
                         }
                     }
                 }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .onAppear { reveal(with: proxy) }
+                // The snapshot can still be empty when the sheet appears.
+                .onChange(of: focus) { reveal(with: proxy) }
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -753,6 +763,15 @@ struct CompactSheet<Content: View>: View {
         .presentationDragIndicator(.visible)
         .sheetSurface()
         .preferredColorScheme(.dark)
+    }
+
+    /// Once per presentation: a later refresh must not yank the list out
+    /// from under a thumb that is scrolling it.
+    private func reveal(with proxy: ScrollViewProxy) {
+        guard !revealed, let focus else { return }
+        revealed = true
+        // Next turn of the run loop — on appear the rows aren't laid out yet.
+        DispatchQueue.main.async { proxy.scrollTo(focus, anchor: .center) }
     }
 }
 

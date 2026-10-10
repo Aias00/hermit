@@ -23,7 +23,8 @@ struct WindowsSheet<C: MultiplexerControlling>: View {
             // dead there — advertising it is a promise the app doesn't keep.
             footerHint: controller.multiplexer == .herdr
                 ? LocalizedStringKey("Tap to switch") : LocalizedStringKey("Swipe to switch"),
-            footerKeys: vocab.windowKeys
+            footerKeys: vocab.windowKeys,
+            focus: controller.snapshot.activeWindowId
         ) {
             let snapshot = controller.snapshot
             ForEach(snapshot.sortedWindows) { window in
@@ -40,6 +41,7 @@ struct WindowsSheet<C: MultiplexerControlling>: View {
                     controller.selectWindow(window.id)
                     dismiss()
                 }
+                .id(window.id)
                 .contextMenu {
                     Button { renameText = window.name; renaming = window } label: {
                         Label("Rename", systemImage: "pencil")
@@ -138,7 +140,8 @@ struct SessionsSheet<C: MultiplexerControlling>: View {
             // dead there — advertising it is a promise the app doesn't keep.
             footerHint: controller.multiplexer == .herdr
                 ? LocalizedStringKey("Tap to switch") : LocalizedStringKey("Swipe to switch"),
-            footerKeys: vocab.sessionKeys
+            footerKeys: vocab.sessionKeys,
+            focus: controller.snapshot.activeSessionId
         ) {
             let snapshot = controller.snapshot
             let sessions = snapshot.sessions.values.sorted { $0.id < $1.id }
@@ -153,6 +156,7 @@ struct SessionsSheet<C: MultiplexerControlling>: View {
                     controller.selectSession(session.id)
                     dismiss()
                 }
+                .id(session.id)
                 .contextMenu {
                     Button { renameText = session.name; renaming = session } label: {
                         Label("Rename", systemImage: "pencil")
@@ -229,7 +233,8 @@ struct SelectPaneSheet<C: MultiplexerControlling>: View {
             title: "Select Pane",
             onPlus: { Haptics.tap(); controller.newPane() },
             footerHint: LocalizedStringKey("Tap to focus · \(controller.multiplexer.vocabulary.splitHint)"),
-            footerKeys: controller.multiplexer.vocabulary.paneKeys
+            footerKeys: controller.multiplexer.vocabulary.paneKeys,
+            focus: controller.snapshot.activePaneId
         ) {
             // A plain list, same shape as the Windows and Sessions sheets —
             // deliberately NOT a spatial mirror of the split layout. This
@@ -271,6 +276,7 @@ struct SelectPaneSheet<C: MultiplexerControlling>: View {
                     controller.selectPane(pane.id)
                     dismiss()
                 }
+                .id(pane.id)
             }
         }
         .task { controller.refresh() }
