@@ -259,6 +259,7 @@ final class DeepLinkRouter {
     func request(connectionId: UUID, paneId: String?) {
         nextToken += 1
         paneRequest = PaneRequest(connectionId: connectionId, paneId: paneId, token: nextToken)
+        Log.island.info("land: request #\(self.nextToken, privacy: .public) conn=\(connectionId.uuidString, privacy: .public) pane=\(paneId ?? "-", privacy: .public)")
     }
 
     /// Consumes the request so it can't be replayed — e.g. against a LATER,

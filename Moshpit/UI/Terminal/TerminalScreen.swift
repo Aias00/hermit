@@ -1,3 +1,4 @@
+import MoshpitKit
 import PhotosUI
 import SwiftUI
 import SwiftTerm
@@ -162,11 +163,14 @@ struct TerminalScreen: View {
 
     private var metrics: SessionMetrics? { metricsRegistry.metrics[connection.id] }
 
-    /// A single observed signal that advances as the tmux snapshot populates —
-    /// attach flips, then panes accumulate. Watched by one `.onChange` so the
-    /// deep-link pane selection retries without bloating the view-body type-check.
+    /// A single observed signal that advances as the multiplexer snapshot
+    /// populates — attach flips, then panes accumulate. Watched by one
+    /// `.onChange` so the deep-link pane selection retries without bloating the
+    /// view-body type-check. Reads ``tmuxSnapshot``, i.e. whichever control
+    /// plane is live: over mosh that is the sidecar, which a detached task
+    /// wires well after `start()` returns.
     private var paneReadinessSignal: Int {
-        guard let snapshot = active?.tmuxController?.snapshot, snapshot.isAttached else { return 0 }
+        guard let snapshot = tmuxSnapshot, snapshot.isAttached else { return 0 }
         return snapshot.panes.count + 1
     }
 
@@ -181,6 +185,7 @@ struct TerminalScreen: View {
         guard let request = router.paneRequest, request.connectionId == connection.id else { return }
         router.clear(token: request.token)
         pendingPaneSelection = request.paneId
+        Log.island.info("land: claimed #\(request.token, privacy: .public) pane=\(request.paneId ?? "-", privacy: .public)")
     }
 
     /// Land on the claimed pane once the tmux control plane is attached and
@@ -189,12 +194,28 @@ struct TerminalScreen: View {
     /// after attach. If the pane never shows up, connection-level landing
     /// (the active pane) is an acceptable fallback — nothing forces it, so a
     /// stale/closed pane id is simply dropped.
+    ///
+    /// Every control plane, not just SSH's in-band controller. This used to
+    /// read `tmuxController` alone, which is nil over mosh — so a tapped
+    /// "finished" notification on a mosh+tmux connection opened the terminal
+    /// on whatever pane mosh was already showing, and the claimed request sat
+    /// here unacted on. Same order as ``tmuxSnapshot``.
     private func selectPendingPaneIfReady() {
         guard let paneId = pendingPaneSelection else { return }
-        guard let controller = active?.tmuxController, controller.snapshot.isAttached else { return }
-        guard controller.snapshot.panes[paneId] != nil else { return }
+        guard let snapshot = tmuxSnapshot, snapshot.isAttached,
+              snapshot.panes[paneId] != nil else {
+            Log.island.info("land: waiting pane=\(paneId, privacy: .public) attached=\(tmuxSnapshot?.isAttached ?? false, privacy: .public) panes=\(tmuxSnapshot?.panes.count ?? -1, privacy: .public)")
+            return
+        }
         pendingPaneSelection = nil
-        controller.selectPane(paneId)
+        Log.island.info("land: selecting pane=\(paneId, privacy: .public) from=\(snapshot.activePaneId ?? "-", privacy: .public) phase=\(String(describing: scenePhase), privacy: .public)")
+        if let controller = active?.tmuxController {
+            controller.selectPane(paneId)
+        } else if let control = active?.moshControl {
+            control.selectPane(paneId)
+        } else {
+            active?.herdrControl?.selectPane(paneId)
+        }
     }
 
     /// Effective cursor colour: amber while roaming (prototype "漫游态自动切换为

@@ -441,6 +441,7 @@ final class SessionHub {
             lastSelection = TmuxSelection(session: session,
                                           window: snap.activeWindowId,
                                           pane: snap.activePaneId)
+            Log.island.info("land: captured selection pane=\(snap.activePaneId ?? "-", privacy: .public) window=\(snap.activeWindowId ?? "-", privacy: .public)")
         }
 
         /// Returning Home leaves the connection alive (for background monitoring
@@ -3186,7 +3187,7 @@ final class SessionHub {
             let away = lastBackgroundedAt.map { Date().timeIntervalSince($0) } ?? 0
             lastBackgroundedAt = nil
             let force = away > forceReconnectAfter
-            Log.ssh.debug("resume: foreground after \(Int(away), privacy: .public)s force=\(force, privacy: .public)")
+            Log.island.info("land: foreground after \(Int(away), privacy: .public)s force=\(force, privacy: .public)")
             // Take back the phone-grid pin for the terminal on screen (released
             // on backgrounding below) — unless that terminal is about to be
             // torn down and rebuilt anyway: the replacement pins on attach,

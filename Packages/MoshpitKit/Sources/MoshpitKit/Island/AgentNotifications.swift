@@ -112,6 +112,7 @@ public final class AgentNotificationHandler: NSObject, UNUserNotificationCenterD
         Task { @MainActor in
             defer { completionHandler() }
             guard let (connectionId, paneId) = target else { return }
+            Log.island.info("land: notification tap conn=\(connectionId.uuidString, privacy: .public) pane=\(paneId, privacy: .public) action=\(actionIdentifier, privacy: .public)")
             // A body tap, or the system's "open". Nothing else can arrive: with
             // no categories registered there are no action identifiers to send.
             guard actionIdentifier == UNNotificationDefaultActionIdentifier else { return }

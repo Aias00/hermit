@@ -886,7 +886,7 @@ struct TmuxSessionControllerTests {
         transport.pushText("%layout-change @0 \(three) 3992,47x40,0,0,1 *Z\n")
         try? await Task.sleep(for: .milliseconds(50))
         answered = await settleControlChatter(transport, answered: answered)
-        let zoomsBefore = await transport.recordedCommands().filter { $0.hasPrefix("resize-pane -Z") }.count
+        let zoomsBefore = await transport.recordedCommands().filter { $0.contains("resize-pane -Z") }.count
 
         // A subagent pane appears: tmux splits the main pane, which unzooms
         // the window. The controller probes the window and zooms it again.
@@ -902,7 +902,7 @@ struct TmuxSessionControllerTests {
                 : block(500 + n, "")
         }
         #expect(await waitUntil {
-            await transport.recordedCommands().filter { $0.hasPrefix("resize-pane -Z") }.count == zoomsBefore + 1
+            await transport.recordedCommands().filter { $0.contains("resize-pane -Z") }.count == zoomsBefore + 1
         }, "the probe found the split window unzoomed: it is zoomed again")
         transport.pushText("%layout-change @0 \(four) 1c2d,47x40,0,0,1 *Z\n")
         try? await Task.sleep(for: .milliseconds(50))
@@ -915,7 +915,7 @@ struct TmuxSessionControllerTests {
         let after = await transport.recordedCommands().suffix(from: answered)
         #expect(!after.contains { $0.hasPrefix("display-message -p -t '@0'") },
                 "an unzoom that kept the pane count is left alone")
-        #expect(await transport.recordedCommands().filter { $0.hasPrefix("resize-pane -Z") }.count == zoomsBefore + 1)
+        #expect(await transport.recordedCommands().filter { $0.contains("resize-pane -Z") }.count == zoomsBefore + 1)
     }
 
     @Test("a resync frame captured at a foreign size is rejected, not painted")
@@ -1474,6 +1474,106 @@ struct TmuxSessionControllerTests {
             await transport.recordedCommands()
                 .contains { $0.hasPrefix("capture-pane -p -e -S") && $0.contains("-t %9") }
         }, "selecting a pane in another window must fill it — deferred, never dropped")
+    }
+
+    @Test("selecting a pane known only from its %output waits for discovery, then lands on it — not on tmux's current window")
+    func selectPaneBeforeDiscoveryLandsAfterIt() async throws {
+        // 真机 2026-10-06: a tapped "finished" card for islander (%5) opened
+        // the terminal on whatever window the desktop client had current.
+        // The agent was mid-turn, so its %output beat discovery and minted a
+        // window-less placeholder; the deep link saw the pane "present" and
+        // switched to window "", and discovery then adopted tmux's current
+        // window because "" was not ours.
+        let (controller, transport) = await makeAttachedController()
+        _ = await waitUntil { await transport.recordedCommands().count >= 3 }
+        transport.pushText("%output %5 streaming\n")
+        #expect(await waitUntil { controller.snapshot.panes["%5"] != nil })
+
+        controller.selectPane("%5")
+        #expect(controller.snapshot.activeWindowId != "", "a placeholder's empty window id must never become the active window")
+
+        // tmux's current window is @4 (the desktop's); %5 lives in @5.
+        _ = await settleControlChatter(transport, answered: 0) { command, n in
+            if command.hasPrefix("list-sessions") {
+                return self.block(n, "$0 1 0")
+            }
+            if command.hasPrefix("list-windows") {
+                return self.block(n, "$0 @4 5 81x24,0,0,4 1 1 ref\n$0 @5 6 81x24,0,0,5 0 1 islander")
+            }
+            if command.hasPrefix("list-panes"), command.contains("pane_current_command"),
+               !command.contains("moshpit") {
+                return self.block(n, "%4 @4 0 80 24 1 0 0 claude\n%5 @5 0 80 24 1 0 0 claude")
+            }
+            return self.block(n, "")
+        }
+
+        #expect(await waitUntil { controller.snapshot.activePaneId == "%5" })
+        #expect(controller.snapshot.activeWindowId == "@5")
+        #expect(await waitUntil {
+            await transport.recordedCommands().contains { $0.hasPrefix("select-window -t @5") }
+        }, "tmux must be told to switch too, or the screen and tmux disagree")
+    }
+
+    @Test("a reconnect restoring into a split window leaves it zoomed, however many zoom probes race")
+    func reconnectRestoreKeepsSplitWindowZoomed() async throws {
+        // 真机 2026-10-09: a notification tapped after a long background
+        // reconnected into Claude Code's agent-team window (a lead + six
+        // teammates). The attach's zoom probe and the restore's selectPane
+        // probe were both answered before either zoom ran, both read
+        // "unzoomed", and two `resize-pane -Z` toggles cancelled out — the
+        // window stayed pinned to the phone grid, split squashed beneath.
+        // The replies below come from a model that runs commands in FIFO
+        // order the way tmux does, so it is the window's END state that is
+        // checked, not the shape of the command.
+        let transport = MockTmuxTransport()
+        let controller = TmuxSessionController(sshSession: transport)
+        controller.pendingRestore = TmuxSelection(session: "$0", window: "@1", pane: "%4")
+        await controller.attach()
+        // The boot block, then the notification real tmux sends every -CC
+        // client on attach — the only word on which session is ours.
+        transport.pushText("%begin 100 0 0\n%end 100 0 0\n\n%session-changed $0 0\n")
+        _ = await waitUntil { await transport.recordedCommands().count >= 3 }
+
+        let layout = "ed9b,499x62,0,0{215x62,0,0,0,283x62,216,0[283x11,216,0,1,283x10,216,12,2,"
+            + "283x9,216,23,3,283x9,216,33,4,283x9,216,43,5,283x9,216,53,6]}"
+        var zoomed = false
+        var active = "%6"
+        let tmux: (String, Int) -> String = { command, n in
+            if command.hasPrefix("list-sessions") { return self.block(n, "$0 1 0") }
+            if command.hasPrefix("list-windows") { return self.block(n, "$0 @1 1 \(layout) 1 7 team") }
+            if command.hasPrefix("list-panes"), command.contains("pane_current_command"),
+               !command.contains("moshpit") {
+                return self.block(n, (0...6).map { "%\($0) @1 \($0) 80 9 \("%\($0)" == active ? 1 : 0) 0 0 claude" }
+                    .joined(separator: "\n"))
+            }
+            if command.hasPrefix("display-message -p -t '@1'") {
+                return self.block(n, "7 \(zoomed ? 1 : 0) \(active) \(layout)")
+            }
+            if command.hasPrefix("select-pane -Z -t ") {
+                active = String(command.dropFirst("select-pane -Z -t ".count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return self.block(n, "") + "%window-pane-changed @1 \(active)\n"
+            }
+            if command.hasPrefix("if-shell -F -t '@1' '#{?window_zoomed_flag,,1}' 'resize-pane -Z -t @1'") {
+                zoomed = true
+            } else if command.hasPrefix("resize-pane -Z -t '@1'") || command.hasPrefix("resize-pane -Z -t @1") {
+                zoomed.toggle()
+            }
+            return self.block(n, "")
+        }
+        // Answer in rounds until the controller goes quiet: every command
+        // written so far runs (in order) before the replies it provokes.
+        var answered = 0
+        for _ in 0..<15 {
+            answered = await settleControlChatter(transport, answered: answered, reply: tmux)
+            try? await Task.sleep(for: .milliseconds(100))
+            if await transport.recordedCommands().count == answered { break }
+        }
+
+        #expect(controller.snapshot.activePaneId == "%4", "the restore landed on the pane it was asked for")
+        let probes = await transport.recordedCommands().filter { $0.hasPrefix("display-message -p -t '@1'") }
+        #expect(probes.count >= 2, "the race needs two probes in flight — otherwise this test proves nothing")
+        #expect(zoomed, "the split window must end up zoomed")
     }
 
     @Test("newWindow lands ON the window it just created")

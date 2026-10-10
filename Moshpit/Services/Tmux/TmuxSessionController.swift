@@ -1125,7 +1125,24 @@ final class TmuxSessionController: MultiplexerControlling {
         // later and silently snap back to the pre-reconnect pane, stacking a
         // second veil→resync cycle on top of this one (the reported garbled
         // flash on switch-during-reconnect).
+        Log.island.info("land: selectPane \(paneId, privacy: .public) from=\(self.snapshot.activePaneId ?? "-", privacy: .public) attached=\(self.snapshot.isAttached, privacy: .public) droppedRestore=\(self.pendingRestore?.pane ?? "-", privacy: .public)")
         pendingRestore = nil
+        // A pane known only from its own %output has no window yet — it
+        // streamed before discovery placed it, which is exactly what an agent
+        // mid-turn does on a fresh attach. Switching now made "" the active
+        // window, and the discovery reply right behind read that as "ours is
+        // gone" and adopted tmux's current window: whichever one a desktop
+        // client sharing the session was looking at. That is where a tapped
+        // notification used to land after a reconnect (真机 2026-10-06: asked
+        // for islander %5, got the desktop's window). Hold the choice as the
+        // pending restore instead; the next `list-panes` places the pane and
+        // replays it.
+        if let pane = snapshot.panes[paneId], pane.windowId.isEmpty {
+            pendingRestore = TmuxSelection(session: snapshot.activeSessionId ?? "",
+                                           window: nil, pane: paneId)
+            refreshWindowsAndPanes()
+            return
+        }
         releaseScrollHolds()
         let oldWindow = snapshot.activeWindowId
         let newWindow = snapshot.panes[paneId]?.windowId ?? oldWindow
@@ -1965,8 +1982,21 @@ final class TmuxSessionController: MultiplexerControlling {
                 self.notePristineLayout(windowId, fields: fields)
             }
             guard fields.count >= 2, (Int(fields[0]) ?? 1) > 1, fields[1] == "0" else { return }
-            self.send(rawCommand: "resize-pane -Z -t '\(windowId)'")
+            self.send(rawCommand: Self.zoomIfUnzoomedCommand(windowId))
         }
+    }
+
+    /// Zoom a window's active pane unless it is zoomed already, decided by tmux
+    /// when the command RUNS. `resize-pane -Z` alone is a toggle, and the
+    /// probe that leads here can be one of two in flight: a reconnect's attach
+    /// zoom and the restore's `selectPane` both asked before either zoom
+    /// landed, both read "unzoomed", and the second toggle undid the first —
+    /// the window stayed pinned to the phone grid with its split squashed
+    /// beneath (真机 2026-10-09: a notification into Claude Code's agent-team
+    /// window showed one teammate as a 67x9 strip, the lead crushed to a
+    /// column; reproduced on the sim with a 30s background).
+    static func zoomIfUnzoomedCommand(_ windowId: String) -> String {
+        "if-shell -F -t '\(windowId)' '#{?window_zoomed_flag,,1}' 'resize-pane -Z -t \(windowId)'"
     }
 
     /// Create (and switch to) a new detached-name session.
@@ -2133,6 +2163,7 @@ final class TmuxSessionController: MultiplexerControlling {
     private func applyPendingRestoreIfReady() {
         guard let restore = pendingRestore, snapshot.isAttached,
               !snapshot.sessions.isEmpty else { return }
+        Log.island.info("land: restore pane=\(restore.pane ?? "-", privacy: .public) window=\(restore.window ?? "-", privacy: .public) present=\(restore.pane.map { self.snapshot.panes[$0] != nil } ?? false, privacy: .public)")
         if let pane = restore.pane, snapshot.panes[pane] != nil {
             pendingRestore = nil
             selectPane(pane)
@@ -2938,6 +2969,9 @@ final class TmuxSessionController: MultiplexerControlling {
             let currentIsOurs =
                 current.flatMap { snapshot.windows[$0] }?.sessionId == snapshot.activeSessionId
             if currentIsOurs, current != windowId { return }
+            if current != windowId {
+                Log.island.info("land: adopt server window \(windowId, privacy: .public) (was \(current ?? "-", privacy: .public))")
+            }
             snapshot.activeWindowId = windowId
             // Window changed: land immersive — zoom the new window's active
             // pane if it has splits.
@@ -2952,6 +2986,9 @@ final class TmuxSessionController: MultiplexerControlling {
                 snapshot.panes[paneId] = pane
             }
             if windowId == snapshot.activeWindowId {
+                if snapshot.activePaneId != paneId {
+                    Log.island.info("land: server pane change \(paneId, privacy: .public) (was \(self.snapshot.activePaneId ?? "-", privacy: .public))")
+                }
                 snapshot.activePaneId = paneId
             }
         case .pause(let paneId):
@@ -3185,6 +3222,7 @@ final class TmuxSessionController: MultiplexerControlling {
         let currentIsOurs =
             current.flatMap { newWindows[$0] }?.sessionId == snapshot.activeSessionId
         if !currentIsOurs, let tmuxActiveWindowId {
+            Log.island.info("land: discovery adopts window \(tmuxActiveWindowId, privacy: .public) (was \(current ?? "-", privacy: .public))")
             snapshot.activeWindowId = tmuxActiveWindowId
         }
         // Navigation that didn't know its window yet (initial attach,
@@ -3231,6 +3269,9 @@ final class TmuxSessionController: MultiplexerControlling {
             }
         }
         snapshot.panes = newPanes
+        if activePaneId != nil, activePaneId != snapshot.activePaneId {
+            Log.island.info("land: discovery adopts pane \(activePaneId ?? "-", privacy: .public) (was \(self.snapshot.activePaneId ?? "-", privacy: .public))")
+        }
         if activePaneId != nil { snapshot.activePaneId = activePaneId }
     }
 
@@ -3433,10 +3474,10 @@ final class TmuxSessionController: MultiplexerControlling {
         // 真机 2026-09-16: the screen one character wide). Moshpit shows one
         // pane at a time, so put the zoom back. Only when the pane count
         // moved: an unzoom that keeps the count is a person's prefix-z from
-        // another client, and theirs to make. Probe-then-zoom rather than a
-        // blind `resize-pane -Z` (a toggle): the FIFO orders the probe behind
-        // anything that re-zoomed meanwhile, and the holder of the window's
-        // size lease is the one device that acts.
+        // another client, and theirs to make. Never a blind `resize-pane -Z`
+        // (a toggle): ``ensureImmersiveZoom`` zooms only if tmux still finds
+        // the window unzoomed when the command runs, and the holder of the
+        // window's size lease is the one device that acts.
         if rendersOutput, !pinsReleased, !zoomed, windowId == snapshot.activeWindowId,
            let panes, panes > 1, panes != previousPanes,
            sizeFollow == nil, !isHeldByAnotherLiveDevice(sizeLeases[windowId]) {
@@ -3755,6 +3796,7 @@ final class TmuxSessionController: MultiplexerControlling {
         // longer matched tmux's. Later %session-changed events are session
         // switches on a live connection and must NOT re-veil.
         let isFreshAttach = !snapshot.isAttached
+        Log.island.info("land: session-changed \(sessionId, privacy: .public) fresh=\(isFreshAttach, privacy: .public)")
         if isFreshAttach { Log.ssh.debug("resume: tmux %session-changed (attach)") }
         snapshot.activeSessionId = sessionId
         if var session = snapshot.sessions[sessionId] {

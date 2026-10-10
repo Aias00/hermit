@@ -1,3 +1,4 @@
+import MoshpitKit
 import SwiftUI
 
 /// Home command board. Saved hosts stay scannable offline; live hosts expand
@@ -147,6 +148,7 @@ struct HomeView: View {
             // Deep link jumps straight into the terminal; TerminalScreen.task
             // still owns prepare/start + the host-key prompt for that path
             // (idempotent — re-entry from a card tap won't re-handshake).
+            Log.island.info("land: home opens terminal path=\(path.count, privacy: .public)")
             open(request.connectionId)
         }
         .moshpitCard(isPresented: $showConnectError) {
