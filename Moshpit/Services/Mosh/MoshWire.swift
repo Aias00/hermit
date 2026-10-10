@@ -314,13 +314,17 @@ struct UserMessage: Equatable {
 /// - `HostBytes` (extension field 2) — `hoststring` (field 4) is a chunk of
 ///   raw terminal output (ANSI) produced by mosh's `Display::new_frame`.
 /// - `ResizeMessage` (extension field 3) — width/height (rare, server-driven).
-/// - `EchoAck` (extension field 4) — predictive-echo bookkeeping (ignored).
-///
-/// We only need the host bytes to drive SwiftTerm.
+/// - `EchoAck` (extension field 7) — `echo_ack_num` (field 8): the newest
+///   user state the server received at least 50ms ago, i.e. long enough for
+///   its echo to be on screen. Predictive echo (``MoshPrediction``) judges its
+///   guesses only once this covers them.
 struct HostMessage {
     /// Concatenated terminal output across all HostBytes instructions, in order.
     var hostBytes = Data()
     var resize: (width: Int, height: Int)?
+    /// The diff's echo ack, when it carries one (the server only sends it
+    /// when the value changed).
+    var echoAck: UInt64?
 
     init(parsing data: Data) throws {
         var reader = ProtoReader(data)
@@ -331,13 +335,15 @@ struct HostMessage {
                 try reader.skipField(wireType: wireType)
                 continue
             }
-            try Self.parseInstruction(reader.readLengthDelimited(), into: &bytes, resize: &resize)
+            try Self.parseInstruction(reader.readLengthDelimited(), into: &bytes,
+                                      resize: &resize, echoAck: &echoAck)
         }
         self.hostBytes = bytes
     }
 
     private static func parseInstruction(_ raw: [UInt8], into bytes: inout Data,
-                                         resize: inout (width: Int, height: Int)?) throws {
+                                         resize: inout (width: Int, height: Int)?,
+                                         echoAck: inout UInt64?) throws {
         var reader = ProtoReader(raw)
         while !reader.isAtEnd {
             let (field, wireType) = try reader.readKey()
@@ -346,10 +352,26 @@ struct HostMessage {
                 bytes.append(try parseHostBytes(reader.readLengthDelimited()))
             case (3, 2): // ResizeMessage at field 3
                 resize = try parseResize(reader.readLengthDelimited())
+            case (7, 2): // EchoAck at field 7
+                echoAck = try parseEchoAck(reader.readLengthDelimited())
             default:
                 try reader.skipField(wireType: wireType)
             }
         }
+    }
+
+    private static func parseEchoAck(_ raw: [UInt8]) throws -> UInt64 {
+        var reader = ProtoReader(raw)
+        var num: UInt64 = 0
+        while !reader.isAtEnd {
+            let (field, wireType) = try reader.readKey()
+            if field == 8, wireType == 0 {       // EchoAck.echo_ack_num = field 8
+                num = try reader.readVarint()
+            } else {
+                try reader.skipField(wireType: wireType)
+            }
+        }
+        return num
     }
 
     private static func parseHostBytes(_ raw: [UInt8]) throws -> Data {

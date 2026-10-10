@@ -135,6 +135,26 @@ struct MoshTransportStateMachineTests {
         return message.data
     }
 
+    /// A host diff the way mosh-server's `Complete::diff_from` writes one:
+    /// the moved echo ack first (Instruction[1] → EchoAck[7] →
+    /// echo_ack_num[8]), then the output, if any.
+    func hostDiff(_ text: String?, echoAck: UInt64) -> Data {
+        var ack = ProtoWriter()
+        ack.appendField(8, varint: echoAck)
+        var ackInstruction = ProtoWriter()
+        ackInstruction.appendField(7, bytes: ack.bytes)
+        var message = ProtoWriter()
+        message.appendField(1, bytes: ackInstruction.bytes)
+        if let text {
+            var hostBytes = ProtoWriter()
+            hostBytes.appendField(4, bytes: Data(text.utf8))
+            var instruction = ProtoWriter()
+            instruction.appendField(2, bytes: hostBytes.bytes)
+            message.appendField(1, bytes: instruction.bytes)
+        }
+        return message.data
+    }
+
     /// mosh's 16-bit millisecond clock, matching `MoshTransport`.
     func nowMs() -> UInt64 { DispatchTime.now().uptimeNanoseconds / 1_000_000 }
     func ts16() -> UInt16 { UInt16(truncatingIfNeeded: nowMs()) }
@@ -150,8 +170,8 @@ struct MoshTransportStateMachineTests {
         await transport.handleDatagram(packet)
 
         var iterator = transport.hostStream.makeAsyncIterator()
-        let chunk = await iterator.next()
-        #expect(chunk == Data("hello".utf8))
+        let frame = await iterator.next()
+        #expect(frame?.bytes == Data("hello".utf8))
 
         let diag = await transport.currentDiagnostics
         #expect(diag.appliedHostNum == 1)
@@ -213,8 +233,8 @@ struct MoshTransportStateMachineTests {
         await transport.handleDatagram(second)
 
         var iterator = transport.hostStream.makeAsyncIterator()
-        #expect(await iterator.next() == Data("a".utf8))
-        #expect(await iterator.next() == Data("b".utf8))
+        #expect(await iterator.next()?.bytes == Data("a".utf8))
+        #expect(await iterator.next()?.bytes == Data("b".utf8))
 
         let diag = await transport.currentDiagnostics
         #expect(diag.appliedHostNum == 2)
@@ -446,5 +466,38 @@ struct MoshTransportStateMachineTests {
         // alone (restart is a no-op there anyway), only flushed.
         await transport.resume()
         #expect(fresh.cancelCalls == 0)
+    }
+
+    // MARK: Echo ack (predictive echo's clock)
+
+    @Test("send reports the user state its keystrokes ride in")
+    func sendReportsUserState() async throws {
+        let (transport, _, _) = try makeTransport()
+        await transport.start(cols: 80, rows: 24)          // state 1: the size
+        #expect(await transport.send(Data("a".utf8)) == 2)
+        #expect(await transport.send(Data("b".utf8)) == 3)
+        #expect(await transport.send(Data()) == nil)
+    }
+
+    @Test("the echo ack rides with the output, and a diff that only moves it still lands")
+    func echoAckFrames() async throws {
+        let (transport, _, crypto) = try makeTransport()
+        var iterator = transport.hostStream.makeAsyncIterator()
+
+        await transport.handleDatagram(try makeDatagram(
+            crypto: crypto, seq: 0, id: 1, oldNum: 0, newNum: 1, diff: hostDiff("a", echoAck: 2)))
+        #expect(await iterator.next() == MoshHostFrame(bytes: Data("a".utf8), echoAck: 2))
+
+        // 50ms later the server acks the next keystroke with no new output —
+        // exactly the frame that confirms a prediction.
+        await transport.handleDatagram(try makeDatagram(
+            crypto: crypto, seq: 1, id: 2, oldNum: 1, newNum: 2, diff: hostDiff(nil, echoAck: 3)))
+        #expect(await iterator.next() == MoshHostFrame(bytes: Data(), echoAck: 3))
+
+        // Output with no ack instruction keeps the last one.
+        await transport.handleDatagram(try makeDatagram(
+            crypto: crypto, seq: 2, id: 3, oldNum: 2, newNum: 3, diff: hostDiff("b")))
+        #expect(await iterator.next() == MoshHostFrame(bytes: Data("b".utf8), echoAck: 3))
+        #expect(await transport.currentDiagnostics.appliedHostNum == 3)
     }
 }

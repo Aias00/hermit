@@ -796,14 +796,15 @@ final class SessionHub {
                 // Leaving mosh copy-mode? Prepend `q` (cancel) on the SAME channel
                 // so it's strictly ordered before the keystrokes — no cross-channel
                 // race.
-                let out = Self.moshInputKeys(data, inCopyMode: moshInCopyMode)
+                let leavingCopyMode = moshInCopyMode
+                let out = Self.moshInputKeys(data, inCopyMode: leavingCopyMode)
                 moshInCopyMode = false
                 // Chained, not a bare `Task { }` — independently-spawned tasks
                 // have no ordering guarantee, so typing a word then quickly
                 // tapping the D-pad could deliver the arrow bytes before the
                 // last character or two (the "history search stops matching
                 // what I typed" bug).
-                sendOverMosh(transport, out)
+                sendOverMosh(transport, out, predict: !leavingCopyMode)
             } else {
                 viewModel.send(data)
             }
@@ -927,11 +928,24 @@ final class SessionHub {
         /// transport (see the property's doc comment). Every write into this
         /// channel must go through here rather than a bare
         /// `Task { await transport.send(...) }`.
-        private func sendOverMosh(_ transport: MoshTransport, _ data: Data) {
+        ///
+        /// `predict`: guess the echo locally (mosh predictive echo). Only
+        /// plain typing on the live screen qualifies — copy-mode keys, wheel
+        /// and clicks move the screen in ways the engine can't model, so they
+        /// take every guess down instead.
+        private func sendOverMosh(_ transport: MoshTransport, _ data: Data, predict: Bool = false) {
+            let batch: Int?
+            if predict {
+                batch = coordinator.predict(data)
+            } else {
+                coordinator.dropPredictions()
+                batch = nil
+            }
             let previous = moshWriteChain
-            moshWriteChain = Task {
+            moshWriteChain = Task { [weak self] in
                 await previous?.value
-                await transport.send(data)
+                let userState = await transport.send(data)
+                if let batch { self?.coordinator.predictionSent(batch: batch, userState: userState) }
             }
         }
 
@@ -1106,6 +1120,13 @@ final class SessionHub {
         /// `scripts/verify/verify-tmux-scroll.py` proves `q` exits a real client.
         nonisolated static func moshInputKeys(_ data: Data, inCopyMode: Bool) -> Data {
             inCopyMode ? moshCopyExitKey + data : data
+        }
+
+        /// The predictive-echo mode a mosh session runs with. A connection
+        /// left at the default (Adaptive) follows Settings → Predictive Echo;
+        /// one set to anything else keeps its own choice.
+        nonisolated static func effectivePredictMode(connection: PredictMode, app: PredictMode) -> PredictMode {
+            connection == .adaptive ? app : connection
         }
 
         /// Look up the server's tmux prefix once (via the sidecar) so `prefix [`
@@ -1956,6 +1977,7 @@ final class SessionHub {
             // — discard, don't replay. Same for the mosh copy-mode flag, whose
             // q-prepend would eat the first keystroke.
             coordinator.discardScrollHold()
+            coordinator.attachPrediction(nil)
             moshInCopyMode = false
             guard let ssh = await viewModel.connectForExec() else { return }
 
@@ -2028,8 +2050,16 @@ final class SessionHub {
                 self.moshTransport = transport
 
                 await MainActor.run {
+                    self.coordinator.attachPrediction(MoshPrediction(
+                        mode: Self.effectivePredictMode(connection: self.connection.predictMode,
+                                                        app: AppSettings.shared.predictMode),
+                        trail: AppSettings.shared.trailOnPredict))
+                    #if DEBUG
+                    MoshPredictionProbe.startIfRequested(self)
+                    #endif
                     transport.onMetrics = { [weak self] srtt, roaming in
                         self?.metricsSink?(srtt, roaming)
+                        self?.coordinator.prediction?.srttMs = srtt
                     }
                     transport.onDiagnostics = { [weak self] diagnostics in
                         self?.diagnosticsSink?(diagnostics)
@@ -2114,12 +2144,12 @@ final class SessionHub {
                 }
                 let coordinator = self.coordinator
                 pumpTask = Task { [weak self] in
-                    for await chunk in transport.hostStream {
+                    for await frame in transport.hostStream {
                         if Task.isCancelled { break }
-                        coordinator.feed(data: chunk)
+                        coordinator.feed(moshFrame: frame)
                         // Bytes arriving IS the switch veil's only progress
                         // signal on this transport — see noteMoshPaint().
-                        self?.noteMoshPaint()
+                        if !frame.bytes.isEmpty { self?.noteMoshPaint() }
                     }
                 }
                 // The view usually finishes layout during the SSH bootstrap,
@@ -2682,6 +2712,7 @@ final class SessionHub {
                 await transport.close()
             }
             moshTransport = nil
+            coordinator.attachPrediction(nil)
             // Fallback reap for a mosh-server this session's own
             // `onReturnPathDead` watchdog never got the chance to reach —
             // see `moshServerPid`'s doc comment for the exact window (this

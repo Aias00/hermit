@@ -185,4 +185,28 @@ struct MoshWireTests {
         let result = assembler.receive(TransportFragment(id: 2, fragmentNum: 0, isFinal: true, contents: Data([9])))
         #expect(result == Data([9]))
     }
+
+    // MARK: - HostMessage echo ack
+
+    @Test("HostMessage reads the echo ack (Instruction field 7, echo_ack_num field 8)")
+    func hostMessageEchoAck() throws {
+        var ack = ProtoWriter()
+        ack.appendField(8, varint: 1 << 33)
+        var instruction = ProtoWriter()
+        instruction.appendField(7, bytes: ack.bytes)
+        var message = ProtoWriter()
+        message.appendField(1, bytes: instruction.bytes)
+
+        let parsed = try HostMessage(parsing: message.data)
+        #expect(parsed.echoAck == 1 << 33)
+        #expect(parsed.hostBytes.isEmpty)
+
+        var bare = ProtoWriter()
+        var hostBytes = ProtoWriter()
+        hostBytes.appendField(4, bytes: Data("x".utf8))
+        var output = ProtoWriter()
+        output.appendField(2, bytes: hostBytes.bytes)
+        bare.appendField(1, bytes: output.bytes)
+        #expect(try HostMessage(parsing: bare.data).echoAck == nil)
+    }
 }

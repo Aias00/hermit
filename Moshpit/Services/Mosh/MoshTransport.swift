@@ -56,14 +56,14 @@ struct MoshDiagnostics: Hashable {
 ///     already applied (so the ANSI composes correctly).
 ///   - Echo timestamps for RTT, surfacing a smoothed SRTT + roaming flag.
 ///
-/// Host output is delivered through `hostStream`, mirroring `SSHSession`, so
-/// the terminal layer consumes mosh and SSH identically.
+/// Host output is delivered through `hostStream`, one ``MoshHostFrame`` per
+/// applied diff, so the terminal layer feeds mosh much like SSH.
 actor MoshTransport {
 
     // MARK: Public output
 
-    nonisolated let hostStream: AsyncStream<Data>
-    private let hostContinuation: AsyncStream<Data>.Continuation
+    nonisolated let hostStream: AsyncStream<MoshHostFrame>
+    private let hostContinuation: AsyncStream<MoshHostFrame>.Continuation
 
     /// Called on the main actor with (srttMs, roaming) whenever they change.
     @MainActor var onMetrics: ((Double, Bool) -> Void)?
@@ -121,6 +121,8 @@ actor MoshTransport {
 
     /// Highest server display state we've applied (and therefore ack).
     private var appliedHostNum: UInt64 = 0
+    /// The server's echo ack as of `appliedHostNum` — see ``MoshHostFrame``.
+    private var echoAck: UInt64 = 0
     private var receiveAssembler = FragmentAssembler()
     private var nextInstructionId: UInt64 = 1
 
@@ -209,8 +211,8 @@ actor MoshTransport {
         self.returnPathDeadlineNanos = returnPathDeadlineNanos
         self.keystrokeTTLMs = keystrokeTTLMs
 
-        var cont: AsyncStream<Data>.Continuation!
-        self.hostStream = AsyncStream<Data>(bufferingPolicy: .unbounded) { cont = $0 }
+        var cont: AsyncStream<MoshHostFrame>.Continuation!
+        self.hostStream = AsyncStream<MoshHostFrame>(bufferingPolicy: .unbounded) { cont = $0 }
         self.hostContinuation = cont
     }
 
@@ -339,10 +341,15 @@ actor MoshTransport {
     // MARK: User input
 
     /// Queue raw keystroke bytes as a new user state and flush immediately.
-    func send(_ data: Data) {
-        guard !data.isEmpty else { return }
+    /// Returns that state's number — what the server's echo ack will name
+    /// once it has had time to echo these bytes (predictive echo keys its
+    /// guesses on it). nil when there was nothing to send.
+    @discardableResult
+    func send(_ data: Data) -> UInt64? {
+        guard !data.isEmpty else { return nil }
         appendUserState([.keystroke(keys: data)])
         flush()
+        return userStates.last?.num
     }
 
     func resize(cols: Int, rows: Int) {
@@ -591,8 +598,12 @@ actor MoshTransport {
                 appliedHostNum = instruction.newNum
                 flush()
             } else if let host = try? HostMessage(parsing: instruction.diff) {
-                if !host.hostBytes.isEmpty {
-                    hostContinuation.yield(host.hostBytes)
+                // A diff may be nothing but a moved echo ack — still worth
+                // delivering: it is what settles pending predictions.
+                let echoMoved = (host.echoAck ?? 0) > echoAck
+                if echoMoved, let ack = host.echoAck { echoAck = ack }
+                if !host.hostBytes.isEmpty || echoMoved {
+                    hostContinuation.yield(MoshHostFrame(bytes: host.hostBytes, echoAck: echoAck))
                 }
                 appliedHostNum = instruction.newNum
                 // Ack the freshly applied state right away.
@@ -751,4 +762,16 @@ final class NWConnectionChannel: DatagramChannel, @unchecked Sendable {
     func receive(_ completion: @escaping @Sendable (Data?, Error?) -> Void) {
         connection.receiveMessage { data, _, _, error in completion(data, error) }
     }
+}
+
+// MARK: - Host frames
+
+/// One applied server diff, as the terminal layer consumes it.
+struct MoshHostFrame: Equatable, Sendable {
+    /// Terminal output to feed (may be empty when only the echo ack moved).
+    var bytes: Data
+    /// The newest user state (``MoshTransport/send(_:)``'s return value) the
+    /// server had received at least 50ms before this frame — its echo, if
+    /// the remote echoes at all, is in the screen by now. Monotonic.
+    var echoAck: UInt64
 }

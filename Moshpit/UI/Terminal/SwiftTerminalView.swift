@@ -576,14 +576,136 @@ struct SwiftTerminalView: UIViewRepresentable {
                 if heldBytes > heldByteLimit { releaseScrollHold() }
                 return
             }
-            terminalView.feed(byteArray: ArraySlice([UInt8](data)))
+            liftingPredictions(on: terminalView) {
+                terminalView.feed(byteArray: ArraySlice([UInt8](data)))
+            }
             postFeedFixups(on: terminalView)
+        }
+
+        // MARK: Predictive echo (mosh)
+
+        /// mosh's local echo for this terminal (see ``MoshPrediction``). Set
+        /// by a mosh session for the life of its transport; nil everywhere
+        /// else, which leaves every path here a no-op.
+        private(set) var prediction: MoshPrediction?
+        private var predictionTick: DispatchWorkItem?
+
+        /// Install (or remove, with nil) the session's predictor, taking down
+        /// whatever the previous one had drawn.
+        func attachPrediction(_ engine: MoshPrediction?) {
+            if let terminalView, prediction?.withdraw(from: terminalView.getTerminal()) == true {
+                terminalView.feed(byteArray: [])
+            }
+            predictionTick?.cancel()
+            predictionTick = nil
+            prediction = engine
+        }
+
+        /// The view predictions may draw into right now: output is live and
+        /// the viewport sits on the live screen (guesses address its rows).
+        private var predictionView: TerminalView? {
+            guard prediction != nil, !scrollHeld, let terminalView,
+                  terminalView.distanceToBottom < 1 else { return nil }
+            return terminalView
+        }
+
+        /// Keystrokes on their way to the mosh server: draw their likely echo
+        /// now. Returns the batch to report back through
+        /// ``predictionSent(batch:userState:)`` once the transport has queued
+        /// the bytes, or nil when nothing was predicted.
+        func predict(_ data: Data) -> Int? {
+            guard let prediction else { return nil }
+            guard let view = predictionView else {
+                // Can't see the live screen (reading scrollback): guessing
+                // blind would only be wrong — start over once it's back.
+                prediction.reset()
+                return nil
+            }
+            let terminal = view.getTerminal()
+            let lifted = prediction.withdraw(from: terminal)
+            let batch = prediction.userInput(data, on: terminal)
+            let drawn = prediction.apply(to: terminal)
+            if lifted || drawn { view.feed(byteArray: []) }   // queue the redraw + caret move
+            schedulePredictionTick()
+            return batch
+        }
+
+        /// Bytes the engine can't model are about to move the screen: take
+        /// every guess down; the next keystroke starts a new epoch.
+        func dropPredictions() {
+            guard let prediction else { return }
+            if let terminalView, prediction.withdraw(from: terminalView.getTerminal()) {
+                terminalView.feed(byteArray: [])
+            }
+            prediction.reset()
+        }
+
+        func predictionSent(batch: Int, userState: UInt64?) {
+            prediction?.sent(batch: batch, as: userState)
+        }
+
+        /// One applied mosh diff. The bytes go through ``feed(data:)`` (which
+        /// lifts the overlay around them); a frame that only moved the echo
+        /// ack still settles the guesses it now covers.
+        func feed(moshFrame frame: MoshHostFrame) {
+            prediction?.noteEchoAck(frame.echoAck)
+            if !frame.bytes.isEmpty {
+                feed(data: frame.bytes)
+            } else if let prediction, let view = predictionView {
+                let terminal = view.getTerminal()
+                let lifted = prediction.withdraw(from: terminal)
+                prediction.settle(on: terminal)
+                let drawn = prediction.apply(to: terminal)
+                if lifted || drawn { view.feed(byteArray: []) }
+                schedulePredictionTick()
+            }
+        }
+
+        /// Run `body` (which feeds host bytes) with the guesses taken off the
+        /// screen, then judge and redraw them. Never feed over them: the
+        /// server diffs against the screen it thinks we have.
+        private func liftingPredictions(on view: TerminalView, _ body: () -> Void) {
+            guard let prediction else { body(); return }
+            let terminal = view.getTerminal()
+            prediction.withdraw(from: terminal)
+            body()
+            guard predictionView != nil else { return }
+            prediction.settle(on: terminal)
+            prediction.apply(to: terminal)
+            schedulePredictionTick()
+        }
+
+        /// mosh wakes every 50ms while a guess is pending, so one stuck past
+        /// 250ms gets shown (and marked past 5s) without waiting for the next
+        /// keystroke or frame. Clock-only, so it redraws only on a change.
+        private func schedulePredictionTick() {
+            guard predictionTick == nil, prediction?.needsTick == true else { return }
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.predictionTick = nil
+                guard let prediction = self.prediction, let view = self.predictionView else { return }
+                if prediction.tick() {
+                    let terminal = view.getTerminal()
+                    let lifted = prediction.withdraw(from: terminal)
+                    let drawn = prediction.apply(to: terminal)
+                    if lifted || drawn { view.feed(byteArray: []) }
+                }
+                self.schedulePredictionTick()
+            }
+            predictionTick = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
         }
 
         // MARK: Output hold (scrollback reading)
 
         /// Begin holding output — the user has scrolled up off the bottom.
         func engageScrollHold() {
+            if !scrollHeld, let prediction, let terminalView {
+                // Guesses address the live screen's rows, which just scrolled
+                // out from under them.
+                if prediction.withdraw(from: terminalView.getTerminal()) { terminalView.feed(byteArray: []) }
+                prediction.reset()
+            }
             scrollHeld = true
         }
 
@@ -763,8 +885,10 @@ struct SwiftTerminalView: UIViewRepresentable {
             guard scrollHeld else { return }
             scrollHeld = false
             guard let terminalView else { heldFeed.removeAll(); heldBytes = 0; return }
-            for chunk in heldFeed {
-                terminalView.feed(byteArray: ArraySlice([UInt8](chunk)))
+            liftingPredictions(on: terminalView) {
+                for chunk in heldFeed {
+                    terminalView.feed(byteArray: ArraySlice([UInt8](chunk)))
+                }
             }
             heldFeed.removeAll()
             heldBytes = 0
@@ -785,13 +909,16 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// thread-safety note applies.
         func feed(text: String) {
             guard let terminalView else { return }
-            terminalView.feed(text: text)
+            liftingPredictions(on: terminalView) {
+                terminalView.feed(text: text)
+            }
             postFeedFixups(on: terminalView)
         }
 
         /// Programmatic resize — typically driven by the parent in response
         /// to remote window-size requests rather than UI layout.
         func resize(cols: Int, rows: Int) {
+            if let terminalView { prediction?.withdraw(from: terminalView.getTerminal()) }
             terminalView?.resize(cols: cols, rows: rows)
         }
 
@@ -1186,8 +1313,10 @@ struct SwiftTerminalView: UIViewRepresentable {
                 self?.unlockFrame()
             }
             if !pendingFeed.isEmpty {
-                for chunk in pendingFeed {
-                    terminalView.feed(byteArray: ArraySlice([UInt8](chunk)))
+                liftingPredictions(on: terminalView) {
+                    for chunk in pendingFeed {
+                        terminalView.feed(byteArray: ArraySlice([UInt8](chunk)))
+                    }
                 }
                 pendingFeed.removeAll()
                 postFeedFixups(on: terminalView)
