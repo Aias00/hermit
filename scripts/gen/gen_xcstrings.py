@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Generate the three strings catalogs: Moshpit/Resources/Localizable.xcstrings (the app),
-Extensions/MoshpitIsland/Localizable.xcstrings (the widget) and
-Extensions/MoshpitPush/Localizable.xcstrings (the notification service extension).
+"""Generate the four strings catalogs: Moshpit/Resources/Localizable.xcstrings (the app),
+Extensions/MoshpitIsland/Localizable.xcstrings (the widget),
+Extensions/MoshpitPush/Localizable.xcstrings (the notification service extension) and
+Extensions/MoshpitShare/Localizable.xcstrings (the share extension).
 
 Source language: en (the key IS the English value).
 Each entry carries complete zh-Hans + ja translations inline; zh-Hant, ko, de, es,
@@ -22,11 +23,19 @@ def add(key, zh=SAME, ja=None):
 def plural(key, en_one, zh, ja):
     S[key] = {"plural": True, "en_one": en_one, "zh": zh, "ja": ja}
 
+def plural_spec(key, en_one, zh, ja, en_other=None):
+    """A plural entry for any table. `en_other` is for keys whose English
+    'other' form differs from the key itself ("%lld needs you" → "need you")."""
+    spec = {"plural": True, "en_one": en_one, "zh": zh, "ja": ja}
+    if en_other:
+        spec["en_other"] = en_other
+    return spec
+
 # ---------- Brand / protocol / glyphs (identical everywhere) ----------
 for k in ["Moshpit", "Vibe Island", "MOSH", "SRTT", "REC",
           "ED25519", "ECDSA-sk", "RSA-4096", "tmux", "paste", "tmux prefix",
           "⌘B", "＋", "22", "60000", "61000", "/usr/local/bin/mosh-server",
-          "ABCdef 012 ~/ssh $", "%lldms", "%lldpt", "Wi-Fi → 5G",
+          "ABCdef 012 ~/ssh $", "%lldms", "%lldpt",
           # Glyphs + technical formats the compiler extracts from Text literals;
           # identical in every language by design.
           "%@@%@", "%lld:%@", "+", "−", "/", "·", "—", "›", "→",
@@ -334,6 +343,9 @@ add("No device key yet — generate one with ＋", "还没有设备密钥，点 
 add("IMPORTED", "已导入", "インポート済み")
 add("No imported keys", "没有已导入的密钥", "インポートされたキーはありません")
 add("Delete Key", "删除密钥", "キーを削除")
+add("It leaves this list for good: its public key can't be copied again or picked for a new connection. Connections already using it keep working.",
+    "删掉后它会从列表里彻底消失：公钥没法再复制，也不能再选给新连接。已经在用它的连接不受影响。",
+    "一覧から完全に消え、公開鍵のコピーや新しい接続での選択はできなくなります。すでに使っている接続はそのまま使えます。")
 add("unused since %@", "自 %@ 起未使用", "%@ 以降未使用")
 # Add Key
 add("Add Key", "添加密钥", "キーを追加")
@@ -358,8 +370,6 @@ add("PROTECTION", "保护", "保護")
 add("Secure Enclave keys are limited to ECDSA-P256; the algorithm adjusts automatically when SE is enabled.",
     "Secure Enclave 只支持 ECDSA-P256，开启后算法会自动切换。",
     "Secure Enclave のキーは ECDSA-P256 に限定されます。SE を有効にするとアルゴリズムは自動調整されます。")
-add("Passphrase", "口令", "パスフレーズ")
-add("Confirm Passphrase", "确认口令", "パスフレーズを確認")
 add("Require Face ID", "需要 Face ID", "Face ID を要求")
 add("Face ID confirmation before every signature", "每次签名前需 Face ID 确认", "署名のたびに Face ID で確認")
 add("Store in Secure Enclave", "存入 Secure Enclave", "Secure Enclave に保存")
@@ -377,9 +387,6 @@ add("When bound, this key is used only for the selected hosts by default; change
 add("PREVIEW · SHA256", "预览 · SHA256", "プレビュー · SHA256")
 add("—:—:—:—:—:—:—:—:—:—  (shown after generation)", "—:—:—:—:—:—:—:—:—:—（生成后显示）", "—:—:—:—:—:—:—:—:—:—  （生成後に表示）")
 add("Key error", "密钥错误", "キーエラー")
-add("WEAK", "弱", "弱い")
-add("FAIR", "中", "普通")
-add("STRONG", "强", "強い")
 
 # ---------- Shortcuts ----------
 add("PREVIEW", "预览", "プレビュー")
@@ -451,7 +458,7 @@ add("First connection to %@:%lld.\n\nKey fingerprint:\n%@\n\nVerify it matches t
 add("Trust", "信任", "信頼")
 add("Connecting…", "连接中…", "接続中…")
 add("roaming…", "漫游中…", "ローミング中…")
-add("Predict ON", "预测已开", "予測オン")
+add("Network changed", "网络已切换", "ネットワークが切り替わりました")
 add("No tmux sessions", "没有 tmux 会话", "tmux セッションがありません")
 add("This server has no running sessions.\nMoshpit only attaches — create the first one to start.",
     "这台服务器上没有在跑的会话。\nMoshpit 只连已有的会话，先新建一个。",
@@ -1148,7 +1155,6 @@ add("Unsupported SSH key type: %@", "不支持的 SSH 密钥类型：%@", "サ�
 add("Version, system, device model, language", "版本、系统、机型、语言", "バージョン、システム、機種、言語")
 add("What happened, or what would help?", "遇到了什么问题，或者希望加点什么？", "何が起きたか、あるいは何があると助かるか")
 add("What the app logged about this session: every terminal resize with its before-and-after size, and the cause of every reconnect. Screenshot it — or copy it — when something looks wrong.", "这次会话里 App 记下的东西：每次终端改尺寸的前后大小，以及每次重连的原因。哪里不对劲时，截个图或复制下来。", "このセッションでアプリが記録した内容：ターミナルのサイズ変更（変更前後のサイズ）と、再接続の原因。何かおかしいときは、スクリーンショットを撮るかコピーしてください。")
-add("Wi-Fi → 5G")
 add("done", "已完成", "完了")
 add("git ")
 add("hint: use --staged")
@@ -1169,15 +1175,64 @@ add("❯")
 add("❯ ")
 add("➜")
 
-# ---------- Vibe Island (shared with widget) ----------
+# ---------- Vibe Island + widgets (the MoshpitIsland extension) ----------
+# Text keys and String(localized:) resolve against Bundle.main, which inside the
+# widget extension is the EXTENSION — every string the Live Activity, Dynamic
+# Island and home/lock-screen widgets show needs a key in this table.
 ISLAND = {}
 def island(key, zh, ja):
     ISLAND[key] = (zh, ja)
     S[key] = (zh, ja)
 island("working", "工作中", "作業中")
-island("needs attention", "等你", "要注意")
 island("idle", "空闲", "アイドル")
+# AgentState.label (MoshpitKit) is the other two; "Switch" cycles the pill.
+for k in ["needs you", "done", "Switch"]:
+    ISLAND[k] = S[k]
 ISLAND["%lldms"] = SAME  # latency unit chip in the Island UI
+ISLAND["Moshpit"] = SAME
+# Header summaries ("1 needs you · 2 working · 1 done") and widget copy.
+ISLAND["%lld needs you"] = plural_spec("%lld needs you", "%lld needs you",
+                                       "%lld 个在等你", "対応待ち %lld", en_other="%lld need you")
+ISLAND["%lld working"] = ("%lld 个工作中", "作業中 %lld")
+ISLAND["%lld done"] = plural_spec("%lld done", "%lld done", "%lld 个已完成", "完了 %lld")
+ISLAND["+%lld more"] = ("还有 %lld 个", "ほか %lld 件")
+ISLAND["paused — open Moshpit to refresh"] = ("已暂停，打开 Moshpit 刷新", "一時停止中 — Moshpit を開くと更新されます")
+ISLAND["paused — open Moshpit"] = ("已暂停，打开 Moshpit", "一時停止中 — Moshpit を開く")
+ISLAND["no active agents"] = ("没有智能体在跑", "稼働中のエージェントなし")
+ISLAND["Moshpit · no agents"] = ("Moshpit · 没有智能体", "Moshpit · エージェントなし")
+ISLAND["Agent Status"] = ("智能体状态", "エージェントの状況")
+ISLAND["Live status of your Moshpit agents."] = ("实时查看 Moshpit 里各个智能体在做什么。", "Moshpit のエージェントの状況をリアルタイムで表示します。")
+# Circular lock-screen widget: one tiny word under the count.
+ISLAND["wait"] = ("等你", "待ち")
+ISLAND["agt"] = ("智能体", "体")
+
+# ---------- Share sheet (the MoshpitShare extension) ----------
+# Same Bundle.main rule as the widget: the share extension has its own catalog.
+SHARE = {}
+for k in ["working", "needs you", "done", "idle", "Cancel"]:
+    SHARE[k] = S[k]
+SHARE["Send to agent"] = ("发给智能体", "エージェントに送る")
+SHARE["1 image — pick the agent that should see it"] = (
+    "1 张图片，选一个要看它的智能体",
+    "画像 1 枚 — 見せるエージェントを選んでください")
+SHARE["%lld images — pick the agent that should see them"] = (
+    "%lld 张图片，选一个要看它们的智能体",
+    "画像 %lld 枚 — 見せるエージェントを選んでください")
+SHARE["Agent list is from %lld min ago — targets may have moved on. Queued images are delivered when the session is next live."] = (
+    "这份智能体列表是 %lld 分钟前的，对方可能已经换了地方。排队的图片会在会话下次连上时送到。",
+    "このエージェント一覧は %lld 分前のものなので、状況が変わっているかもしれません。キューに入れた画像は、次にセッションがつながったときに届きます。")
+SHARE["Delivered as an uploaded path the moment the session is live — instantly, if Moshpit is connected right now."] = (
+    "会话一连上，图片就会上传，并把路径交给智能体；Moshpit 现在正连着的话，马上就到。",
+    "セッションがつながった時点でアップロードし、そのパスを渡します。いま Moshpit が接続中なら、すぐに届きます。")
+SHARE["No agents to send to"] = ("没有可以发送的智能体", "送信先のエージェントがありません")
+SHARE["Open Moshpit and connect to a session with a running agent first — the share sheet lists every agent Moshpit is watching."] = (
+    "先打开 Moshpit，连上一个有智能体在跑的会话。这里会列出 Moshpit 正在留意的每个智能体。",
+    "まず Moshpit を開き、エージェントが動いているセッションに接続してください。共有シートには Moshpit が見守っているすべてのエージェントが並びます。")
+SHARE["Couldn't queue the images"] = ("图片没能排进队列", "画像をキューに入れられませんでした")
+SHARE["Queued for %@"] = ("已排队，等着发给 %@", "%@ 宛てにキューに入れました")
+SHARE["Moshpit uploads and hands over the path the moment that session is live."] = (
+    "那个会话一连上，Moshpit 就会上传图片并把路径交过去。",
+    "そのセッションがつながった時点で、Moshpit がアップロードしてパスを渡します。")
 
 # ---------- Agent notifications (shared with the push extension) ----------
 # AgentNotificationCopy (MoshpitKit) composes every agent card — the local one
@@ -1311,7 +1366,7 @@ def entry(key, spec, english=None):
         locs["zh-Hans"] = unit(key)
         locs["ja"] = unit(key)
     elif isinstance(spec, dict) and spec.get("plural"):
-        locs["en"] = plural_unit({"one": spec["en_one"], "other": key})
+        locs["en"] = plural_unit({"one": spec["en_one"], "other": spec.get("en_other", key)})
         locs["zh-Hans"] = unit(spec["zh"])
         locs["ja"] = unit(spec["ja"])
     else:
@@ -1467,7 +1522,8 @@ def check(paths):
 root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CATALOGS = [os.path.join(root, "Moshpit/Resources/Localizable.xcstrings"),
             os.path.join(root, "Extensions/MoshpitIsland/Localizable.xcstrings"),
-            os.path.join(root, "Extensions/MoshpitPush/Localizable.xcstrings")]
+            os.path.join(root, "Extensions/MoshpitPush/Localizable.xcstrings"),
+            os.path.join(root, "Extensions/MoshpitShare/Localizable.xcstrings")]
 INFOPLIST_CATALOG = os.path.join(root, "Moshpit/Resources/InfoPlist.xcstrings")
 
 if "--check" in sys.argv:
@@ -1476,10 +1532,11 @@ if "--check" in sys.argv:
 write_catalog(CATALOGS[0], S)
 write_catalog(CATALOGS[1], ISLAND)
 write_catalog(CATALOGS[2], PUSH)
+write_catalog(CATALOGS[3], SHARE)
 INFOPLIST_EN = infoplist_english()
 write_catalog(INFOPLIST_CATALOG, {k: INFOPLIST_ZH_JA[k] for k in INFOPLIST_ZH_JA}, english=INFOPLIST_EN)
 
-ALL = dict(S); ALL.update(ISLAND); ALL.update(PUSH); ALL.update({k: INFOPLIST_ZH_JA[k] for k in INFOPLIST_ZH_JA})
+ALL = dict(S); ALL.update(ISLAND); ALL.update(PUSH); ALL.update(SHARE); ALL.update({k: INFOPLIST_ZH_JA[k] for k in INFOPLIST_ZH_JA})
 print("extra locales (scripts/gen/locales/*.json):")
 if not report_locales(ALL):
     raise SystemExit("locale files have problems; see above")

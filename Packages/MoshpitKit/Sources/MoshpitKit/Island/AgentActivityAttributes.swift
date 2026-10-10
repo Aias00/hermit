@@ -18,8 +18,9 @@ public struct AgentActivityAttributes: ActivityAttributes {
         case done         // was working, now quiet — finished its turn
         case idle         // quiet, nothing notable
 
-        /// Resolved against `Bundle.main` — the app's or the widget's own
-        /// catalog, both of which carry these four keys.
+        /// Resolved against `Bundle.main` — the app's, the widget's or the
+        /// share extension's own catalog; scripts/gen/gen_xcstrings.py puts
+        /// these four keys in all three.
         public var label: String {
             switch self {
             case .working:   return String(localized: "working")

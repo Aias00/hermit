@@ -199,11 +199,11 @@ struct LockScreenView: View {
 
     private var summary: String {
         var parts: [String] = []
-        if state.attentionCount > 0 { parts.append("\(state.attentionCount) needs you") }
-        if state.workingCount > 0 { parts.append("\(state.workingCount) working") }
+        if state.attentionCount > 0 { parts.append(String(localized: "\(state.attentionCount) needs you")) }
+        if state.workingCount > 0 { parts.append(String(localized: "\(state.workingCount) working")) }
         let done = state.agents.filter { $0.state == .done }.count
-        if done > 0 { parts.append("\(done) done") }
-        return parts.isEmpty ? "" : parts.joined(separator: " · ")
+        if done > 0 { parts.append(String(localized: "\(done) done")) }
+        return parts.joined(separator: " · ")
     }
 }
 

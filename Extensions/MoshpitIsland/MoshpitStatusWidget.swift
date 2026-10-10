@@ -114,11 +114,11 @@ struct AgentStatusWidgetView: View {
     }
 
     private var summaryLine: String {
+        if isStale { return String(localized: "paused — open Moshpit") }
         var parts: [String] = []
-        if state.attentionCount > 0 { parts.append("\(state.attentionCount) needs you") }
-        if state.workingCount > 0 { parts.append("\(state.workingCount) working") }
-        if isStale { return "paused — open Moshpit" }
-        return parts.isEmpty ? "no active agents" : parts.joined(separator: " · ")
+        if state.attentionCount > 0 { parts.append(String(localized: "\(state.attentionCount) needs you")) }
+        if state.workingCount > 0 { parts.append(String(localized: "\(state.workingCount) working")) }
+        return parts.isEmpty ? String(localized: "no active agents") : parts.joined(separator: " · ")
     }
 
     // MARK: families
@@ -206,7 +206,7 @@ struct AgentStatusWidgetView: View {
             VStack(spacing: 0) {
                 Text("\(state.attentionCount > 0 ? state.attentionCount : total)")
                     .font(.system(size: 18, weight: .bold, design: .rounded))
-                Text(state.attentionCount > 0 ? "wait" : "agt")
+                Text(state.attentionCount > 0 ? LocalizedStringKey("wait") : LocalizedStringKey("agt"))
                     .font(.system(size: 8, weight: .medium))
             }
         }

@@ -98,9 +98,11 @@ private struct ShareTargetView: View {
                     }
                 }
             } header: {
-                Text(images.count == 1
-                     ? "1 image — pick the agent that should see it"
-                     : "\(images.count) images — pick the agent that should see them")
+                if images.count == 1 {
+                    Text("1 image — pick the agent that should see it")
+                } else {
+                    Text("\(images.count) images — pick the agent that should see them")
+                }
             } footer: {
                 if snapshotAge > 300 {
                     Text("Agent list is from \(Int(snapshotAge / 60)) min ago — targets may have moved on. Queued images are delivered when the session is next live.")
@@ -124,9 +126,14 @@ private struct ShareTargetView: View {
             Image(systemName: failed ? "exclamationmark.triangle" : "checkmark.circle.fill")
                 .font(.system(size: 40))
                 .foregroundStyle(failed ? .orange : .green)
-            Text(failed ? "Couldn't queue the images"
-                        : "Queued for \(name)")
-                .font(.headline)
+            Group {
+                if failed {
+                    Text("Couldn't queue the images")
+                } else {
+                    Text("Queued for \(name)")
+                }
+            }
+            .font(.headline)
             if !failed {
                 Text("Moshpit uploads and hands over the path the moment that session is live.")
                     .font(.subheadline)
@@ -167,7 +174,8 @@ private struct ShareTargetView: View {
                                paneId: target.paneId,
                                agentName: item.command,
                                label: item.location,
-                               stateLabel: item.state)
+                               stateLabel: AgentActivityAttributes.AgentState(rawValue: item.state)?.label
+                                   ?? item.state)
         }
 
         // Images: every attachment that can load as image data.
