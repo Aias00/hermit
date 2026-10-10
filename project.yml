@@ -133,7 +133,7 @@ packages:
     # Revert to the upstream URL if/when these land there and a
     # release picks them up.
     url: https://github.com/Cluas/SwiftTerm.git
-    revision: b6042c4b0b542aac4e5d58d3bc233d0939be6b82
+    revision: dd7f2cd47507e4ed9501835739eb26af3a5ed4bc
   Citadel:
     url: https://github.com/orlandos-nl/Citadel.git
     from: "0.7.0"
