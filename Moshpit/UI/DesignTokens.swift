@@ -95,7 +95,6 @@ enum Ink {
     static let seBadgeText = Color(hex: "B7F5C0")
     static let seBadgeBorder = success.opacity(0.30)
     static let fpPreviewText = Color(hex: "DFF89A")
-    static let predictOnText = Color(hex: "DFF89A")
     static let warnBoxTitle = Color(hex: "FFD39A")
     static let keyChipBG = Color.white.opacity(0.085)
     static let keyChipText = Color(hex: "E8E3D6").opacity(0.74)

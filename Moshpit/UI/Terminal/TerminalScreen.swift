@@ -2859,6 +2859,9 @@ final class HoldRepeater: ObservableObject {
 
 // MARK: - Roam banner (screen 5)
 
+/// Shown while mosh re-homes onto a new network path. The path watcher only
+/// says *a better path appeared*, not which interfaces it moved between, so the
+/// title names the event rather than a direction it can't know.
 struct RoamBanner: View {
     let metrics: SessionMetrics?
     @State private var pulsing = false
@@ -2873,7 +2876,7 @@ struct RoamBanner: View {
                     .shadow(color: Ink.warn.opacity(0.8), radius: 6)
                     .scaleEffect(pulsing ? 1.6 : 1)
                     .opacity(pulsing ? 0.55 : 1)
-                Text("Wi-Fi → 5G")
+                Text("Network changed")
                     .font(Face.display(13, .semibold))
                     .foregroundStyle(Ink.primary)
                 Spacer()
@@ -2893,13 +2896,6 @@ struct RoamBanner: View {
                     .stroke(Ink.warn, lineWidth: 1.4)
                     .frame(width: 64, height: 18)
                 Spacer()
-                HStack(spacing: 5) {
-                    Circle().fill(Ink.mosh).frame(width: 5, height: 5)
-                        .shadow(color: Ink.mosh.opacity(0.7), radius: 3)
-                    Text("Predict ON")
-                        .font(Face.mono(10))
-                        .foregroundStyle(Ink.predictOnText)
-                }
             }
         }
         .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
