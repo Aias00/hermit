@@ -227,9 +227,7 @@ struct SwiftTerminalView: UIViewRepresentable {
             coordinator.attach(to: existing)   // gesture attach is idempotent
             coordinator.hostContainer = container
             container.geometryHeld = geometryHeld
-            theme.apply(to: existing)
-            coordinator.enforcedCursor = TerminalCursor.apply(
-                shape: cursorShape, colorId: cursorColorId, blink: cursorBlink, to: existing)
+            applyStyle(to: existing)
             if focusPolicy == .take {
                 DispatchQueue.main.async { [weak existing] in
                     _ = existing?.becomeFirstResponder()
@@ -274,9 +272,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         terminalView.terminalDelegate = coordinator
         coordinator.attach(to: terminalView)
 
-        theme.apply(to: terminalView)
-        coordinator.enforcedCursor = TerminalCursor.apply(
-            shape: cursorShape, colorId: cursorColorId, blink: cursorBlink, to: terminalView)
+        applyStyle(to: terminalView)
         // Pop the system keyboard as soon as the terminal is on screen — the
         // app's shortcut bar rides above it via safeAreaInset.
         if focusPolicy == .take {
@@ -303,11 +299,7 @@ struct SwiftTerminalView: UIViewRepresentable {
             terminal.font = desired
         }
 
-        theme.apply(to: terminal)
-        // Re-assert cursor after theme (theme also sets caretColor), and
-        // refresh the coordinator's enforced copy for the post-feed guard.
-        coordinator.enforcedCursor = TerminalCursor.apply(
-            shape: cursorShape, colorId: cursorColorId, blink: cursorBlink, to: terminal)
+        applyStyle(to: terminal)
 
         // Honor the keyboard-dismiss toggle.
         switch focusPolicy {
@@ -322,6 +314,27 @@ struct SwiftTerminalView: UIViewRepresentable {
                 DispatchQueue.main.async { [weak terminal] in _ = terminal?.resignFirstResponder() }
             }
         }
+    }
+
+    /// Push the theme and cursor settings into `terminal` — only what changed
+    /// since the last push. Not idempotent in cost: SwiftTerm's colour setters
+    /// (`nativeBackgroundColor`, `installColors`) drop its attribute cache and
+    /// repaint the whole screen, and SwiftUI calls `updateUIView` on every
+    /// re-render of the parent (each SRTT tick on a mosh session included).
+    private func applyStyle(to terminal: TerminalView) {
+        let style = Coordinator.AppliedStyle(
+            terminal: ObjectIdentifier(terminal), theme: theme,
+            cursorShape: cursorShape, cursorColorId: cursorColorId, cursorBlink: cursorBlink)
+        let previous = coordinator.appliedStyle
+        guard previous != style else { return }
+        if previous?.terminal != style.terminal || previous?.theme != style.theme {
+            theme.apply(to: terminal)
+        }
+        // Re-assert cursor after theme (theme also sets caretColor), and
+        // refresh the coordinator's enforced copy for the post-feed guard.
+        coordinator.enforcedCursor = TerminalCursor.apply(
+            shape: cursorShape, colorId: cursorColorId, blink: cursorBlink, to: terminal)
+        coordinator.appliedStyle = style
     }
 
     // MARK: - Coordinator
@@ -378,6 +391,18 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// choice only survives until the next such sequence. Installed by
         /// whoever calls ``TerminalCursor.apply``; nil skips enforcement.
         var enforcedCursor: (style: CursorStyle, color: UIColor)?
+
+        /// What ``SwiftTerminalView/applyStyle(to:)`` last pushed, and into
+        /// which view — so a re-render that changes nothing visual costs a
+        /// comparison instead of a full repaint.
+        struct AppliedStyle: Equatable {
+            var terminal: ObjectIdentifier
+            var theme: TerminalTheme
+            var cursorShape: CursorShape
+            var cursorColorId: String
+            var cursorBlink: Bool
+        }
+        var appliedStyle: AppliedStyle?
 
         /// Re-assert ``enforcedCursor`` if the fed bytes changed the caret.
         /// Cheap when nothing changed (two comparisons), so it runs after
