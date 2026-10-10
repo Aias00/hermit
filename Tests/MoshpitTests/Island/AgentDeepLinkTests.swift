@@ -1,0 +1,77 @@
+import Foundation
+import Testing
+@testable import Moshpit
+import MoshpitKit
+
+/// `moshpit://connection/<uuid>?pane=<paneId>` is written by the app (Live
+/// Activity, widget snapshot) and read back by the app, the share extension and
+/// the Shortcuts intent. tmux pane ids start with `%`, which is exactly the
+/// percent-escape character — the link has to survive that round trip.
+@Suite("AgentDeepLink")
+struct AgentDeepLinkTests {
+    let id = UUID(uuidString: "3F2504E0-4F89-11D3-9A0C-0305E82C3301")!
+
+    @Test("pane ids round-trip, including two-digit ones that look like escapes",
+          arguments: ["%1", "%5", "%12", "%40", "%123", "w1 p2"])
+    func roundTrip(pane: String) throws {
+        let link = AgentDeepLink.string(connectionId: id, paneId: pane)
+        let parsed = try #require(AgentDeepLink.parse(link))
+        #expect(parsed.connectionId == id)
+        #expect(parsed.paneId == pane)
+    }
+
+    @Test("the uuid is the path, not the host")
+    func uuidIsThePath() throws {
+        let url = try #require(URL(string: AgentDeepLink.string(connectionId: id, paneId: "%3")))
+        #expect(url.host() == "connection")
+        #expect(url.lastPathComponent == id.uuidString)
+        // Not a connection link: the uuid in the host slot is rejected.
+        #expect(AgentDeepLink.parse("moshpit://\(id.uuidString)?pane=%253") == nil)
+    }
+
+    @Test("links written before the encoder existed still land on their pane",
+          arguments: ["%1", "%12", "%123"])
+    func legacyUnencodedPane(pane: String) throws {
+        let parsed = try #require(AgentDeepLink.parse("moshpit://connection/\(id.uuidString)?pane=\(pane)"))
+        #expect(parsed.paneId == pane)
+    }
+
+    @Test("a link without a pane still names the connection")
+    func noPane() throws {
+        let parsed = try #require(AgentDeepLink.parse("moshpit://connection/\(id.uuidString)"))
+        #expect(parsed.connectionId == id)
+        #expect(parsed.paneId == nil)
+    }
+
+    @Test("other schemes are refused unless the caller allows them")
+    func schemes() throws {
+        let url = try #require(URL(string: "moshpitdemo://connection/\(id.uuidString)?pane=%2512"))
+        #expect(AgentDeepLink.parse(url) == nil)
+        #expect(AgentDeepLink.parse(url, schemes: ["moshpit", "moshpitdemo"])?.paneId == "%12")
+    }
+
+    @Test("a widget row's target is what the share sheet and Shortcuts address")
+    func widgetItemTarget() throws {
+        let item = AgentWidgetState.Item(
+            id: "x", command: "claude", location: "work · 4:rugisland",
+            state: "attention", startedAt: .now,
+            deepLink: AgentDeepLink.string(connectionId: id, paneId: "%12"))
+        let target = try #require(item.target)
+        #expect(target.connectionId == id)
+        #expect(target.paneId == "%12")
+
+        let noLink = AgentWidgetState.Item(id: "y", command: "claude", location: "",
+                                           state: "working", startedAt: .now)
+        #expect(noLink.target == nil)
+    }
+
+    @Test("the app's URL handler requests the exact pane")
+    @MainActor
+    func routerRequestsPane() throws {
+        let router = DeepLinkRouter()
+        let url = try #require(URL(string: AgentDeepLink.string(connectionId: id, paneId: "%12")))
+        router.handle(url)
+        #expect(router.paneRequest?.connectionId == id)
+        #expect(router.paneRequest?.paneId == "%12")
+    }
+}

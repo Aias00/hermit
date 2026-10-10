@@ -72,14 +72,9 @@ struct AgentTargetEntity: AppEntity, Identifiable {
 
     static func fromSnapshot() -> [AgentTargetEntity] {
         AgentWidgetStore.read().items.compactMap { item in
-            guard let link = item.deepLink,
-                  let url = URL(string: link),
-                  let connectionId = UUID(uuidString: url.host() ?? ""),
-                  let pane = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                      .queryItems?.first(where: { $0.name == "pane" })?.value
-            else { return nil }
-            return AgentTargetEntity(id: item.id, connectionId: connectionId,
-                                     paneId: pane, agentName: item.command,
+            guard let target = item.target else { return nil }
+            return AgentTargetEntity(id: item.id, connectionId: target.connectionId,
+                                     paneId: target.paneId, agentName: item.command,
                                      label: item.location)
         }
     }

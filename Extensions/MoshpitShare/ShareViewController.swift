@@ -161,15 +161,10 @@ private struct ShareTargetView: View {
         let state = AgentWidgetStore.read()
         snapshotAge = Date().timeIntervalSince(state.updatedAt)
         targets = state.items.compactMap { item in
-            guard let link = item.deepLink,
-                  let url = URL(string: link),
-                  let connectionId = UUID(uuidString: url.host() ?? ""),
-                  let pane = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                      .queryItems?.first(where: { $0.name == "pane" })?.value
-            else { return nil }
+            guard let target = item.target else { return nil }
             return ShareTarget(id: item.id,
-                               connectionId: connectionId,
-                               paneId: pane,
+                               connectionId: target.connectionId,
+                               paneId: target.paneId,
                                agentName: item.command,
                                label: item.location,
                                stateLabel: item.state)

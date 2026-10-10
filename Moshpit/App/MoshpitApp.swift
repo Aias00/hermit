@@ -274,11 +274,8 @@ final class DeepLinkRouter {
     }
 
     func handle(_ url: URL) {
-        guard url.scheme == "moshpit", url.host == "connection",
-              let id = UUID(uuidString: url.lastPathComponent) else { return }
-        let pane = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .queryItems?.first(where: { $0.name == "pane" })?.value
-        request(connectionId: id, paneId: pane)
+        guard let link = AgentDeepLink.parse(url) else { return }
+        request(connectionId: link.connectionId, paneId: link.paneId)
     }
 }
 

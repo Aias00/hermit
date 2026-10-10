@@ -884,7 +884,7 @@ final class AgentActivityMonitor {
             ? nil
             : ordered[((headlineOffset % ordered.count) + ordered.count) % ordered.count]
         let deepLink = headline.map {
-            "moshpit://connection/\($0.connectionId)?pane=\($0.paneId)"
+            AgentDeepLink.string(connectionId: $0.connectionId, paneId: $0.paneId)
         }
         return AgentActivityAttributes.ContentState(
             agents: ordered,
@@ -993,7 +993,8 @@ final class AgentActivityMonitor {
             AgentWidgetState.Item(id: $0.id, command: $0.command, location: $0.location,
                                   detail: $0.detail,
                                   state: $0.state.rawValue, startedAt: $0.startedAt,
-                                  deepLink: "moshpit://connection/\($0.connectionId)?pane=\($0.paneId)")
+                                  deepLink: AgentDeepLink.string(connectionId: $0.connectionId,
+                                                                 paneId: $0.paneId))
         }
         AgentWidgetStore.write(AgentWidgetState(
             items: items,
