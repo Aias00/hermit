@@ -312,25 +312,15 @@ struct AddConnectionView: View {
         connection.multiplexer = multiplexer
 
         do {
-            if authMethod == .key, let key = selectedKey {
-                // Managed key: point at the key's own keychain blob; the raw
-                // algorithm tells SSHService how to interpret it (SE keys are
-                // dataRepresentation handles, not PEM).
-                connection.keychainRef = key.keychainRef
-                connection.sshKeyId = key.id
-                connection.sshKeyAlgorithmRaw = key.algorithm.rawValue
-            } else {
-                connection.sshKeyId = nil
-                connection.sshKeyAlgorithmRaw = nil
-                let secret = authMethod == .password ? password : privateKeyPEM
-                if !secret.isEmpty {
-                    let ref = connection.keychainRef ?? keychain.generateRef()
-                    if authMethod == .password {
-                        try await keychain.savePassword(secret, forRef: ref, requireBiometry: false)
-                    } else {
-                        try await keychain.savePrivateKey(secret, forRef: ref, requireBiometry: false)
-                    }
-                    connection.keychainRef = ref
+            if let secret = ConnectionCredential.apply(
+                to: &connection, authMethod: authMethod, selectedKeyId: selectedKeyId,
+                keys: keyStore.keys, password: password, privateKeyPEM: privateKeyPEM,
+                newRef: { keychain.generateRef() }),
+               let ref = connection.keychainRef {
+                if authMethod == .password {
+                    try await keychain.savePassword(secret, forRef: ref, requireBiometry: false)
+                } else {
+                    try await keychain.savePrivateKey(secret, forRef: ref, requireBiometry: false)
                 }
             }
             // Drop any cached (possibly stale) credential so the new one is used.
