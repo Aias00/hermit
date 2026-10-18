@@ -149,6 +149,7 @@ struct ShortcutEditRow: View {
         case .scroll: return "arrow.up.and.down"
         case .mic: return "mic"
         case .image: return "photo"
+        case .files: return "folder"
         default: return nil
         }
     }

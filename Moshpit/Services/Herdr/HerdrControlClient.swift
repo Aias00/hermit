@@ -491,6 +491,10 @@ final class HerdrControlClient: MultiplexerControlling {
     /// from a repo answers yes.
     func worktreeRepo(for sessionId: String) -> String? { worktreeRepos[sessionId] }
 
+    /// Where the pane's foreground program runs, from the last snapshot —
+    /// what an agent's relative paths are relative to.
+    func workingDirectory(ofPane paneId: String) -> String? { paneCwds[paneId] }
+
     /// What happened when we tried to remove a task's worktree.
     enum WorktreeRemoval: Equatable {
         case removed

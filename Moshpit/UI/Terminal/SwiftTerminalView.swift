@@ -447,9 +447,20 @@ struct SwiftTerminalView: UIViewRepresentable {
             let schedule = { [weak self, weak terminalView] in
                 guard let self else { return }
                 self.linkifyWork?.cancel()
-                let work = DispatchWorkItem { [weak terminalView] in
+                let work = DispatchWorkItem { [weak self, weak terminalView] in
                     guard let terminalView else { return }
                     PlainLinkDetector.linkify(terminalView)
+                    // Path links cost the HOST a probe, so only a pane on
+                    // screen asks: a tmux session's other panes keep printing
+                    // while hidden, and nine agents' worth of re-asks every
+                    // few seconds is a `find` loop nobody is looking at.
+                    // Showing the pane lays it out, which runs a pass.
+                    if let links = self?.pathLinks, terminalView.window != nil,
+                       UIApplication.shared.applicationState != .background {
+                        MainActor.assumeIsolated {
+                            PathLinkDetector.linkify(terminal: terminalView.getTerminal(), resolver: links)
+                        }
+                    }
                 }
                 self.linkifyWork = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
@@ -487,6 +498,24 @@ struct SwiftTerminalView: UIViewRepresentable {
 
         /// Called when OSC 7 reports a new working directory. Optional.
         var onHostDirectoryChange: ((String?) -> Void)?
+
+        /// Which paths on this terminal the host has confirmed, so the link
+        /// pass can make them tappable (`PathLinkDetector`). nil = paths stay
+        /// plain text. An answer from the host schedules another pass.
+        var pathLinks: RemotePathLinks? {
+            didSet {
+                MainActor.assumeIsolated {
+                    pathLinks?.onResolved = { [weak self] in
+                        guard let self, let terminalView = self.terminalView else { return }
+                        self.scheduleLinkify(on: terminalView, after: 0)
+                    }
+                }
+            }
+        }
+
+        /// A tapped host-path link — one `pathLinks` confirmed, or Claude
+        /// Code's own OSC-8 `file://` link. Receives the absolute host path.
+        var onOpenRemotePath: ((String) -> Void)?
 
         /// Called when the remote rings the terminal bell (BEL). The Vibe
         /// Island agent monitor uses this as a "needs attention" signal.
@@ -981,7 +1010,11 @@ struct SwiftTerminalView: UIViewRepresentable {
         weak var hostContainer: TerminalHostContainer? {
             didSet {
                 hostContainer?.onTerminalLaidOut = { [weak self] terminal in
-                    self?.reportGrid(of: terminal)
+                    guard let self else { return }
+                    self.reportGrid(of: terminal)
+                    // A pane that just came on screen: its path links were
+                    // held back while it was hidden.
+                    if self.pathLinks != nil { self.scheduleLinkify(on: terminal) }
                 }
                 // Container-level wiring belongs HERE, not at the assignment
                 // sites: a coordinator is configured when its pane is minted,
@@ -1438,6 +1471,14 @@ struct SwiftTerminalView: UIViewRepresentable {
             // surfaces one). Open only safe web/mail schemes — never arbitrary
             // custom schemes from remote output.
             let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
+            // A host path is opened in the app, never handed to the system:
+            // `file://` here names a file on the REMOTE machine.
+            if let path = RemotePathLink.path(from: trimmed) {
+                Log.input.info("path open \(path, privacy: .private)")
+                let open = onOpenRemotePath
+                Task { @MainActor in open?(path) }
+                return
+            }
             guard let url = URL(string: trimmed),
                   let scheme = url.scheme?.lowercased(),
                   ["http", "https", "mailto", "ftp", "ftps"].contains(scheme) else { return }

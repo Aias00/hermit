@@ -1052,6 +1052,41 @@ add("READY TO INSERT", "可以插入", "挿入できます")
 add("Reading the selected images…", "正在读取选中的图片…", "選択した画像を読み込み中…")
 add("UPLOAD FAILED", "上传失败", "アップロード失敗")
 add("UPLOADING %lld%%", "上传中 %lld%%", "アップロード中 %lld%%")
+
+# ---------- Host path preview (RemotePreview) ----------
+add("OPENING…", "打开中…", "開いています…")
+add("DOWNLOADING %lld%%", "下载中 %lld%%", "ダウンロード中 %lld%%")
+add("LARGE FILE", "文件较大", "大きなファイル")
+add("CAN'T OPEN", "打不开", "開けません")
+add("NOTHING TO PREVIEW", "没有可预览的文件", "プレビューできるものはありません")
+add("This file is %@. Download it to preview?", "这个文件有 %@，要下载下来预览吗？",
+    "このファイルは %@ です。ダウンロードしてプレビューしますか？")
+add("This file is no longer on the host.", "这个文件已经不在主机上了。", "このファイルはもうホストにありません。")
+add("This host has SFTP turned off, and the file is too large to send without it.",
+    "这台主机关了 SFTP，文件又太大，没法用别的办法传过来。",
+    "このホストは SFTP がオフで、SFTP なしで送るにはファイルが大きすぎます。")
+add("Couldn't reach the host. Check the connection and try again.",
+    "连不上主机。检查一下连接再试。", "ホストに接続できません。接続を確認してもう一度お試しください。")
+add("Only images, video, audio, PDFs and documents are shown here.",
+    "这里只显示图片、视频、音频、PDF 和文档。",
+    "ここには画像、ビデオ、オーディオ、PDF、書類だけが表示されます。")
+# Folder sheet: add / rename / delete
+add("Add", "添加", "追加")
+add("Upload Photos", "上传照片", "写真をアップロード")
+add("Upload Files", "上传文件", "ファイルをアップロード")
+add("New Folder", "新建文件夹", "新規フォルダ")
+add("Couldn't upload", "没能上传", "アップロードできませんでした")
+add("Couldn't create the folder", "没能新建文件夹", "フォルダを作成できませんでした")
+add("Couldn't rename", "没能重命名", "名前を変更できませんでした")
+add("Couldn't delete", "没能删除", "削除できませんでした")
+add("Couldn't read that photo.", "读不了这张照片。", "この写真を読み込めませんでした。")
+add("Something with that name is already there.", "这里已经有同名的文件或文件夹了。", "同じ名前のものがすでにあります。")
+add("The host didn't allow it. Check that you can write to this folder.", "主机拒绝了这次操作。检查一下你对这个文件夹有没有写权限。", "ホストに拒否されました。このフォルダに書き込めるか確認してください。")
+add("“%@” and everything in it will be deleted from the host.", "会从主机上删除 %@ 和里面的所有内容。", "ホストから %@ とその中身がすべて削除されます。")
+add("“%@” will be deleted from the host.", "会从主机上删除 %@。", "ホストから %@ が削除されます。")
+# Shortcut bar: the Files key
+add("Browse files", "浏览文件", "ファイルを見る")
+add("Share", "分享", "共有")
 add("Attach image", "附带图片", "画像を添付")
 add("Back", "返回", "戻る")
 add("Line dropped", "链路中断", "接続が切れました")

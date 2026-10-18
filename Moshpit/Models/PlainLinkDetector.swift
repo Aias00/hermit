@@ -138,7 +138,7 @@ enum PlainLinkDetector {
 
     /// The logical-line offset of a match mapped back to the physical cell it
     /// starts on.
-    private static func cell(atOffset offset: Int, spans: [(row: Int, length: Int)]) -> (row: Int, col: Int)? {
+    static func cell(atOffset offset: Int, spans: [(row: Int, length: Int)]) -> (row: Int, col: Int)? {
         var remaining = offset
         for span in spans {
             if remaining < span.length { return (span.row, remaining) }
@@ -198,9 +198,9 @@ enum PlainLinkDetector {
     /// Splits a logical-line match back into per-physical-row column ranges
     /// (it may cross one or more soft-wrap boundaries) and tags each row's
     /// slice individually — `tagPlainTextLink` only accepts a single row.
-    private static func tagAcrossRows(startOffset: Int, length: Int,
-                                      spans: [(row: Int, length: Int)],
-                                      terminal: Terminal, url: String) {
+    static func tagAcrossRows(startOffset: Int, length: Int,
+                              spans: [(row: Int, length: Int)],
+                              terminal: Terminal, url: String) {
         var offset = startOffset
         var remaining = length
         for (row, rowLength) in spans {

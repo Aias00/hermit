@@ -449,6 +449,281 @@ actor SSHSession {
         case decodeFailed
     }
 
+    // MARK: - Reading files for preview
+
+    /// The SFTP session previews read through, kept open between reads: a
+    /// folder of thumbnails is a dozen reads in a row, and opening a fresh
+    /// subsystem channel for each (what `withSFTP` does) costs a round trip
+    /// apiece. Reopened when the channel has died; closed with the session.
+    private var previewSFTP: SFTPClient?
+
+    private func previewReader() async throws -> SFTPClient {
+        if let previewSFTP, previewSFTP.isActive { return previewSFTP }
+        // A transport-injected session (tests) has no Citadel client; the
+        // callers fall back to exec, as uploads do.
+        guard let sftpClient else { throw SSHError.sessionClosed }
+        let fresh = try await sftpClient.openSFTP()
+        previewSFTP = fresh
+        return fresh
+    }
+
+    /// What `path` is: file or folder, size, modification time. SFTP stat,
+    /// or the exec fallback (no time) on a host without the subsystem.
+    func remoteStat(_ path: String) async throws -> RemoteFileEntry {
+        guard !closed else { throw SSHError.sessionClosed }
+        do {
+            let attributes = try await previewReader().getAttributes(at: path)
+            return Self.entry(path: path, attributes)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            let output = try await executeCommand(RemoteFileCommands.stat(path))
+            guard let entry = RemoteFileCommands.parseStat(String(decoding: output, as: UTF8.self),
+                                                           path: path) else {
+                throw SSHError.underlying(RemoteReadError.notFound)
+            }
+            return entry
+        }
+    }
+
+    /// Opens `path` for reads at any offset — what streaming playback pulls
+    /// byte ranges through. SFTP only: the exec fallback can't read a range,
+    /// so on a host without SFTP this throws and the caller downloads.
+    func openRemoteFile(_ path: String) async throws -> RemoteFileHandle {
+        guard !closed else { throw SSHError.sessionClosed }
+        let file = try await previewReader().openFile(filePath: path, flags: .read)
+        do {
+            let size = try await file.readAttributes().size ?? 0
+            guard size > 0 else { throw SSHError.underlying(RemoteReadError.notFound) }
+            return RemoteFileHandle(file: file, size: size)
+        } catch {
+            try? await file.close()
+            throw error
+        }
+    }
+
+    /// The login directory — where SFTP and exec channels start. SFTP
+    /// resolves `.`; the exec fallback asks the shell.
+    func remoteHomeDirectory() async throws -> String {
+        guard !closed else { throw SSHError.sessionClosed }
+        do {
+            let home = try await previewReader().getRealPath(atPath: ".")
+            if home.hasPrefix("/") { return home }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {}
+        let output = try await executeCommand("pwd")
+        let home = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard home.hasPrefix("/") else { throw SSHError.underlying(RemoteReadError.notFound) }
+        return home
+    }
+
+    /// The entries of the folder at `path`, unfiltered and unsorted (see
+    /// `RemoteFileEntry.browsable`).
+    func listRemoteDirectory(_ path: String) async throws -> [RemoteFileEntry] {
+        guard !closed else { throw SSHError.sessionClosed }
+        do {
+            let base = path.hasSuffix("/") ? String(path.dropLast()) : path
+            return try await previewReader().listDirectory(atPath: path)
+                .flatMap(\.components)
+                .filter { $0.filename != "." && $0.filename != ".." }
+                .map { Self.entry(path: base + "/" + $0.filename, $0.attributes) }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            let output = try await executeCommand(RemoteFileCommands.list(path))
+            return RemoteFileCommands.parseList(String(decoding: output, as: UTF8.self), in: path)
+        }
+    }
+
+    /// Copy the file at `path` into `destination` (created or replaced).
+    /// Reads ride SFTP in 256KB chunks, eight in flight at a time so a long
+    /// round trip doesn't set the pace; the exec fallback moves files up to
+    /// `RemoteFileCommands.execDownloadLimit` as one base64 reply.
+    func downloadRemoteFile(
+        _ path: String,
+        to destination: URL,
+        progress: (@Sendable (Double) -> Void)? = nil) async throws {
+        guard !closed else { throw SSHError.sessionClosed }
+        do {
+            try await sftpDownload(path, to: destination, progress: progress)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try await execDownload(path, to: destination, progress: progress)
+        }
+    }
+
+    private func sftpDownload(
+        _ path: String,
+        to destination: URL,
+        progress: (@Sendable (Double) -> Void)?) async throws {
+        let file = try await previewReader().openFile(filePath: path, flags: .read)
+        do {
+            let size = try await file.readAttributes().size ?? 0
+            FileManager.default.createFile(atPath: destination.path, contents: nil)
+            let handle = try FileHandle(forWritingTo: destination)
+            defer { try? handle.close() }
+            _ = try await WindowedRead.pull(
+                size: size, chunk: 64 * 1024, window: 16,
+                read: { offset, length in
+                    var buffer = try await file.read(from: offset, length: length)
+                    return buffer.readBytes(length: buffer.readableBytes) ?? []
+                },
+                write: { offset, bytes in
+                    try handle.seek(toOffset: offset)
+                    try handle.write(contentsOf: bytes)
+                },
+                progress: { received in
+                    if size > 0 { progress?(min(1, Double(received) / Double(size))) }
+                })
+            try? await file.close()
+        } catch {
+            try? await file.close()
+            throw error
+        }
+    }
+
+    private func execDownload(
+        _ path: String,
+        to destination: URL,
+        progress: (@Sendable (Double) -> Void)?) async throws {
+        let entry = try await remoteStat(path)
+        guard !entry.isDirectory else { throw SSHError.underlying(RemoteReadError.notFound) }
+        guard (entry.size ?? 0) <= RemoteFileCommands.execDownloadLimit else {
+            throw SSHError.underlying(RemoteReadError.tooLargeWithoutSFTP)
+        }
+        let output = try await executeCommand(RemoteFileCommands.cat(path))
+        guard let data = Data(base64Encoded: output, options: .ignoreUnknownCharacters) else {
+            throw SSHError.underlying(RemoteReadError.notFound)
+        }
+        try data.write(to: destination)
+        progress?(1)
+    }
+
+    enum RemoteReadError: Error {
+        case notFound
+        case tooLargeWithoutSFTP
+    }
+
+    // MARK: - Changing files from the folder sheet
+
+    enum RemoteEditError: Error {
+        /// Something with the target name is already there.
+        case nameTaken
+        /// The exec form ran but didn't report success, or the path is one
+        /// the sheet never deletes.
+        case failed
+    }
+
+    /// SFTP first, the exec form (`RemoteFileEdits`) on any SFTP failure —
+    /// the same split as reads. The exec reply decides: its marker is the
+    /// only success there is.
+    private func edit(sftp: (SFTPClient) async throws -> Void, exec command: String?) async throws {
+        guard !closed else { throw SSHError.sessionClosed }
+        do {
+            try await sftp(previewReader())
+            return
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {}
+        guard let command else { throw SSHError.underlying(RemoteEditError.failed) }
+        try Self.checkEditReply(try await executeCommand(command))
+    }
+
+    private static func checkEditReply(_ reply: Data) throws {
+        let text = String(decoding: reply, as: UTF8.self)
+        if text.contains(RemoteFileEdits.takenMarker) { throw SSHError.underlying(RemoteEditError.nameTaken) }
+        guard text.contains(RemoteFileEdits.okMarker) else { throw SSHError.underlying(RemoteEditError.failed) }
+    }
+
+    func createRemoteDirectory(_ path: String) async throws {
+        try await edit(sftp: { try await $0.createDirectory(atPath: path) },
+                       exec: RemoteFileEdits.makeDirectory(path))
+    }
+
+    /// Never overwrites: OpenSSH's SFTP rename refuses an existing target,
+    /// and the exec form checks first.
+    func renameRemoteItem(_ path: String, to newPath: String) async throws {
+        try await edit(sftp: { sftp in
+            if (try? await sftp.getAttributes(at: newPath)) != nil {
+                throw SSHError.underlying(RemoteEditError.nameTaken)
+            }
+            try await sftp.rename(at: path, to: newPath)
+        }, exec: RemoteFileEdits.rename(path, to: newPath))
+    }
+
+    /// A file goes through SFTP; a folder, with everything in it, through
+    /// `rm -rf` — SFTP can only remove an empty one.
+    func deleteRemoteItem(_ entry: RemoteFileEntry) async throws {
+        guard let command = RemoteFileEdits.remove(entry.path, isDirectory: entry.isDirectory) else {
+            throw SSHError.underlying(RemoteEditError.failed)
+        }
+        if entry.isDirectory {
+            guard !closed else { throw SSHError.sessionClosed }
+            try Self.checkEditReply(try await executeCommand(command))
+        } else {
+            try await edit(sftp: { try await $0.remove(at: entry.path) }, exec: command)
+        }
+    }
+
+    /// Streams `local` to `remotePath`, which must not exist yet (SFTP's
+    /// exclusive create; the exec form checks first). A failed SFTP upload
+    /// removes what it wrote before falling back.
+    func uploadRemoteFile(from local: URL, to remotePath: String,
+                          progress: (@Sendable (Double) -> Void)? = nil) async throws {
+        guard !closed else { throw SSHError.sessionClosed }
+        let size = (try? FileManager.default.attributesOfItem(atPath: local.path)[.size] as? UInt64) ?? 0
+        do {
+            let sftp = try await previewReader()
+            let file = try await sftp.openFile(filePath: remotePath, flags: [.write, .create, .forceCreate])
+            do {
+                let handle = try FileHandle(forReadingFrom: local)
+                defer { try? handle.close() }
+                var offset: UInt64 = 0
+                while let chunk = try handle.read(upToCount: 128 * 1024), !chunk.isEmpty {
+                    try Task.checkCancellation()
+                    try await file.write(ByteBuffer(bytes: chunk), at: offset)
+                    offset += UInt64(chunk.count)
+                    if size > 0 { progress?(min(1, Double(offset) / Double(size))) }
+                }
+                try await file.close()
+                return
+            } catch {
+                try? await file.close()
+                try? await sftp.remove(at: remotePath)
+                throw error
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {}
+
+        guard size <= RemoteFileCommands.execDownloadLimit else {
+            throw SSHError.underlying(RemoteReadError.tooLargeWithoutSFTP)
+        }
+        let data = try Data(contentsOf: local)
+        let plan = RemoteFileEdits.upload(to: remotePath)
+        try Self.checkEditReply(try await executeCommand(plan.begin))
+        var offset = 0
+        while offset < data.count {
+            try Task.checkCancellation()
+            let end = min(offset + ExecUploadCommands.chunkBytes, data.count)
+            _ = try await executeCommand(plan.append(data[offset..<end].base64EncodedString()))
+            offset = end
+            progress?(0.95 * Double(offset) / Double(max(data.count, 1)))
+        }
+        try Self.checkEditReply(try await executeCommand(plan.finish))
+        progress?(1)
+    }
+
+    private static func entry(path: String, _ attributes: SFTPFileAttributes) -> RemoteFileEntry {
+        // S_IFMT / S_IFDIR. A symlink reads as what readdir reported for the
+        // link itself; a link to a previewable file still previews.
+        let isDirectory = attributes.permissions.map { $0 & 0o170000 == 0o040000 } ?? false
+        return RemoteFileEntry(path: path, isDirectory: isDirectory, size: attributes.size,
+                               modified: attributes.accessModificationTime?.modificationTime)
+    }
+
     func resize(rows: Int, cols: Int) async throws {
         guard !closed else { throw SSHError.sessionClosed }
         self.rows = rows
@@ -466,6 +741,8 @@ actor SSHSession {
         closed = true
         writer = nil
         continuation.finish()
+        try? await previewSFTP?.close()
+        previewSFTP = nil
         // Shutting the transport cancels in-flight PTY reads via channel
         // close → the read loop exits → its markClosed is a no-op.
         await transport.shutdown()
@@ -1109,5 +1386,29 @@ enum ExecUploadCommands {
     /// character that needs anything is the quote itself.
     static func quote(_ path: String) -> String {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}
+
+/// A host file held open over SFTP (`SSHSession.openRemoteFile`). Reads may
+/// overlap — each is its own request on the wire. Closed by whoever opened
+/// it, or with the session.
+final class RemoteFileHandle: @unchecked Sendable {
+    let size: UInt64
+    private let file: SFTPFile
+
+    fileprivate init(file: SFTPFile, size: UInt64) {
+        self.file = file
+        self.size = size
+    }
+
+    /// At most `length` bytes from `offset` (OpenSSH answers 255 KiB at the
+    /// most); empty at the end of the file.
+    func read(from offset: UInt64, length: UInt32) async throws -> [UInt8] {
+        var buffer = try await file.read(from: offset, length: length)
+        return buffer.readBytes(length: buffer.readableBytes) ?? []
+    }
+
+    func close() async {
+        try? await file.close()
     }
 }

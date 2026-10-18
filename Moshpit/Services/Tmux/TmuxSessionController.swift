@@ -83,6 +83,22 @@ final class TmuxSessionController: MultiplexerControlling {
     @ObservationIgnored
     private var paneCoordinators: [String: SwiftTerminalView.Coordinator] = [:]
 
+    /// Makes each pane terminal's path links (`RemotePathLinks`) — the
+    /// session supplies it, since the probe rides its file-transfer SSH.
+    /// Panes minted before it is set get theirs when it is.
+    @ObservationIgnored
+    var pathLinksFactory: ((_ paneId: String) -> RemotePathLinks)? {
+        didSet {
+            for (paneId, coordinator) in paneCoordinators where coordinator.pathLinks == nil {
+                coordinator.pathLinks = pathLinksFactory?(paneId)
+            }
+        }
+    }
+
+    /// A tapped host-path link in any pane.
+    @ObservationIgnored
+    var onOpenRemotePath: ((String) -> Void)?
+
     /// Coordinator of the pane currently on screen — the target for one-shot
     /// input modifiers (sticky Ctrl) and other "whatever the user is typing
     /// into right now" concerns.
@@ -1567,6 +1583,29 @@ final class TmuxSessionController: MultiplexerControlling {
         sendCommand("show-options -gqv prefix") { response in
             completion(response.lines.first ?? "C-b")
         }
+    }
+
+    /// The pane's working directory as tmux reports it — where the pane's
+    /// program runs, which is what an agent's relative paths are relative
+    /// to. nil when not attached, on a tmux error, or after 4s without a
+    /// reply (a dying connection never answers).
+    func panePath(_ paneId: String) async -> String? {
+        guard snapshot.isAttached else { return nil }
+        let answer: String?? = await withTimeoutValue(4) { [weak self] in
+            await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+                Task { @MainActor [weak self] in
+                    guard let self, self.snapshot.isAttached else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    self.sendCommand("display-message -p -t \(paneId) '#{pane_current_path}'") { response in
+                        let path = response.lines.first?.trimmingCharacters(in: .whitespaces) ?? ""
+                        continuation.resume(returning: !response.isError && path.hasPrefix("/") ? path : nil)
+                    }
+                }
+            }
+        }
+        return answer ?? nil
     }
 
     // A pane-targeted paste (e.g. the Home card's per-agent image entry)
@@ -4106,6 +4145,8 @@ final class TmuxSessionController: MultiplexerControlling {
                 self?.resyncPane(paneId)
             }
         }
+        coordinator.pathLinks = pathLinksFactory?(paneId)
+        coordinator.onOpenRemotePath = { [weak self] path in self?.onOpenRemotePath?(path) }
         terminal.terminalDelegate = coordinator
         coordinator.attach(to: terminal)
 

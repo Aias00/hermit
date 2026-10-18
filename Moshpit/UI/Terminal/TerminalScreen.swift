@@ -1,5 +1,6 @@
 import MoshpitKit
 import PhotosUI
+import QuickLook
 import SwiftUI
 import SwiftTerm
 import UIKit
@@ -146,6 +147,13 @@ struct TerminalScreen: View {
     /// Camera capture sheet (an attach-image source; menu entry hidden where
     /// there is no camera, e.g. the simulator).
     @State private var showCamera = false
+    /// A fetched host file on its way into QuickLook (a tapped path link).
+    @State private var quickLookURL: URL?
+    /// A tapped host FOLDER, presented as the folder sheet.
+    @State private var remoteFolder: RemoteFolderTarget?
+    /// A tapped host video is playing (`RemoteVideoPlayer`, presented
+    /// outside SwiftUI — this only tracks it for `anySheetOpen`).
+    @State private var remoteVideoOpen = false
 
     /// iPad landscape trims the app's own chrome (top bar 54→42, shortcut bar
     /// 50→38, pane inset 4→2). With the software keyboard up, an iPad mini has
@@ -297,6 +305,7 @@ struct TerminalScreen: View {
     /// 状态").
     private var anySheetOpen: Bool {
         showWindowsSheet || showSessionsSheet || showPaneSheet || showCamera
+            || quickLookURL != nil || remoteFolder != nil || remoteVideoOpen
     }
 
     /// Whether the pane behind a modal is pinned to the size it already has.
@@ -670,6 +679,46 @@ struct TerminalScreen: View {
             photoSelection = []
             beginImageAttachment(items)
         }
+        .quickLookPreview($quickLookURL)
+        .onChange(of: quickLookURL) { _, url in
+            if url == nil { dismissRemotePreview() }
+        }
+        .appSheet(item: $remoteFolder, onDismiss: { dismissRemotePreview() }) { target in
+            RemoteFolderSheet(folder: target.folder, files: target.files)
+        }
+        .onChange(of: active?.remotePreview?.phase) { _, phase in
+            switch phase {
+            case .ready(let url)?:
+                presentSheet { quickLookURL = url }
+            case .folder(let entry)?:
+                guard let files = active?.remotePreview?.files else { return }
+                presentSheet { remoteFolder = RemoteFolderTarget(folder: entry, files: files) }
+            case .stream(let entry, let source)?:
+                guard let files = active?.remotePreview?.files else { return }
+                presentSheet {
+                    remoteVideoOpen = true
+                    RemoteVideoPlayer.present(entry, source: source, files: files) {
+                        remoteVideoOpen = false
+                        dismissRemotePreview()
+                    }
+                }
+            default:
+                break
+            }
+        }
+    }
+
+    /// Identifiable wrapper so `.sheet(item:)` can carry a host folder.
+    private struct RemoteFolderTarget: Identifiable {
+        let folder: RemoteFileEntry
+        let files: RemoteFileAccess
+        var id: String { folder.path }
+    }
+
+    /// Put away whatever a tapped path link opened.
+    private func dismissRemotePreview() {
+        active?.remotePreview?.cancel()
+        active?.remotePreview = nil
     }
 
     private var installTargetBinding: Binding<InstallTarget?> {
@@ -1420,6 +1469,10 @@ struct TerminalScreen: View {
             photoPickerPresented = true
             return
         }
+        if shortcut.kind == .files {
+            active?.openWorkingDirectory()
+            return
+        }
         if shortcut.kind == .paste {
             // UIPasteboard reads are synchronous and can block for well over a
             // second: a cross-app paste triggers iOS's "Allow Paste?" prompt,
@@ -1548,6 +1601,10 @@ struct TerminalScreen: View {
                     onSend: { finishImageAttachment(submit: true) })
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            if let preview = active?.remotePreview, preview.showsHUD {
+                RemotePreviewHUD(model: preview, onDismiss: { dismissRemotePreview() })
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             ShortcutBarView(
                 shortcuts: shortcutStore.toolbar(
                     forHost: connection.displayName,
@@ -1569,6 +1626,7 @@ struct TerminalScreen: View {
         }
         .animation(.easeOut(duration: 0.2), value: dictation == nil)
         .animation(.easeOut(duration: 0.2), value: imageAttachment == nil)
+        .animation(.easeOut(duration: 0.2), value: active?.remotePreview?.showsHUD ?? false)
     }
 
     // MARK: - Image attachment
@@ -2258,6 +2316,9 @@ struct ShortcutBarView: View {
                             if shortcut.kind == .paste {
                                 Image(systemName: "doc.on.clipboard")
                                     .font(.system(size: 13, weight: .semibold))
+                            } else if shortcut.kind == .files {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 13, weight: .semibold))
                             } else {
                                 Text(shortcut.chipLabel)
                                     .font(Face.mono(11, .semibold))
@@ -2274,8 +2335,9 @@ struct ShortcutBarView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(shortcut.kind == .paste
-                                        ? Text("Paste") : Text(shortcut.chipLabel))
+                    .accessibilityLabel(shortcut.kind == .paste ? Text("Paste")
+                                        : shortcut.kind == .files ? Text("Browse files")
+                                        : Text(shortcut.chipLabel))
                 }
             }
         }

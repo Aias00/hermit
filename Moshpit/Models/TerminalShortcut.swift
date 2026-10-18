@@ -49,6 +49,12 @@ enum ShortcutKind: String, Codable, CaseIterable {
     /// chip (resolved by the caller, which drives the attachment flow) — not
     /// user-creatable.
     case image
+    /// Opens the folder sheet at the focused pane's working directory on the
+    /// host — where an agent's output lands, a tap away from the pane it
+    /// came out of. A normal, reorderable/removable chip (resolved by the
+    /// caller, which asks the session for the directory) — not
+    /// user-creatable.
+    case files
 }
 
 enum ShortcutModifier: String, Codable, CaseIterable, Comparable {
@@ -154,6 +160,9 @@ struct TerminalShortcut: Identifiable, Codable, Equatable, Hashable {
             // Resolved by the caller (opens the photo picker / attachment
             // overlay). Like dictation, nothing reaches the PTY until the
             // user commits with Insert or Send.
+            return nil
+        case .files:
+            // Resolved by the caller (opens the folder sheet).
             return nil
         }
     }
@@ -613,6 +622,13 @@ final class ShortcutStore {
             // instead of costing anyone a key. Trailing end like the mic, so
             // nothing shuffles under an upgrading user's thumb.
             special(.image, "img", "Attach image", inBar: true),
+            // Browse the host: the folder sheet at the focused pane's working
+            // directory. In the bar for the same reason as the image chip —
+            // it is the only way into the files an agent wrote without a
+            // path on screen to tap. Upgrading sets get it from the
+            // summary-keyed catch-all in `reconcileBuiltins`, at the trailing
+            // end, so nothing already in the bar moves.
+            special(.files, "files", "Browse files", inBar: true),
             // Return, and the Claude Code two-step. Tab accepts whatever
             // Claude Code is suggesting and Return sends it, which is two taps
             // in the one place you least want them — so `⇥⏎` sends 0x09 0x0D

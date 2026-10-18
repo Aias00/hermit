@@ -245,7 +245,7 @@ struct AddShortcutView: View {
             return payload.isEmpty ? name : String(localized: "\(name) · types \"\(payload)\"")
         case .command:
             return payload.isEmpty ? name : String(localized: "\(name) · runs \(payload)")
-        case .dpad, .arrows, .paste, .scroll, .ctrl, .mic, .image:
+        case .dpad, .arrows, .paste, .scroll, .ctrl, .mic, .image, .files:
             return name   // not user-creatable; here only for exhaustiveness
         }
     }

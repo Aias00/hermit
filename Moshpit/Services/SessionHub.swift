@@ -284,6 +284,109 @@ final class SessionHub {
         /// every number addressable from the image chip's long-press menu.
         var imageUploads = ImageUploadLog()
 
+        // MARK: Host paths → preview on the phone
+
+        /// What a tapped host path opened (download, QuickLook, folder) —
+        /// presented by the terminal screen, cleared when it's dismissed.
+        var remotePreview: RemotePreviewModel?
+
+        /// The working directory the plain terminal's shell last reported
+        /// over OSC 7, for shells that do (most don't; tmux and herdr panes
+        /// are asked directly instead).
+        @ObservationIgnored private var reportedDirectory: String?
+
+        /// The file-transfer channel, packaged for the preview.
+        var remoteFileAccess: RemoteFileAccess {
+            RemoteFileAccess(scope: connection.id.uuidString) { [weak self] in
+                guard let self else { throw SSHError.sessionClosed }
+                return try await self.acquireFileTransferSSH()
+            }
+        }
+
+        /// Open whatever a tapped path link names on the host.
+        func openRemotePath(_ path: String) {
+            remotePreview?.cancel()
+            let model = RemotePreviewModel(path: path, files: remoteFileAccess)
+            remotePreview = model
+            model.start()
+        }
+
+        /// The shortcut bar's Files key: the folder sheet at the focused
+        /// pane's working directory, or the login directory when nothing
+        /// reports one (a plain shell without OSC 7).
+        func openWorkingDirectory() {
+            remotePreview?.cancel()
+            let files = remoteFileAccess
+            let model = RemotePreviewModel(files: files) { [weak self] in
+                if let directory = await self?.focusedWorkingDirectory() { return directory }
+                return try await files.channel().remoteHomeDirectory()
+            }
+            remotePreview = model
+            model.start()
+        }
+
+        /// Where the pane on screen runs: tmux is asked about its active
+        /// pane, everything else goes through `plainWorkingDirectory`.
+        private func focusedWorkingDirectory() async -> String? {
+            if let tmuxController {
+                guard let pane = tmuxController.snapshot.activePaneId
+                        ?? tmuxController.snapshot.activePanes.first?.id else { return nil }
+                return await tmuxController.panePath(pane)
+            }
+            return await plainWorkingDirectory()
+        }
+
+        /// Ask the host which of `batch` exist (`PathProbe`). Rides the
+        /// channel that's already up without `acquireFileTransferSSH`'s
+        /// liveness ping — this runs whenever new paths scroll by — and only
+        /// dials when that fails. nil = no answer (not "none exist").
+        func probeRemotePaths(cwd: String?,
+                              batch: [TerminalPathScanner.Candidate]) async -> [Int: PathProbe.Hit]? {
+            let command = PathProbe.command(cwd: cwd, candidates: batch)
+            func ask(_ ssh: SSHSession) async -> [Int: PathProbe.Hit]? {
+                guard let output = await withTimeoutValue(8, { try await ssh.executeCommand(command) })
+                else { return nil }
+                return PathProbe.parse(String(decoding: output, as: UTF8.self), count: batch.count)
+            }
+            if let ssh = fileTransferSSH ?? onDemandTransferSSH, let hits = await ask(ssh) { return hits }
+            guard let ssh = try? await acquireFileTransferSSH() else { return nil }
+            return await ask(ssh)
+        }
+
+        private func makePathLinks(workingDirectory: @escaping () async -> String?) -> RemotePathLinks {
+            RemotePathLinks(workingDirectory: workingDirectory) { [weak self] cwd, batch in
+                await self?.probeRemotePaths(cwd: cwd, batch: batch)
+            }
+        }
+
+        /// The plain terminal's working directory: the pane mosh is showing
+        /// (asked of the sidecar), herdr's focused pane, or OSC 7.
+        private func plainWorkingDirectory() async -> String? {
+            if let moshControl, let pane = moshControl.snapshot.activePaneId {
+                return await moshControl.panePath(pane)
+            }
+            if let herdrControl, let pane = herdrControl.snapshot.activePaneId {
+                return herdrControl.workingDirectory(ofPane: pane)
+            }
+            return reportedDirectory
+        }
+
+        /// Every multiplexer control plane passes through here as it's wired
+        /// (attach, reconnect rebuild, mosh's late sidecar), so each tmux
+        /// controller's panes get path links however it came to be.
+        private func controlPlaneWired(_ control: any MultiplexerControlling) {
+            if let tmux = control as? TmuxSessionController, tmux === tmuxController {
+                tmux.onOpenRemotePath = { [weak self] path in self?.openRemotePath(path) }
+                tmux.pathLinksFactory = { [weak self, weak tmux] paneId in
+                    RemotePathLinks(workingDirectory: { await tmux?.panePath(paneId) }) { [weak self] cwd, batch in
+                        await self?.probeRemotePaths(cwd: cwd, batch: batch)
+                    }
+                }
+            }
+            coordinator.pathLinks?.invalidateWorkingDirectory()
+            onMultiplexerControlChanged?(control)
+        }
+
         nonisolated var id: UUID { connection.id }
 
         @ObservationIgnored private var pumpTask: Task<Void, Never>?
@@ -357,7 +460,7 @@ final class SessionHub {
                 self.tmuxController = tmuxController
                 if armFirstFrame { armFirstFrameWait(for: tmuxController) }
             }
-            if let control { onMultiplexerControlChanged?(control) }
+            if let control { controlPlaneWired(control) }
             self.moshServerPid = pid
             self.moshHadFirstContact = hadContact
             if transport != nil { viewModel.markConnected() }
@@ -561,6 +664,17 @@ final class SessionHub {
         init(connection: ServerConnection, dial: TerminalViewModel.Dialer? = nil) {
             self.connection = connection
             self.viewModel = TerminalViewModel(connection: connection, dial: dial)
+            coordinator.pathLinks = makePathLinks { [weak self] in await self?.plainWorkingDirectory() }
+            coordinator.onOpenRemotePath = { [weak self] path in
+                Task { @MainActor [weak self] in self?.openRemotePath(path) }
+            }
+            coordinator.onHostDirectoryChange = { [weak self] directory in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.reportedDirectory = directory.flatMap(RemotePathLink.path(from:))
+                    self.coordinator.pathLinks?.invalidateWorkingDirectory()
+                }
+            }
         }
 
         /// Rough on-screen grid for a font size, used to seed the terminal
@@ -1346,7 +1460,7 @@ final class SessionHub {
                 Log.ssh.debug("resume: tmux boot written after \(Int(Date().timeIntervalSince(startBegan) * 1000), privacy: .public)ms")
                 tmuxController = controller
                 armFirstFrameWait(for: controller)
-                onMultiplexerControlChanged?(controller)
+                controlPlaneWired(controller)
                 beginAttachTimeout(controller: controller)
             } else if multiplexer == .herdr {
                 // Native single-pane rendering: this PTY carries herdr's frame
@@ -1401,7 +1515,7 @@ final class SessionHub {
             }
             client.start()
             herdrControl = client
-            onMultiplexerControlChanged?(client)
+            controlPlaneWired(client)
         }
 
         /// Put the skew notice up with its remedy attached. Never runs the
@@ -2294,7 +2408,7 @@ final class SessionHub {
                     try? await session.write(bytes)
                 }
                 tmuxController = controller
-                onMultiplexerControlChanged?(controller)
+                controlPlaneWired(controller)
                 beginAttachTimeout(controller: controller)
             } else {
                 let coordinator = self.coordinator
@@ -2529,7 +2643,7 @@ final class SessionHub {
             let boot = "\(tmux) set -g history-limit 50000 2>/dev/null; " + chain + "\r"
             try? await ssh.write(Data(boot.utf8))
             moshControl = controller
-            onMultiplexerControlChanged?(controller)
+            controlPlaneWired(controller)
         }
 
         /// Bound the wait for `controller`'s tmux control-mode attach to
