@@ -2203,6 +2203,48 @@ struct TmuxSessionControllerTests {
         #expect(sent.contains("61 0a 62"))
     }
 
+    // A lone arrow goes as tmux's key name so tmux encodes it against the
+    // pane's real DECCKM. The local flag that picked the variant goes stale
+    // whenever `%output` is dropped (pins handed back) or the -CC attach is
+    // fresh, and oh-my-zsh's prefix history search only answers `ESC O A`.
+    @Test("sendInput sends a lone arrow as tmux's key name, whichever DECCKM variant arrived",
+          arguments: [
+            ([0x1B, 0x5B, 0x41], "Up"), ([0x1B, 0x4F, 0x41], "Up"),
+            ([0x1B, 0x5B, 0x42], "Down"), ([0x1B, 0x4F, 0x42], "Down"),
+            ([0x1B, 0x5B, 0x43], "Right"), ([0x1B, 0x4F, 0x43], "Right"),
+            ([0x1B, 0x5B, 0x44], "Left"), ([0x1B, 0x4F, 0x44], "Left"),
+          ] as [([UInt8], String)])
+    func sendInputArrowAsKeyName(bytes: [UInt8], key: String) async throws {
+        let (controller, transport) = await makeAttachedController()
+        _ = await waitUntil { await transport.recordedCommands().count >= 3 }
+        let baseline = await transport.recordedCommands().count
+
+        controller.sendInput(Data(bytes), paneId: "%0")
+
+        let landed = await waitUntil(timeout: 0.5) {
+            await transport.recordedCommands().count > baseline
+        }
+        #expect(landed)
+        #expect(await transport.recordedCommands().last?.trimmingCharacters(in: .newlines) == "send-keys -t %0 \(key)")
+    }
+
+    @Test("sendInput keeps a modified arrow and a bare ESC as raw hex — only the plain arrows depend on DECCKM")
+    func sendInputModifiedArrowStaysHex() async throws {
+        let (controller, transport) = await makeAttachedController()
+        _ = await waitUntil { await transport.recordedCommands().count >= 3 }
+
+        // ⌃→ is `ESC [ 1 ; 5 C` in either cursor-key mode.
+        var baseline = await transport.recordedCommands().count
+        controller.sendInput(Data([0x1B, 0x5B, 0x31, 0x3B, 0x35, 0x43]), paneId: "%0")
+        _ = await waitUntil(timeout: 0.5) { await transport.recordedCommands().count > baseline }
+        #expect(await transport.recordedCommands().last?.trimmingCharacters(in: .newlines) == "send-keys -t %0 -H 1b 5b 31 3b 35 43")
+
+        baseline = await transport.recordedCommands().count
+        controller.sendInput(Data([0x1B]), paneId: "%0")
+        _ = await waitUntil(timeout: 0.5) { await transport.recordedCommands().count > baseline }
+        #expect(await transport.recordedCommands().last?.trimmingCharacters(in: .newlines) == "send-keys -t %0 -H 1b")
+    }
+
     @Test("sendInput with empty data is a no-op (no write)")
     func sendInputEmptyIsNoOp() async throws {
         let (controller, transport) = await makeAttachedController()

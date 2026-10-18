@@ -1497,6 +1497,8 @@ struct TerminalScreen: View {
         // SEMANTIC keys (`pane send-keys`) — the local DECCKM below is stale
         // there (frames never carry mode changes), and sendInput is the one
         // choke point both this D-pad and a hardware keyboard flow through.
+        // SSH+tmux does the same one level down: the controller sends a lone
+        // arrow as a tmux key name (`TmuxSessionController.sendInput`).
         let appMode = active?.applicationCursorKeys ?? false
         let csi: [UInt8]
         switch direction {

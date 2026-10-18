@@ -2181,7 +2181,8 @@ final class TmuxSessionController: MultiplexerControlling {
 
     /// Forward keyboard input from the focused pane to tmux. Uses
     /// `send-keys -H <hex>` so control bytes and binary data round-trip
-    /// untouched.
+    /// untouched — except a lone arrow key, which goes as tmux's own key
+    /// name so tmux encodes it (see the comment in the body).
     ///
     /// `paneId` isn't always sourced from `snapshot` — `SessionHub
     /// .deliverAgentInput` (the Vibe Island lock-screen Allow/Deny/Reply
@@ -2196,6 +2197,24 @@ final class TmuxSessionController: MultiplexerControlling {
         // so the echo of what they type is actually visible.
         paneCoordinators[paneId]?.releaseScrollHold()
         if snapshot.panes[paneId]?.windowId == snapshot.activeWindowId { noteUserInteraction() }
+        // A lone arrow (either DECCKM variant) goes as a key NAME, which tmux
+        // encodes against the pane's REAL cursor-key mode: `ESC O A` while
+        // the pane is in application mode, `ESC [ A` otherwise. Whoever sent
+        // these bytes chose the variant from the LOCAL emulator's flag, and
+        // that flag is only ever learned by watching the pane's `ESC[?1h`
+        // go by — which a fresh -CC attach never replays, and which
+        // `handlePaneOutput` drops while our pins are handed back (Home,
+        // background). The capture that repaints the screen afterwards
+        // carries no modes. So a window opened from Home came up with the
+        // flag stuck at normal mode, the D-pad sent `ESC [ A`, and
+        // oh-my-zsh — which binds its prefix history search to `kcuu1`, the
+        // application-mode sequence — recalled the previous entry instead
+        // of completing the typed line (user report, 2026-10-18). Same
+        // reasoning as `sendPaste` for bracketed paste.
+        if let key = SessionHub.ActiveSession.arrowKeyName(data) {
+            send(rawCommand: "send-keys -t \(paneId) \(key.capitalized)")
+            return
+        }
         let hex = data.map { String(format: "%02x", $0) }.joined(separator: " ")
         send(rawCommand: "send-keys -t \(paneId) -H \(hex)")
     }

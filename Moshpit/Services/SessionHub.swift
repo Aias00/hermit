@@ -708,6 +708,11 @@ final class SessionHub {
         /// shell's terminfo-driven `bindkey` for that key never fires (e.g.
         /// zsh's history-prefix-search widget is bound to `kcuu1`, which for
         /// `xterm-256color` IS the application-mode sequence, not `ESC[A`).
+        ///
+        /// Only plain SSH and mosh actually go by it. tmux and herdr re-encode
+        /// a lone arrow server-side against the pane's real mode (see
+        /// `TmuxSessionController.sendInput`, `HerdrControlClient.sendKey`),
+        /// because there this local flag goes stale.
         var applicationCursorKeys: Bool { activeTerminal?.applicationCursor ?? false }
 
         /// Paste-aware send: wraps the clipboard text in bracketed-paste markers
