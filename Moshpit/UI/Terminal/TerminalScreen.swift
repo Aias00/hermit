@@ -1956,7 +1956,9 @@ struct ShortcutBarView: View {
     /// across two pixel rows, which on thin strokes (the ^ of ^C) reads as
     /// "the key is blurry" (user report, 2026-08-16). Whole points are crisp
     /// at every display scale; 1pt granularity during the drag itself is
-    /// imperceptible.
+    /// imperceptible. (The blur in that report turned out to be the gradient
+    /// mask, not this — see `chipRowFade`. The rounding stays: it costs
+    /// nothing.)
     private func clampedChipRowOffset(_ proposed: CGFloat, viewportWidth: CGFloat) -> CGFloat {
         guard chipRowContentWidth > viewportWidth else { return 0 }
         let minOffset = viewportWidth - chipRowContentWidth
@@ -1968,23 +1970,28 @@ struct ShortcutBarView: View {
     /// always straddles the trailing edge, and the fade lands on it.
     private static let chipRowFadeWidth: CGFloat = 20
 
-    /// The chip row's mask: opaque, except it fades out over an edge that has
+    /// The chip row's edge fade: the row fades out over an edge that has
     /// chips hidden past it — the standard "there's more this way" cue, and
     /// the only affordance this hand-rolled pan has (user ask, 2026-09-18).
     ///
-    /// This is the second time the row has had a fade. The first one (26pt,
-    /// linear) went out with the 2026-08-16 blur report: the drag was also
-    /// parking chips on half-pixels, and the two compounded into "the keys
-    /// are blurry". The half-pixel is gone (`clampedChipRowOffset` rounds),
-    /// and this fade is shaped so a chip under it still reads as a chip:
-    /// a quadratic curve that keeps most of its reach near full opacity and
-    /// drops to clear only in the last few points at the very edge.
+    /// Painted OVER the row in the bar's own colour, never as a gradient
+    /// `.mask`. A gradient mask makes the row an offscreen alpha pass, and on
+    /// device (iOS 27, not the simulator) that pass rasterizes TEXT at 1x
+    /// while symbols and strokes stay at 3x: esc/tab/^C came out as 1x
+    /// bitmaps scaled up — the blur's curvature sat 96% on one pixel phase in
+    /// three, the signature of a 3× upscale (lossless device capture,
+    /// 2026-10-18). Both blur reports line up with it: 08-16 under the first
+    /// fade (26pt, a gradient mask), quiet while the mask was a plain
+    /// rectangle, back once this fade returned as a gradient mask. Over an
+    /// opaque background a scrim of 1 − a composites to exactly what a mask
+    /// of a did, so nothing about the look changes.
     ///
-    /// Each side's fade grows in over its own width as content disappears
-    /// past it, so the fade eases in and out at the ends of the pan instead
-    /// of snapping on and off. When everything fits, both sides are opaque
-    /// and the mask is a plain rectangle — full-opacity tap targets, and it
-    /// still gates hit-testing (see the mask comment below).
+    /// Shaped so a chip under it still reads as a chip: a quadratic curve
+    /// that keeps most of its reach near full opacity and drops to clear
+    /// only in the last few points at the very edge. Each side grows in over
+    /// its own width as content disappears past it, so the fade eases in and
+    /// out at the ends of the pan instead of snapping on and off; when
+    /// everything fits, both sides are zero-width.
     private func chipRowFade(viewportWidth: CGFloat) -> some View {
         let offset = clampedChipRowOffset(chipRowOffset + chipRowDragTranslation,
                                           viewportWidth: viewportWidth)
@@ -1993,19 +2000,19 @@ struct ShortcutBarView: View {
                            max(0, chipRowContentWidth + offset - viewportWidth))
         return HStack(spacing: 0) {
             chipRowEdgeFade(width: leading, edge: .leading)
-            Rectangle().fill(.black)
+            Spacer(minLength: 0)
             chipRowEdgeFade(width: trailing, edge: .trailing)
         }
     }
 
-    /// One edge of `chipRowFade`: opaque on the row's side, clear at `edge`.
-    /// Stops follow 1 − t², t running towards the edge — three quarters of
-    /// the way in the mask still passes 44%, and nearly everything inside
-    /// the first quarter is untouched.
+    /// One edge of `chipRowFade`: clear on the row's side, the bar's colour
+    /// at `edge`. How much of the row shows through follows 1 − t², t running
+    /// towards the edge — three quarters of the way in it still shows 44%,
+    /// and nearly everything inside the first quarter is untouched.
     private func chipRowEdgeFade(width: CGFloat, edge: HorizontalEdge) -> some View {
         let curve: [(CGFloat, Double)] = [(0, 1), (0.25, 0.94), (0.5, 0.75), (0.75, 0.44), (1, 0)]
-        let stops = curve.map { location, alpha in
-            Gradient.Stop(color: .black.opacity(alpha), location: location)
+        let stops = curve.map { location, showsThrough in
+            Gradient.Stop(color: Ink.shortcutBarBG.opacity(1 - showsThrough), location: location)
         }
         return LinearGradient(
             stops: stops,
@@ -2171,10 +2178,14 @@ struct ShortcutBarView: View {
             // A mask, not `.clipped()`: clipped() trims only the drawing, and
             // the offset row's hidden tail would still HIT-TEST beyond the
             // viewport — stealing taps under the pinned keyboard toggle. A
-            // mask gates hit-testing along with the pixels. The mask is a
-            // rectangle that fades at whichever edge has chips past it; see
-            // `chipRowFade` for the shape and for why it is this narrow.
-            .mask(chipRowFade(viewportWidth: viewport.size.width))
+            // mask gates hit-testing along with the pixels. A plain
+            // rectangle, never a gradient — the edge fade is painted over
+            // the row instead; see `chipRowFade` for why.
+            .mask(Rectangle())
+            .overlay {
+                chipRowFade(viewportWidth: viewport.size.width)
+                    .allowsHitTesting(false)
+            }
             .contentShape(Rectangle())
             .gesture(
                 // minimumDistance keeps a plain tap from ever engaging this
