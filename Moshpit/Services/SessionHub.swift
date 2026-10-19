@@ -148,6 +148,13 @@ final class SessionHub {
         /// the cover before it is dropped anyway; aligned with the attach
         /// timeout that latches `attachStalled`, so both give up together.
         @ObservationIgnored var firstFrameAttachBoundSeconds: Double = tmuxAttachTimeoutSeconds
+        /// How long a server that has answered must then stay quiet, still
+        /// unattached, before the answer reads as a refusal. The pump stamps a
+        /// chunk the moment it lands, ahead of the parser and the main actor,
+        /// so an attach can be in flight behind a fresh stamp — a fallback
+        /// poll landing in that gap took it for a refusal and dropped the
+        /// ghost (public CI, 2026-09-16 and 2026-10-19).
+        @ObservationIgnored var firstFrameAnswerSettleSeconds: Double = 0.5
 
         /// Window pins and pristine layouts a retired controller still owed
         /// the server, carried to its replacement so the debt is settled on
@@ -2904,9 +2911,11 @@ final class SessionHub {
         /// waiting rather than drop the cover:
         /// - attached: the pane is hosted and its first capture is in flight,
         ///   so give it the fallback measured from the ATTACH;
-        /// - not attached, but the server has answered the boot line: the
-        ///   attach was refused (no sessions / no server) — the empty-state
-        ///   card behind the cover is the thing to show, drop now;
+        /// - not attached, but the server has answered the boot line and gone
+        ///   quiet for ``firstFrameAnswerSettleSeconds``: the attach was
+        ///   refused (no sessions / no server) — the empty-state card behind
+        ///   the cover is the thing to show, drop. A fresher answer may be the
+        ///   attach itself, still on its way to the main actor: hold;
         /// - not attached and not a byte back since the boot line: the link
         ///   is slow or dead, hold — up to the attach bound, past which the
         ///   attach timeout has latched `attachStalled` and holding a frozen
@@ -2916,8 +2925,12 @@ final class SessionHub {
             if let attachedAt = controller.attachedAt {
                 return now.timeIntervalSince(attachedAt) < firstFrameFallbackSeconds
             }
-            if controller.lastInboundAt > armedAt { return false }
-            return now.timeIntervalSince(armedAt) < firstFrameAttachBoundSeconds
+            let withinBound = now.timeIntervalSince(armedAt) < firstFrameAttachBoundSeconds
+            let answeredAt = controller.lastInboundAt
+            if answeredAt > armedAt {
+                return withinBound && now.timeIntervalSince(answeredAt) < firstFrameAnswerSettleSeconds
+            }
+            return withinBound
         }
 
         /// Stop waiting AND drop the ghost: the replacement has painted (or

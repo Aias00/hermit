@@ -412,10 +412,11 @@ struct SessionLifecycleTests {
     /// the ghost stands until a frame paints.
     @Test("The first-frame fallback holds the ghost while the server has not answered the boot line")
     func fallbackHoldsGhostOnSilentLink() async {
-        // 0.45s: well under the 700ms of silence below, and wide enough that
+        // 0.8s: well under the 1.1s of silence below, and wide enough that
         // the post-attach check lands inside the grace even when the full
-        // suite is hogging the main actor (a 0.2s grace flaked there).
-        let rig = ghostedSession(fallback: 0.45, attachBound: 5)
+        // suite is hogging the main actor (0.2s and then 0.45s flaked there —
+        // partly the answer-before-attach gap that the settle now covers).
+        let rig = ghostedSession(fallback: 0.8, attachBound: 5)
         let (session, painted, replacement, transport) = (rig.session, rig.painted, rig.replacement, rig.transport)
         #expect(await bounded(1) { await session.stop(forReconnect: true) })
         #expect(session.retiredTmuxController === painted)
@@ -423,7 +424,7 @@ struct SessionLifecycleTests {
         session.installForTesting(moshTransport: nil, tmuxController: replacement, armFirstFrame: true)
         #expect(session.awaitingFirstFrame)
 
-        try? await Task.sleep(for: .milliseconds(700))
+        try? await Task.sleep(for: .milliseconds(1100))
         #expect(session.retiredTmuxController === painted, "a silent link is not a server that never paints")
         #expect(session.awaitingFirstFrame)
 
@@ -478,6 +479,30 @@ struct SessionLifecycleTests {
         #expect(await eventually(1.5) { session.retiredTmuxController == nil },
                 "an answered boot line with no attach is the server's silence, not the link's")
         #expect(session.awaitingFirstFrame == false)
+        await replacement.detach()
+    }
+
+    /// The pump stamps a chunk before the parser and the main actor have
+    /// read it, so a fresh answer may be the attach itself still in flight —
+    /// a fallback poll landing in that gap used to call it a refusal and drop
+    /// the ghost. Only an answer that then goes quiet is one.
+    @Test("A fresh answer holds the cover; only an answer gone quiet reads as a refusal")
+    func answerSettlesBeforeRefusal() async {
+        let rig = ghostedSession(fallback: 0.2, attachBound: 5)
+        let (session, replacement, transport) = (rig.session, rig.replacement, rig.transport)
+        await replacement.beginControlMode()
+        let armedAt = Date()
+        transport.pushText("no sessions\n")
+        #expect(await eventually(1) { replacement.lastInboundAt > armedAt })
+        #expect(replacement.attachedAt == nil)
+        let answeredAt = replacement.lastInboundAt
+        let settle = session.firstFrameAnswerSettleSeconds
+        #expect(session.firstFrameWaitHolds(replacement, armedAt: armedAt,
+                                            now: answeredAt.addingTimeInterval(settle / 2)),
+                "an attach may still be on its way behind this stamp")
+        #expect(!session.firstFrameWaitHolds(replacement, armedAt: armedAt,
+                                             now: answeredAt.addingTimeInterval(settle + 0.1)),
+                "answered, then quiet, still unattached: refused")
         await replacement.detach()
     }
 
