@@ -172,9 +172,10 @@ struct ShortcutStoreTests {
         // must be filtered out here too — when the image chip joined the
         // defaults it silently appeared in this "old" fixture, the toolbar
         // stopped matching the migration's stale-default guard, and both
-        // migration tests failed against migration code that was fine.
+        // migration tests failed against migration code that was fine. The
+        // files chip tripped the same wire.
         ShortcutStore.builtins
-            .filter { $0.kind != .mic && $0.kind != .arrows && $0.kind != .image }
+            .filter { $0.kind != .mic && $0.kind != .arrows && $0.kind != .image && $0.kind != .files }
             .map { shortcut in
                 var restored = shortcut
                 if restored.summary == "Clear screen" { restored.inToolbar = true }
@@ -189,7 +190,7 @@ struct ShortcutStoreTests {
         return ShortcutStore(defaults: defaults)
     }
 
-    @Test("seeds a lean default toolbar: esc, tab, interrupt, paste, arrows, mic, img")
+    @Test("seeds a lean default toolbar: esc, tab, interrupt, paste, arrows, mic, img, files")
     func defaultToolbar() throws {
         let store = freshStore()
         let labels = store.toolbar.map(\.chipLabel)
@@ -200,10 +201,11 @@ struct ShortcutStoreTests {
         // The mic trails the row: it used to be pinned outside the scroll at
         // the trailing edge, so this is where it already appeared. The image
         // chip trails even that — same "attach something" family as the mic,
-        // added to the defaults with the M1 image-attach feature.
-        #expect(store.toolbarCount == 7)
-        #expect(labels == ["esc", "tab", "^C", "paste", "✛", "mic", "img"])
-        #expect(store.toolbar.last?.kind == .image)
+        // added to the defaults with the M1 image-attach feature. The files
+        // chip trails the image: the way back out to what an agent wrote.
+        #expect(store.toolbarCount == 8)
+        #expect(labels == ["esc", "tab", "^C", "paste", "✛", "mic", "img", "files"])
+        #expect(store.toolbar.last?.kind == .files)
         #expect(store.available.contains { $0.kind == .ctrl })
         #expect(store.available.contains { $0.kind == .scroll })
         #expect(allBuiltin)
@@ -223,7 +225,7 @@ struct ShortcutStoreTests {
         // The invariant that remains load-bearing: the CORE editing keys —
         // everything up to and including the D-pad — must sit fully inside
         // the row at rest, so nothing you type/steer with ever needs a
-        // scroll. Trailing feature chips (mic, img) are allowed past the
+        // scroll. Trailing feature chips (mic, img, files) are allowed past the
         // edge. Widths mirror the layout: chips 46pt (D-pad 42), 6pt gaps,
         // 8pt leading inset; the pinned keyboard toggle occupies 54pt
         // (4 + 42 + 8) of a 402pt screen.
@@ -236,7 +238,7 @@ struct ShortcutStoreTests {
         #expect(width <= 402 - 54, "core keys overflow: \(width)pt")
         // And the feature chips are where the contract expects them — at the
         // trailing edge, where clipping only ever hides a re-openable door.
-        #expect(store.toolbar.last?.kind == .image)
+        #expect(store.toolbar.last?.kind == .files)
     }
 
     @Test("the tap-first cluster ships available but out of the bar")
@@ -307,10 +309,10 @@ struct ShortcutStoreTests {
         // an upgrade that quietly hides it reads as the feature being removed.
         #expect(store.toolbar.contains { $0.kind == .mic })
         // At the trailing edge, which is where the pinned key already sat — so
-        // no existing chip shifts under the user's thumb. The image chip (a
-        // later builtin, injected by the summary-keyed catch-all AFTER this
-        // migration) lands behind it, so the tail reads [mic, img].
-        #expect(store.toolbar.suffix(2).map(\.kind) == [.mic, .image])
+        // no existing chip shifts under the user's thumb. The image and files
+        // chips (later builtins, injected by the summary-keyed catch-all AFTER
+        // this migration) land behind it, so the tail reads [mic, img, files].
+        #expect(store.toolbar.suffix(3).map(\.kind) == [.mic, .image, .files])
         // And it makes room for itself rather than overflowing the row.
         #expect(!store.toolbar.contains { $0.chipLabel == "^L" })
         #expect(store.available.contains { $0.chipLabel == "^L" })
@@ -332,11 +334,11 @@ struct ShortcutStoreTests {
         defaults.set(try JSONEncoder().encode(previous), forKey: "moshpit.shortcuts.v1")
 
         let store = ShortcutStore(defaults: defaults)
-        // Six after ^L leaves, plus the image chip the catch-all injects
-        // behind the mic (it postdates this whole migration era).
-        #expect(store.toolbarCount == 7)
+        // Six after ^L leaves, plus the image and files chips the catch-all
+        // injects behind the mic (they postdate this whole migration era).
+        #expect(store.toolbarCount == 8)
         #expect(!store.toolbar.contains { $0.chipLabel == "^L" })
-        #expect(store.toolbar.suffix(2).map(\.kind) == [.mic, .image])
+        #expect(store.toolbar.suffix(3).map(\.kind) == [.mic, .image, .files])
     }
 
     @Test("a customized toolbar keeps every key the user put in it")
