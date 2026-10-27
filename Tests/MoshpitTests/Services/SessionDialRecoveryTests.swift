@@ -11,6 +11,44 @@ import Testing
 @MainActor
 struct SessionDialRecoveryTests {
 
+    @Test("Composer submit while offline throws instead of reporting success and losing a draft")
+    func offlineSubmitFails() async {
+        let session = SessionHub.ActiveSession(connection: connection())
+        do { try await session.submitLine("keep draft"); Issue.record("must reject offline submission") }
+        catch {}
+        await session.stop()
+    }
+
+    @Test("Lost herdr release acknowledgement is bounded and reconnects without leaving the screen")
+    func herdrLostReleaseAckRecovers() async throws {
+        var config = connection()
+        config.multiplexer = .herdr
+        let script = DialScript { _ in throw SSHError.connectionFailed }
+        let session = SessionHub.ActiveSession(connection: config, dial: script.dialer)
+        let frame = SSHSession(connection: config, transport: QuietTransport())
+        session.installForTesting(moshTransport: nil, herdrFrameSession: frame, pendingHerdrCloses: 1)
+        session.herdrForegroundRecoveryDeadline = .milliseconds(10)
+        session.releaseWindowPinsForBackground()
+        session.repinForeground()
+        for _ in 0..<100 {
+            if script.dials > 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(script.dials > 0, "foreground recovery must not wait forever for an old close frame")
+        await session.stop()
+    }
+
+    @Test("Herdr input during detached rendering never falls through into the SSH shell")
+    func detachedHerdrInputIsBlocked() async {
+        var config = connection()
+        config.multiplexer = .herdr
+        let session = SessionHub.ActiveSession(connection: config)
+        session.viewModel.markConnected()
+        session.sendInput(Data([0x0D]))
+        #expect(session.herdrNotice != nil)
+        await session.stop()
+    }
+
     private func connection() -> ServerConnection {
         var connection = ServerConnection(
             name: "recovery",

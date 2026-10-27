@@ -114,6 +114,7 @@ final class PushService: PushCoordinating {
     /// nothing anywhere saying why. Pairing a host IS the moment the user asked
     /// for notifications from it.
     func registerForRemoteNotifications() {
+        guard AppSettings.agentNotificationsAvailable else { return }
         let count = pairings.count
         guard count > 0 else {
             Log.push.info("no paired hosts — not registering for remote notifications")

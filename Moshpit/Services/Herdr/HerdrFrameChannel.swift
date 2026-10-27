@@ -124,6 +124,11 @@ struct HerdrFrameParser {
 /// The commands the frame channel accepts on stdin, and the shell line that
 /// starts it.
 enum HerdrFrameCommand {
+    /// Unknown remote geometry must wait for a snapshot, never use the phone grid.
+    static func preservedGrid(pane: PaneInfo?) -> (cols: Int, rows: Int)? {
+        guard let pane, pane.width > 0, pane.height > 0 else { return nil }
+        return (pane.width, pane.height)
+    }
 
     /// Boot line for the channel, to be written into an interactive remote
     /// shell (append `\r` at the call site).
@@ -221,8 +226,22 @@ enum HerdrFrameCommand {
     /// sending wheel escapes and driving copy-mode. herdr's server makes that
     /// call — `wheel` becomes a mouse report for an app that grabbed the
     /// mouse, or scrollback movement for one that didn't.
-    static func scroll(up: Bool, lines: Int, source: ScrollSource = .wheel) -> String {
-        #"{"type":"terminal.scroll","direction":"\#(up ? "up" : "down")","lines":\#(max(1, lines)),"source":"\#(source.rawValue)"}"#
+    static func scroll(up: Bool, lines: Int, source: ScrollSource = .wheel,
+                       column: Int = 0, row: Int = 0) -> String {
+        #"{"type":"terminal.scroll","direction":"\#(up ? "up" : "down")","lines":\#(max(1, lines)),"source":"\#(source.rawValue)","column":\#(max(0, column)),"row":\#(max(0, row))}"#
+    }
+
+    /// Herdr emits ONE mouse report per command, irrespective of `lines`.
+    /// Separate ticks preserve drag distance for mouse-aware apps as well as shells.
+    static func scrollCommands(lines: Int, cols: Int, rows: Int, source: ScrollSource = .wheel) -> [String] {
+        guard lines != 0 else { return [] }
+        let column = max(0, cols / 2)
+        let row = max(0, rows / 2)
+        if source == .pageKey {
+            return [scroll(up: lines > 0, lines: Int(max(-24, min(24, lines)).magnitude), source: source, column: column, row: row)]
+        }
+        let count = Int(max(-24, min(24, lines)).magnitude)
+        return Array(repeating: scroll(up: lines > 0, lines: 1, column: column, row: row), count: count)
     }
 
     enum ScrollSource: String {

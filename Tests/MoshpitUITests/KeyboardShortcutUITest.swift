@@ -24,8 +24,9 @@ final class KeyboardShortcutUITest: XCTestCase {
     func testHomeShortcutsOpenSettingsAndAddConnection() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.navigationBars["Moshpit"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["启动台"].waitForExistence(timeout: 5))
 
         app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 3),
@@ -34,10 +35,10 @@ final class KeyboardShortcutUITest: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].waitForNonExistence(timeout: 3))
 
         app.typeKey("n", modifierFlags: .command)
-        XCTAssertTrue(app.navigationBars["Add Connection"].waitForExistence(timeout: 3),
+        XCTAssertTrue(app.navigationBars["新建 Host"].waitForExistence(timeout: 3),
                       "⌘N opens Add Connection")
-        app.navigationBars["Add Connection"].buttons["Cancel"].tap()
-        XCTAssertTrue(app.navigationBars["Add Connection"].waitForNonExistence(timeout: 3))
+        app.navigationBars["新建 Host"].buttons["Cancel"].tap()
+        XCTAssertTrue(app.navigationBars["新建 Host"].waitForNonExistence(timeout: 3))
     }
 
     /// Needs a live host: run with
@@ -61,6 +62,7 @@ final class KeyboardShortcutUITest: XCTestCase {
         if let tmux = env["MOSHPIT_SEED_TMUX_BIN"] {
             app.launchArguments += ["-MOSHPIT_SEED_TMUX_BIN", tmux]
         }
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
         // Connect from the card; trust the host key the first time.
@@ -97,7 +99,7 @@ final class KeyboardShortcutUITest: XCTestCase {
 
         // ⌘W: leave the terminal; the session stays alive on Home.
         app.typeKey("w", modifierFlags: .command)
-        XCTAssertTrue(app.navigationBars["Moshpit"].waitForExistence(timeout: 5), "⌘W goes back to Home")
+        XCTAssertTrue(app.navigationBars["启动台"].waitForExistence(timeout: 5), "⌘W goes back to Home")
         XCTAssertTrue(app.buttons["1: shell, 2p"].waitForExistence(timeout: 5),
                       "the session is still attached after leaving")
     }

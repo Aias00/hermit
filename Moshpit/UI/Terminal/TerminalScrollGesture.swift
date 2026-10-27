@@ -234,10 +234,12 @@ final class TerminalScrollGesture: NSObject, UIGestureRecognizerDelegate {
         switch gesture.state {
         case .began:
             pinchBaseSize = terminal.font.pointSize
+            coordinator?.onFontSizePreview?(Double(pinchBaseSize))
         case .changed:
             let target = min(max(pinchBaseSize * gesture.scale, 8), 32)
             if abs(target - terminal.font.pointSize) >= 0.5 {
-                terminal.font = terminal.font.withSize(target)
+                if let coordinator { coordinator.previewFontSize(Double(target)) }
+                else { terminal.font = terminal.font.withSize(target) }
             }
         case .ended, .cancelled, .failed:
             // Persist — otherwise the next appearance pass (theme change,

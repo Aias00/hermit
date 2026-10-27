@@ -10,7 +10,11 @@ struct AddConnectionView: View {
     let store: ConnectionStore
     let keychain: KeychainService
     var existing: ServerConnection?
+    var onConnect: ((ServerConnection) -> Void)?
 
+    @State private var discovering = false
+    @State private var browser = LocalHostBrowser()
+    @State private var showAdvanced = false
     @State private var name = ""
     @State private var host = ""
     @State private var port = "22"
@@ -41,10 +45,12 @@ struct AddConnectionView: View {
     @State private var socksProxyHost = ""
     @State private var socksProxyPort = "1080"
 
-    init(store: ConnectionStore, keychain: KeychainService, existing: ServerConnection? = nil) {
+    init(store: ConnectionStore, keychain: KeychainService, existing: ServerConnection? = nil,
+         onConnect: ((ServerConnection) -> Void)? = nil) {
         self.store = store
         self.keychain = keychain
         self.existing = existing
+        self.onConnect = onConnect
         if let c = existing {
             _name = State(initialValue: c.name)
             _host = State(initialValue: c.host)
@@ -81,11 +87,21 @@ struct AddConnectionView: View {
     var body: some View {
         NavigationStack {
             Form {
-                FormGroup(title: "CONNECTION") {
+                Section {
+                    Button { discovering = true } label: { Label("发现本地设备", systemImage: "wifi.router") }
+                        .accessibilityIdentifier("discover-local-hosts")
+                }
+                FormGroup(title: "名称") {
                     FieldRow(placeholder: "Name", text: $name)
+                }
+                FormGroup(title: "连接") {
                     FieldRow(placeholder: "Host", text: $host)
                     NumberFieldRow(label: "Port", placeholder: "22", text: $port)
                     FieldRow(placeholder: "Username", text: $username)
+                    Picker("连接模式", selection: $useMosh) {
+                        Text("SSH").tag(false)
+                        Text("Mosh").tag(true)
+                    }
                 }
 
                 FormGroup(title: "AUTHENTICATION") {
@@ -135,6 +151,21 @@ struct AddConnectionView: View {
                     }
                 }
 
+                FormGroup(title: "会话保持", footer: "tmux 与 herdr 使用各自的会话。SSH 下的 herdr 可使用原生工作区与 Agent 切换。") {
+                    Picker("会话模式", selection: $multiplexer) {
+                        Text("关闭").tag(Multiplexer.none)
+                        Text("tmux").tag(Multiplexer.tmux)
+                        Text("herdr").tag(Multiplexer.herdr)
+                    }.pickerStyle(.segmented).accessibilityIdentifier("multiplexer-picker")
+                }
+                if onConnect != nil {
+                    Section("连接测试") {
+                        Button { Task { await save(connectAfter: true) } } label: {
+                            Label("保存并测试连接", systemImage: "network")
+                        }.disabled(!canSave).accessibilityIdentifier("test-host-connection")
+                    }
+                }
+                DisclosureGroup("高级连接设置", isExpanded: $showAdvanced) {
                 FormGroup(
                     title: "ROAMING · MOSH",
                     footer: "Mosh keeps the session alive across Wi-Fi / 5G handoff and sleep/wake. UDP must be open server-side; the client picks an unused port within range. With tmux, Moshpit attaches to your existing sessions and never creates or restyles them; only sessions you create through Moshpit get its native look (status bar hidden, restored on disconnect)."
@@ -202,47 +233,6 @@ struct AddConnectionView: View {
                     title: "ADVANCED",
                     footer: "tmux and herdr hold separate, unrelated sessions. If the host doesn't have the one you pick, Moshpit says so and drops to a plain shell — it never quietly attaches the other. With Mosh, herdr runs its own terminal UI; native rendering needs SSH."
                 ) {
-                    Menu {
-                        ForEach(Multiplexer.allCases, id: \.self) { mux in
-                            Button {
-                                multiplexer = mux
-                            } label: {
-                                // Checkmark on the current choice — the
-                                // menu used to give no clue which one
-                                // was active.
-                                Label {
-                                    Text(mux.label)
-                                    Text(mux.subtitle)
-                                } icon: {
-                                    // Checkmark on the active row, the
-                                    // multiplexer's own symbol on the
-                                    // others: selection stays legible
-                                    // (the menu used to give no clue)
-                                    // and the rest become recognisable
-                                    // without reading two lowercase
-                                    // tool names. The collapsed row
-                                    // below carries the current one's
-                                    // symbol, so it is never hidden.
-                                    Image(systemName: multiplexer == mux
-                                          ? "checkmark" : mux.symbol)
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 10) {
-                            Text("Multiplexer").font(.body).foregroundStyle(Ink.primary)
-                            Spacer()
-                            HStack(spacing: 5) {
-                                Image(systemName: multiplexer.symbol)
-                                    .font(.system(size: 12, weight: .medium))
-                                Text(multiplexer.label).font(.body)
-                            }
-                            .foregroundStyle(Ink.meta)
-                            MenuChevron()
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .accessibilityIdentifier("multiplexer-picker")
                     // The path field follows the choice: it's the one
                     // that skips the capability probe, so offering the
                     // wrong binary's path would be a trap.
@@ -256,9 +246,10 @@ struct AddConnectionView: View {
                     }
                     ToggleRow(label: "Compress Output", isOn: $compressOutput)
                 }
+                }.accessibilityIdentifier("connection-advanced")
             }
             .moshpitForm()
-            .navigationTitle(existing == nil ? "Add Connection" : "Edit Connection")
+            .navigationTitle(existing == nil ? "新建 Host" : "编辑 Host")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -283,10 +274,35 @@ struct AddConnectionView: View {
                 KeyPickerSheet(keys: connectableKeys, selectedKeyId: $selectedKeyId)
             }
         }
+        .appSheet(isPresented: $discovering) {
+            NavigationStack {
+                List {
+                    if let failure = browser.failure { Text(failure).foregroundStyle(.orange) }
+                    ForEach(browser.hosts) { found in
+                        Button {
+                            host = found.hostname; port = String(found.port)
+                            if name.isEmpty { name = found.name }
+                            discovering = false
+                        } label: {
+                            VStack(alignment: .leading) { Text(found.name); Text(found.hostname).font(.caption).foregroundStyle(.secondary) }
+                        }
+                    }
+                    if browser.hosts.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ProgressView("查找局域网 SSH 服务…")
+                            Text("手机与电脑需处于同一 Wi-Fi。只会发现通过 Bonjour 广播 SSH 服务的设备；未发现时仍可手动输入 IP。")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }.padding(.vertical)
+                    }
+                }.navigationTitle("本地设备").toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("取消") { discovering = false } }
+                }.task { browser.start() }.onDisappear { browser.stop() }
+            }.preferredColorScheme(.dark)
+        }
         .preferredColorScheme(.dark)
     }
 
-    private func save() async {
+    private func save(connectAfter: Bool = false) async {
         var connection = existing ?? ServerConnection()
         connection.name = name
         connection.host = host
@@ -336,5 +352,6 @@ struct AddConnectionView: View {
             store.update(connection)
         }
         dismiss()
+        if connectAfter { onConnect?(connection) }
     }
 }

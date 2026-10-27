@@ -43,10 +43,154 @@ enum TerminalFocusPolicy {
 /// merely clipped by this container — and when the keyboard settles the
 /// terminal is resized ONCE to the final bounds. One resize, one reflow, one
 /// remote SIGWINCH (instead of a resize storm), no visible intermediate state.
+enum RemoteViewportGeometry {
+    /// Fit the native cell grid to the device's available width. Very wide
+    /// desktop grids retain a readable minimum and can be panned horizontally.
+    static func fittedFontSize(preferred: Double, columns: Int, cellWidth: CGFloat, viewportWidth: CGFloat,
+                               minimumFontSize: CGFloat = 8) -> CGFloat {
+        let base = CGFloat(max(13, preferred))
+        guard columns > 0, cellWidth > 0, viewportWidth > 0 else { return base }
+        let ratio = viewportWidth / (CGFloat(columns) * cellWidth)
+        return max(minimumFontSize, min(18, base * ratio))
+    }
+    static func adjustedFontSize(displayed: Double, delta: Double) -> Double {
+        min(32, max(8, displayed + delta))
+    }
+    static func origin(current: CGFloat?, contentHeight: CGFloat, viewportHeight: CGFloat) -> CGFloat {
+        let bottom = viewportHeight - contentHeight
+        // A short terminal starts at the top; positive offsets manufacture
+        // an empty band above all output when the viewport becomes taller.
+        if bottom >= 0 { return 0 }
+        return min(0, max(bottom, current ?? bottom))
+    }
+}
+
 final class TerminalHostContainer: UIView {
+    static let rendererPreferenceChanged = Notification.Name("moshpit.terminal.rendererChanged")
+    static let metalPreferenceKey = "moshpit.terminal.useMetal"
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        NotificationCenter.default.addObserver(self, selector: #selector(applyRendererPreference),
+            name: Self.rendererPreferenceChanged, object: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        applyRendererPreference()
+    }
+
+    @objc private func applyRendererPreference() {
+        // Metal needs an attached surface. Reused panes pick up the preference
+        // when hosted again, without recreating their terminal or scrollback.
+        guard window != nil, let terminalView else { return }
+        // An absent preference uses Metal; an explicit false remains a user's
+        // fallback choice across upgrades and before TerminalScreen is mounted.
+        let enabled = UserDefaults.standard.object(forKey: Self.metalPreferenceKey) as? Bool ?? true
+        guard terminalView.isUsingMetalRenderer != enabled else { return }
+        do {
+            try terminalView.setUseMetal(enabled)
+        } catch {
+            try? terminalView.setUseMetal(false)
+            Log.input.error("Metal renderer unavailable: \(error.localizedDescription, privacy: .public)")
+        }
+        terminalView.getTerminal().updateFullScreen()
+        terminalView.setNeedsDisplay()
+    }
+
+    private var focusGeneration = 0
+    private(set) var requestedFocus: TerminalFocusPolicy = .allow
+
+    /// Deferred responder changes must still belong to this host and to the
+    /// latest policy. A stale `take` must not steal a draft halfway through typing.
+    func requestFocus(_ policy: TerminalFocusPolicy) {
+        requestedFocus = policy
+        focusGeneration += 1
+        let generation = focusGeneration
+        guard policy != .allow else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.focusGeneration == generation,
+                  let terminal = self.terminalView, terminal.superview === self else { return }
+            if self.requestedFocus == .take, terminal.window != nil {
+                if !terminal.isFirstResponder { terminal.becomeFirstResponder() }
+            } else if self.requestedFocus == .resign, terminal.isFirstResponder {
+                terminal.resignFirstResponder()
+            }
+        }
+    }
+
     /// The hosted terminal. Weak: SwiftTerm views are persistent objects owned
     /// by the session (tmux panes outlive any single host container).
     private(set) weak var terminalView: TerminalView?
+    var remoteGrid: (cols: Int, rows: Int)? {
+        didSet {
+            if oldValue?.cols != remoteGrid?.cols || oldValue?.rows != remoteGrid?.rows {
+                remoteOrigin = nil
+                remoteContentRows = nil
+                contentExtentDirty = true
+                setNeedsLayout()
+            }
+        }
+    }
+    private var remoteOrigin: CGFloat?
+    private var previousBottomOrigin: CGFloat = 0
+    private(set) var remoteContentRows: Int?
+    private var contentExtentDirty = true
+
+    func invalidateRemoteContentExtent() {
+        guard remoteGrid != nil else { return }
+        contentExtentDirty = true
+        setNeedsLayout()
+    }
+
+    private func occupiedRowCount(in terminal: Terminal) -> Int {
+        let cursorRows = min(terminal.rows, max(1, terminal.buffer.y + 1))
+        for row in stride(from: terminal.rows - 1, through: cursorRows - 1, by: -1) {
+            guard let line = terminal.getLine(row: row) else { continue }
+            for col in 0..<terminal.cols where line[col].width > 0 {
+                let char = terminal.getCharacter(for: line[col])
+                if char != " " && char != "\u{0}" { return row + 1 }
+            }
+        }
+        return cursorRows
+    }
+
+    private var visibleRemoteHeight: CGFloat {
+        guard let terminalView, let grid = remoteGrid else { return 0 }
+        return terminalView.frame.height * CGFloat(min(grid.rows, remoteContentRows ?? grid.rows)) / CGFloat(max(1, grid.rows))
+    }
+
+    /// Size the pixel surface BEFORE changing font: SwiftTerm otherwise reflows
+    /// the fixed remote grid through the old pixel bounds and loses screen cells.
+    private var pendingRemoteFont: UIFont?
+    func applyRemoteFont(_ font: UIFont) {
+        if frameLocked || geometryHeld { pendingRemoteFont = font; return }
+        guard let terminalView, let grid = remoteGrid else { return }
+        let cell = TerminalCellGeometry.measuredCell(font: font,
+            scale: terminalView.window?.screen.scale ?? UITraitCollection.current.displayScale)
+        terminalView.frame.size = CGSize(width: cell.width * CGFloat(grid.cols), height: cell.height * CGFloat(grid.rows))
+        terminalView.font = font
+        setNeedsLayout()
+        layoutIfNeeded()
+        terminalView.getTerminal().updateFullScreen()
+        terminalView.setNeedsDisplay()
+    }
+
+    /// Consume finger travel locally before asking the remote history to move.
+    func panRemoteViewport(by delta: CGFloat) -> CGFloat {
+        guard remoteGrid != nil, let terminalView else { return 0 }
+        layoutIfNeeded()
+        let old = terminalView.frame.minY
+        let next = RemoteViewportGeometry.origin(current: old + delta,
+            contentHeight: visibleRemoteHeight, viewportHeight: bounds.height)
+        remoteOrigin = next
+        terminalView.frame.origin.y = next
+        return next - old
+    }
 
     /// While true, ``layoutSubviews`` leaves the terminal's frame alone.
     /// Toggled by the coordinator around keyboard transitions.
@@ -107,6 +251,7 @@ final class TerminalHostContainer: UIView {
         guard terminal.superview !== self else { return }
         terminalView = terminal
         addSubview(terminal)
+        applyRendererPreference()
         // Only adopt the container's bounds when the container HAS bounds. A
         // freshly created container is .zero until its first layout pass, and
         // framing a REUSED terminal to .zero makes SwiftTerm reflow the whole
@@ -118,7 +263,7 @@ final class TerminalHostContainer: UIView {
         // Keeping the terminal's previous frame until layoutSubviews delivers
         // real bounds means the common case (same device, same size) never
         // reflows at all.
-        if bounds != .zero {
+        if bounds != .zero, remoteGrid == nil {
             terminal.frame = bounds
         }
         clipsToBounds = true
@@ -133,10 +278,48 @@ final class TerminalHostContainer: UIView {
     /// Installed by the ``SwiftTerminalView/Coordinator`` that owns this
     /// container.
     var onTerminalLaidOut: ((TerminalView) -> Void)?
+    var onViewportLaidOut: ((Int, Int) -> Void)?
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard let terminalView, !frameLocked, !geometryHeld else { return }
+        guard let terminalView else { return }
+        guard !frameLocked, !geometryHeld else { return }
+        if let font = pendingRemoteFont, let grid = remoteGrid {
+            pendingRemoteFont = nil
+            let cell = TerminalCellGeometry.measuredCell(font: font,
+                scale: terminalView.window?.screen.scale ?? UITraitCollection.current.displayScale)
+            terminalView.frame.size = CGSize(width: cell.width * CGFloat(grid.cols), height: cell.height * CGFloat(grid.rows))
+            terminalView.font = font
+        }
+        if bounds.width > 0, bounds.height > 0 {
+            let cell = TerminalCellGeometry.measuredCell(font: terminalView.font,
+                scale: terminalView.window?.screen.scale ?? UITraitCollection.current.displayScale)
+            let viewport = TerminalCellGeometry.grid(for: bounds.size, cell: cell)
+            if viewport.cols > 0, viewport.rows > 0 { onViewportLaidOut?(viewport.cols, viewport.rows) }
+        }
+        if let grid = remoteGrid, bounds.width > 0, bounds.height > 0 {
+            let cell = TerminalCellGeometry.measuredCell(font: terminalView.font,
+                scale: terminalView.window?.screen.scale ?? UITraitCollection.current.displayScale)
+            let size = CGSize(width: cell.width * CGFloat(grid.cols), height: cell.height * CGFloat(grid.rows))
+            if contentExtentDirty {
+                remoteContentRows = occupiedRowCount(in: terminalView.getTerminal())
+                contentExtentDirty = false
+            }
+            let contentHeight = cell.height * CGFloat(min(grid.rows, remoteContentRows ?? grid.rows))
+            let bottom = min(0, bounds.height - contentHeight)
+            let followsBottom = remoteOrigin == nil || abs((remoteOrigin ?? 0) - previousBottomOrigin) < 1
+            let origin = RemoteViewportGeometry.origin(current: followsBottom ? nil : remoteOrigin,
+                contentHeight: contentHeight, viewportHeight: bounds.height)
+            previousBottomOrigin = bottom
+            remoteOrigin = origin
+            terminalView.frame = CGRect(origin: CGPoint(x: 0, y: origin), size: size)
+            if terminalView.getTerminal().cols != grid.cols || terminalView.getTerminal().rows != grid.rows {
+                terminalView.resize(cols: grid.cols, rows: grid.rows)
+            }
+            onTerminalLaidOut?(terminalView)
+            return
+        }
+        guard !frameLocked, !geometryHeld else { return }
         // Same guard as host(): a transient zero-bounds pass (sheet
         // transitions, remounts) must not squeeze a live buffer through the
         // minimum grid — that reflow doesn't round-trip.
@@ -228,11 +411,7 @@ struct SwiftTerminalView: UIViewRepresentable {
             coordinator.hostContainer = container
             container.geometryHeld = geometryHeld
             applyStyle(to: existing)
-            if focusPolicy == .take {
-                DispatchQueue.main.async { [weak existing] in
-                    _ = existing?.becomeFirstResponder()
-                }
-            }
+            container.requestFocus(focusPolicy)
             return container
         }
         let font = TerminalFont.font(id: fontName, size: CGFloat(fontSize))
@@ -256,7 +435,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         // the seed would break that pact: whenever it happened to match the
         // final layout, `sizeChanged` never fires and the server stays at
         // the seed forever.
-        let seed = SessionHub.ActiveSession.estimateGrid(fontSize: fontSize)
+        let seed = coordinator.remoteGrid ?? SessionHub.ActiveSession.estimateGrid(fontSize: fontSize)
         let cell = TerminalCellGeometry.measuredCell(
             font: font, scale: UITraitCollection.current.displayScale)
         let birthFrame = CGRect(x: 0, y: 0,
@@ -275,15 +454,12 @@ struct SwiftTerminalView: UIViewRepresentable {
         applyStyle(to: terminalView)
         // Pop the system keyboard as soon as the terminal is on screen — the
         // app's shortcut bar rides above it via safeAreaInset.
-        if focusPolicy == .take {
-            DispatchQueue.main.async { [weak terminalView] in
-                _ = terminalView?.becomeFirstResponder()
-            }
-        }
         let container = TerminalHostContainer()
+        container.remoteGrid = coordinator.remoteGrid
         container.host(terminalView)
         coordinator.hostContainer = container
         container.geometryHeld = geometryHeld
+        container.requestFocus(focusPolicy)
         return container
     }
 
@@ -296,24 +472,16 @@ struct SwiftTerminalView: UIViewRepresentable {
         let targetSize = CGFloat(fontSize)
         let desired = TerminalFont.font(id: fontName, size: targetSize)
         if terminal.font.pointSize != targetSize || terminal.font.fontName != desired.fontName {
-            terminal.font = desired
+            if coordinator.remoteGrid != nil {
+                uiView.applyRemoteFont(desired)
+            } else {
+                terminal.font = desired
+            }
         }
 
         applyStyle(to: terminal)
 
-        // Honor the keyboard-dismiss toggle.
-        switch focusPolicy {
-        case .take:
-            if !terminal.isFirstResponder, terminal.window != nil {
-                DispatchQueue.main.async { [weak terminal] in _ = terminal?.becomeFirstResponder() }
-            }
-        case .allow:
-            break
-        case .resign:
-            if terminal.isFirstResponder {
-                DispatchQueue.main.async { [weak terminal] in _ = terminal?.resignFirstResponder() }
-            }
-        }
+        uiView.requestFocus(focusPolicy)
     }
 
     /// Push the theme and cursor settings into `terminal` — only what changed
@@ -435,6 +603,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// is O(1).
         private func postFeedFixups(on terminalView: TerminalView) {
             enforceCursor(on: terminalView)
+            hostContainer?.invalidateRemoteContentExtent()
             scheduleLinkify(on: terminalView)
         }
 
@@ -527,6 +696,17 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// ``scroll(lines:)`` pages the local buffer. Positive = older, negative
         /// = newer.
         var onScroll: ((Int) -> Void)?
+        private(set) var localViewportGrid: (cols: Int, rows: Int)?
+        var onViewportSizeChange: ((Int, Int) -> Void)?
+        func reportViewport(cols: Int, rows: Int) {
+            guard cols > 0, rows > 0,
+                  localViewportGrid?.cols != cols || localViewportGrid?.rows != rows else { return }
+            localViewportGrid = (cols, rows)
+            onViewportSizeChange?(cols, rows)
+        }
+        var remoteGrid: (cols: Int, rows: Int)? {
+            didSet { hostContainer?.remoteGrid = remoteGrid }
+        }
 
         /// Set for tmux panes alongside ``onScroll``: pixel-precise scroll
         /// requests from the pan gesture (positive = older). Returns the
@@ -778,6 +958,12 @@ struct SwiftTerminalView: UIViewRepresentable {
         @discardableResult
         func scroll(pixels dy: CGFloat) -> CGFloat {
             guard dy != 0, dy.isFinite else { return 0 }
+            if remoteGrid != nil, let onScroll {
+                let moved = hostContainer?.panRemoteViewport(by: dy) ?? 0
+                let rows = rowCarry.take(pixels: dy - moved, cellHeight: cellHeight)
+                if rows != 0 { onScroll(rows) }
+                return dy
+            }
             if let onScrollPixels {
                 return onScrollPixels(dy)
             }
@@ -1009,6 +1195,10 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// ``onGridReport``.
         weak var hostContainer: TerminalHostContainer? {
             didSet {
+                hostContainer?.remoteGrid = remoteGrid
+                hostContainer?.onViewportLaidOut = { [weak self] cols, rows in
+                    self?.reportViewport(cols: cols, rows: rows)
+                }
                 hostContainer?.onTerminalLaidOut = { [weak self] terminal in
                     guard let self else { return }
                     self.reportGrid(of: terminal)
@@ -1369,6 +1559,18 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// Pinch-zoom ended — commit the final font size so it can persist
         /// (the next appearance pass used to silently snap it back).
         var onFontSizeCommit: ((Double) -> Void)?
+        var onFontSizePreview: ((Double) -> Void)?
+
+        func previewFontSize(_ size: Double) {
+            guard let terminalView else { return }
+            let font = terminalView.font.withSize(CGFloat(min(32, max(8, size))))
+            if remoteGrid != nil, let hostContainer {
+                hostContainer.applyRemoteFont(font)
+            } else {
+                terminalView.font = font
+            }
+            onFontSizePreview?(Double(font.pointSize))
+        }
 
         /// Fired after the user submits a line (the sent bytes contained CR/LF).
         /// tmux panes resync from the server shortly after: the IME commit +

@@ -10,6 +10,8 @@ final class AppearanceFlowUITest: XCTestCase {
 
     @MainActor
     private func openSettings(_ app: XCUIApplication) {
+        app.buttons["主机与设置"].tap()
+        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
     }
@@ -18,6 +20,7 @@ final class AppearanceFlowUITest: XCTestCase {
     func testAccentAndIconAreSeparateRows() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         openSettings(app)
 
@@ -30,6 +33,7 @@ final class AppearanceFlowUITest: XCTestCase {
     func testCreateCustomAccentAppliesIt() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         openSettings(app)
 
@@ -66,6 +70,7 @@ final class AppearanceFlowUITest: XCTestCase {
     func testIconGalleryOffersDistinctIconsAndSwitches() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         openSettings(app)
 

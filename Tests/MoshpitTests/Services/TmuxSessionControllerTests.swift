@@ -45,6 +45,24 @@ private func makeAttachedController() async -> (TmuxSessionController, MockTmuxT
 @MainActor
 struct TmuxSessionControllerTests {
 
+    @Test("A rejected paste stage reports failure and never sends Enter")
+    func failedSubmitNeverSendsEnter() async throws {
+        let (controller, transport) = await makeAttachedController()
+        _ = await waitUntil { await transport.recordedCommands().count >= 3 }
+        transport.pushText("%begin 1 1 0\n%end 1 1 0\n%begin 2 2 0\n%end 2 2 0\n%begin 3 3 0\n%end 3 3 0\n")
+        try await Task.sleep(for: .milliseconds(20))
+        let submit = Task { try await controller.submitLine("retained draft", paneId: "%0", timeout: 0.3) }
+        let sent = await waitUntil { await transport.recordedCommands().contains { $0.hasPrefix("set-buffer -b moshpit-submit-") } }
+        #expect(sent)
+        transport.pushText("%begin 4 4 0\nrejected\n%error 4 4 0\n")
+        do { try await submit.value; Issue.record("must not report success") } catch {}
+        let commands = await transport.recordedCommands()
+        #expect(!commands.contains { $0.contains("paste-buffer -p -b moshpit-submit-") })
+        #expect(!commands.contains { $0.contains("send-keys -t %0 Enter") })
+        await controller.detach()
+        transport.finish()
+    }
+
     // ─────────────────────────────────────────────────────────────
     // attach() / initial discovery
     // ─────────────────────────────────────────────────────────────

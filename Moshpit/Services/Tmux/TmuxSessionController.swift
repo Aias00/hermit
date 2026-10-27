@@ -2294,6 +2294,31 @@ final class TmuxSessionController: MultiplexerControlling {
         if snapshot.panes[paneId]?.windowId == snapshot.activeWindowId { noteUserInteraction() }
     }
 
+    /// Await tmux's response for each stage; a failed paste must never be
+    /// followed by Enter, nor be reported as a successful composer submit.
+    func submitLine(_ text: String, paneId: String, timeout: Double = 12) async throws {
+        guard Self.isValidTmuxId(paneId), snapshot.isAttached else { throw SSHError.ptyNotReady }
+        let buffer = "moshpit-submit-" + UUID().uuidString
+        let commands = [
+            "set-buffer -b \(buffer) -- \(Self.tmuxCommandStringLiteral(text))",
+            "paste-buffer -p -b \(buffer) -d -t \(paneId)",
+            "send-keys -t \(paneId) Enter"
+        ]
+        for command in commands {
+            try Task.checkCancellation()
+            guard snapshot.isAttached, transportIsLive?() ?? true else { throw SSHError.sessionClosed }
+            let accepted: Bool? = await withCheckedContinuation { continuation in
+                let once = OnceContinuation<Bool?>(continuation)
+                sendCommand(command) { once.resume(!$0.isError) }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(timeout))
+                    once.resume(nil)
+                }
+            }
+            guard accepted == true else { throw HerdrControlClient.SubmissionError.unconfirmed }
+        }
+    }
+
     /// Tell tmux the client viewport changed size. Driven by the container
     /// view; tmux resizes each visible pane to fit.
     ///

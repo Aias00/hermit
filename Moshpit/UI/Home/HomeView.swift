@@ -30,6 +30,10 @@ struct HomeView: View {
     /// spinner and guards against double-taps during the ~2s channel flush.
     @State private var disconnectingIds: Set<UUID> = []
     @State private var path: [UUID] = []
+    @State private var selectedTab = 0
+    @State private var launchConnection: ServerConnection?
+    @State private var launchCommand = ""
+    @State private var showLaunchTerminal = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var splitIsPortrait = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -187,10 +191,10 @@ struct HomeView: View {
             SettingsScreen(liveSession: liveSessionForHooks)
         }
         .appSheet(isPresented: $showAddConnection) {
-            AddConnectionView(store: store, keychain: keychain)
+            AddConnectionView(store: store, keychain: keychain, onConnect: { open($0.id) })
         }
         .appSheet(item: $editingConnection) { connection in
-            AddConnectionView(store: store, keychain: keychain, existing: connection)
+            AddConnectionView(store: store, keychain: keychain, existing: connection, onConnect: { open($0.id) })
         }
         .confirmationDialog(
             "Delete \(deletingConnection?.displayName ?? String(localized: "connection"))?",
@@ -271,8 +275,13 @@ struct HomeView: View {
     private var stackLayout: some View {
         NavigationStack(path: $path) {
             homeList
+            .navigationDestination(isPresented: $showLaunchTerminal) {
+                if let connection = launchConnection {
+                    TerminalScreen(connection: connection, hub: hub, initialCommand: launchCommand)
+                }
+            }
             .navigationDestination(for: UUID.self) { id in
-                if let connection = store.connections.first(where: { $0.id == id }) {
+                if let connection = store.connections.first(where: { $0.id == id }) ?? hub.sessions[id]?.connection {
                     // No pane target passed here — TerminalScreen reads the
                     // deep-link pane straight from `router.paneRequest` itself
                     // (see its own `.onChange`), which also lets it react to a
@@ -327,69 +336,22 @@ struct HomeView: View {
     /// The connection list with its title and toolbar — the root of the
     /// stack on a phone, the sidebar on an iPad.
     private var homeList: some View {
-        List {
-            if !store.connections.isEmpty {
-                // One status row instead of three decorative counters — it
-                // says the one thing that matters right now and TAKES YOU
-                // THERE: an agent waiting outranks everything, then live
-                // connections; all-quiet is just a quiet line.
-                Section {
-                    statusRow
-                        .listRowBackground(statusRowFill)
-                        .listRowSeparatorTint(Ink.hairline)
-                } header: {
-                    // The tagline the brand card used to carry, in the same
-                    // small mono voice, now labelling the one status line.
-                    SectionKicker(title: "The pit never closes")
-                }
-
-                // One SECTION per host, not one row: the system draws the
-                // section as the card, and every row inside it — host head,
-                // session, window, pane — gets its own swipe actions and
-                // long-press menu. As a single row the whole card swiped and
-                // pressed as the connection, whichever tree row the finger
-                // was on.
-                ForEach(store.connections) { connection in
-                    connectionCard(connection)
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        .listSectionSpacing(10)
-        // The tree's rows are 34pt; the system's 44pt floor would pad them out.
-        .environment(\.defaultMinListRowHeight, ConnectionCard.treeRowMinHeight)
-        .scrollContentBackground(.hidden)
-        // Two frames rather than one: the first caps the column, the
-        // second hands it the screen's full width to be centred within.
-        // Only iPad and iPhone landscape ever reach the cap.
-        .frame(maxWidth: Metrics.homeMaxWidth)
-        .frame(maxWidth: .infinity)
-        .background { HomeStage() }
-        .overlay {
-            if store.connections.isEmpty {
-                emptyState
-            }
-        }
-        .navigationTitle("Moshpit")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    showSettings = true
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .keyboardShortcut(",", modifiers: .command)
-                .accessibilityIdentifier("home-settings")
-                Button {
-                    handleAdd()
-                } label: {
-                    Label("Add Connection", systemImage: "plus")
-                }
-                .keyboardShortcut("n", modifiers: .command)
-                .accessibilityIdentifier("home-add")
-            }
-        }
+        LaunchpadView(connections: store.connections, hub: hub, tab: $selectedTab,
+            onAdd: handleAdd,
+            onEdit: { editingConnection = $0 },
+            onOpen: { open($0) },
+            onDelete: { deletingConnection = $0 },
+            onSettings: { showSettings = true },
+            onRun: { host, name, command in
+                var copy = host
+                copy.id = UUID()
+                copy.name = name + " · " + host.displayName
+                copy.multiplexer = .none
+                copy.connectionProtocol = .ssh
+                launchConnection = copy
+                launchCommand = command
+                showLaunchTerminal = true
+            })
     }
 
     /// Show a connection's terminal: a push on the phone, the detail column

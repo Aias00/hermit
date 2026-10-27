@@ -101,7 +101,7 @@ final class HomeTreeGesturesUITest: XCTestCase {
         let newPane = app.buttons["New Pane"]
         pressForMenu(row, until: newPane, "a long-press on a window row opens the window's menu")
         XCTAssertTrue(app.buttons["Kill Window"].exists)
-        XCTAssertFalse(app.buttons["Delete Connection"].exists,
+        XCTAssertFalse(app.buttons["删除主机"].exists,
                        "the connection's menu must not answer a window row")
         shot(app, "04-window-menu")
     }
@@ -126,7 +126,7 @@ final class HomeTreeGesturesUITest: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 3), .completed, "a tap on the open head closes it")
         XCTAssertTrue(head.waitForExistence(timeout: 2), "and we are still on Home")
 
-        let deleteItem = app.buttons["Delete Connection"]
+        let deleteItem = app.buttons["删除主机"]
         pressForMenu(head, until: deleteItem, "the head row's long-press is the connection's menu")
         shot(app, "06-head-menu")
     }

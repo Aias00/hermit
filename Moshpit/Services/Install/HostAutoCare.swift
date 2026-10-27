@@ -53,6 +53,7 @@ final class HostAutoCare {
     }
 
     func tend(connection: ServerConnection, session: SessionHub.ActiveSession) {
+        guard AppSettings.agentNotificationsAvailable else { return }
         // Harness escape hatch. Every seeded test connection points at a REAL
         // host (a scratch tmux, but the login's real $HOME) — without this, a
         // perf probe or reconnect harness would silently pair its throwaway

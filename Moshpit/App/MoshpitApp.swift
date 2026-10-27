@@ -327,6 +327,7 @@ struct RootView: View {
                 settings.appThemeId = AppThemeCatalog.signalRoom.id
                 settings.appIconId = AppIconCatalog.primary.id
                 settings.themeId = TerminalTheme.fallback.id
+                settings.store.set(false, forKey: "moshpit.conversation.sidebar.visible")
             }
             await applySmokeSeedIfRequested()
             #endif
@@ -338,11 +339,17 @@ struct RootView: View {
     private func applySmokeSeedIfRequested() async {
         guard
             let user = launchArg("-MOSHPIT_SEED_USER"),
-            let keyB64 = launchArg("-MOSHPIT_SEED_KEY_B64"),
-            let keyData = Data(base64Encoded: keyB64),
-            let pem = String(data: keyData, encoding: .utf8),
             autoSeededConnection == nil
         else { return }
+
+        // Password smoke tests use the environment so secrets never enter argv.
+        // They are persisted only through the same Keychain path as the form.
+        let password = ProcessInfo.processInfo.environment["MOSHPIT_SEED_PASSWORD"]
+        let pem = launchArg("-MOSHPIT_SEED_KEY_B64")
+            .flatMap { Data(base64Encoded: $0) }
+            .flatMap { String(data: $0, encoding: .utf8) }
+        guard password?.isEmpty == false || pem != nil else { return }
+        let usesPassword = password?.isEmpty == false
 
         let host = launchArg("-MOSHPIT_SEED_HOST") ?? "127.0.0.1"
         let port = Int(launchArg("-MOSHPIT_SEED_PORT") ?? "22") ?? 22
@@ -361,7 +368,11 @@ struct RootView: View {
         let id = launchArg("-MOSHPIT_SEED_ID").flatMap(UUID.init(uuidString:)) ?? UUID()
         let ref = id.uuidString
         do {
-            try await keychain.savePrivateKey(pem, forRef: ref, requireBiometry: false)
+            if usesPassword, let password {
+                try await keychain.savePassword(password, forRef: ref, requireBiometry: false)
+            } else if let pem {
+                try await keychain.savePrivateKey(pem, forRef: ref, requireBiometry: false)
+            }
         } catch {
             print("[smoke seed] keychain save failed: \(error)")
             return
@@ -378,7 +389,7 @@ struct RootView: View {
             host: host,
             port: port,
             username: user,
-            authMethod: .key,
+            authMethod: usesPassword ? .password : .key,
             connectionProtocol: useMosh ? .mosh : .ssh,
             sshPort: port,
             moshServerPath: launchArg("-MOSHPIT_SEED_MOSH_BIN"),
@@ -392,16 +403,21 @@ struct RootView: View {
             multiplexerRaw: launchArg("-MOSHPIT_SEED_MUX")
         )
 
-        for existing in store.connections {
-            store.delete(id: existing.id)
+        // Seeding one test host must not erase other saved connections.
+        if store.connections.contains(where: { $0.id == connection.id }) {
+            store.update(connection)
+        } else {
+            store.add(connection)
         }
-        store.add(connection)
         // `-MOSHPIT_SEED_QUIET 1` silences local notifications for a capture
         // run. Simulator banners don't auto-dismiss the way a device's do, so
         // a "needs you" alert sits over the nav bar and ruins every shot after
         // it — and the Vibe Island has its own coverage elsewhere.
         if launchArg("-MOSHPIT_SEED_QUIET") == "1" {
             settings.notificationsEnabled = false
+            // Keep UI automation's idle detection deterministic; a repeating
+            // caret animation otherwise occupies its entire 60-second wait.
+            settings.cursorBlink = false
         }
         // `-MOSHPIT_SEED_HOME 1` seeds the connection but stays on the Attach
         // home screen (instead of auto-pushing the terminal), so the home

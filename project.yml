@@ -130,10 +130,9 @@ packages:
     # printed over several rows (Claude Code re-opens the same OSC-8 link
     # on each wrapped row) is one link to the selection: long-press selects
     # all of it and copying yields the address without the row breaks.
-    # Revert to the upstream URL if/when these land there and a
-    # release picks them up.
-    url: https://github.com/Cluas/SwiftTerm.git
-    revision: dd7f2cd47507e4ed9501835739eb26af3a5ed4bc
+    # Library snapshot includes the Metal glyph-color fix; provenance and
+    # revision are recorded in Packages/SwiftTerm/UPSTREAM.json.
+    path: Packages/SwiftTerm
   Citadel:
     url: https://github.com/orlandos-nl/Citadel.git
     from: "0.7.0"
@@ -277,6 +276,8 @@ targets:
       properties:
         CFBundleName: Moshpit
         CFBundleDisplayName: Moshpit
+        NSBonjourServices:
+          - _ssh._tcp
         UIAppFonts:
           - JetBrainsMono-Regular.ttf
           - MapleMono-Regular.ttf

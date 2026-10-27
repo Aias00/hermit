@@ -16,14 +16,14 @@ struct AppSettingsTests {
         return (defaults, name)
     }
 
-    @Test("default values match the prototype: fontSize=9, GitHub Dark, block teal cursor")
+    @Test("default values match the prototype: fontSize=13, Remote Navy, block teal cursor")
     func defaults() {
         let (defaults, name) = Self.makeDefaults()
         defer { defaults.removePersistentDomain(forName: name) }
 
         let settings = AppSettings(defaults: defaults)
-        #expect(settings.fontSize == 9)
-        #expect(settings.themeId == "github-dark")
+        #expect(settings.fontSize == 13)
+        #expect(settings.themeId == "remote-navy")
         #expect(settings.cursorShape == .block)
         #expect(settings.cursorColorId == "teal")
         #expect(settings.cursorBlink)
@@ -32,6 +32,29 @@ struct AppSettingsTests {
         #expect(settings.predictMode == .adaptive)
         #expect(settings.udpRangeStart == 60000)
         #expect(settings.udpRangeEnd == 61000)
+    }
+
+    @Test("Reference appearance migrates the old default once and preserves other themes", arguments: ["github-dark", "nord", "custom-user-theme"])
+    func referenceAppearanceMigration(previous: String) {
+        let (defaults, name) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(previous, forKey: "moshpit.settings.themeId")
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.themeId == (previous == "github-dark" ? "remote-navy" : previous))
+        settings.themeId = "github-dark"
+        let reloaded = AppSettings(defaults: defaults)
+        #expect(reloaded.themeId == "github-dark", "later choices must not be migrated again")
+    }
+
+    @Test("small legacy fonts upgrade once without overriding later user choices", arguments: [9.0, 22.0])
+    func readableFontMigration(previous: Double) {
+        let (defaults, name) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(previous, forKey: "moshpit.settings.fontSize")
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.fontSize == max(13, previous))
+        settings.fontSize = 10
+        #expect(AppSettings(defaults: defaults).fontSize == 10)
     }
 
     @Test("set then get returns the written value on the same instance")

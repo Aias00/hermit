@@ -11,6 +11,36 @@ import Testing
 @MainActor
 struct TerminalViewModelDialTests {
 
+    private actor RecordingWriter: SSHPTYWriter {
+        var writes: [Data] = []
+        let fails: Bool
+        init(fails: Bool = false) { self.fails = fails }
+        func write(_ data: Data) async throws {
+            if fails { throw SSHError.sessionClosed }
+            writes.append(data)
+        }
+        func resize(cols: Int, rows: Int) async throws {}
+    }
+
+    @Test("Confirmed SSH submit preserves input order and surfaces write failures")
+    func confirmedWrites() async throws {
+        for fails in [false, true] {
+            let writer = RecordingWriter(fails: fails)
+            let transport = QuietTransport(writer: writer)
+            let model = TerminalViewModel(connection: connection(), dial: { config, _, _ in
+                SSHSession(connection: config, transport: transport)
+            })
+            await model.start()
+            model.send(Data("before".utf8))
+            do {
+                try await model.sendConfirmed(Data("draft\r".utf8))
+                #expect(!fails)
+            } catch { #expect(fails) }
+            if !fails { #expect(await writer.writes == [Data("before".utf8), Data("draft\r".utf8)]) }
+            await model.disconnect()
+        }
+    }
+
     private func connection() -> ServerConnection {
         ServerConnection(
             name: "dial",

@@ -330,6 +330,22 @@ final class ShortcutStore {
         }
     }
 
+    /// Contextual overflow; keep the stored toolbar untouched for other screens.
+    func supplementaryToolbar(forHost hostName: String?, inMultiplexer: Bool) -> [TerminalShortcut] {
+        toolbar(forHost: hostName, inMultiplexer: inMultiplexer).filter { shortcut in
+            switch shortcut.kind {
+            case .ctrl, .arrows, .dpad, .scroll, .mic, .image, .files:
+                return false
+            case .keyCombo:
+                let primary = ["\u{1b}", "\u{1b}[A", "\u{1b}[B", "\u{1b}[C", "\u{1b}[D",
+                               "\u{1b}OA", "\u{1b}OB", "\u{1b}OC", "\u{1b}OD"].map { Data($0.utf8) }
+                return !primary.contains(shortcut.encodedBytes() ?? Data())
+            case .paste, .text, .command:
+                return true
+            }
+        }
+    }
+
     func add(_ shortcut: TerminalShortcut) {
         reloadIfNeeded()
         var sc = shortcut

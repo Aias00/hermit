@@ -16,6 +16,8 @@ final class ThemeFlowUITest: XCTestCase {
     /// Settings → Theme, returning the gallery's navigation bar.
     @MainActor
     private func openGallery(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons["主机与设置"].tap()
+        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
 
@@ -36,6 +38,7 @@ final class ThemeFlowUITest: XCTestCase {
     func testGalleryListsBuiltInsAndSwitchesSelection() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         _ = openGallery(app)
 
@@ -60,6 +63,7 @@ final class ThemeFlowUITest: XCTestCase {
     func testDuplicateEditAndSaveBecomesSelection() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         _ = openGallery(app)
 
@@ -102,6 +106,7 @@ final class ThemeFlowUITest: XCTestCase {
     func testImportPastedPaletteCreatesSelectableTheme() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         _ = openGallery(app)
 
@@ -130,6 +135,7 @@ final class ThemeFlowUITest: XCTestCase {
     func testDeleteCustomThemeFallsBackToDefault() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         _ = openGallery(app)
 

@@ -20,6 +20,9 @@ enum PredictMode: String, CaseIterable {
 /// computed over UserDefaults with the access/withMutation pattern.
 @Observable
 final class AppSettings {
+    /// Hidden until the agent notification feature is ready for release.
+    static let agentNotificationsAvailable = false
+
     @ObservationIgnored private let defaults: UserDefaults
 
     /// The same store, for collaborators that persist their own bookkeeping
@@ -56,6 +59,19 @@ final class AppSettings {
     func reloadIfNeeded() {
         guard !isAuthoritative, readiness.isReadable(defaults) else { return }
         isAuthoritative = true
+        // Upgrade existing small defaults once; subsequent pinch/settings choices remain user-owned.
+        if !defaults.bool(forKey: "moshpit.settings.readableFont.v1") {
+            let previous = defaults.object(forKey: "moshpit.settings.fontSize") as? Double ?? 9
+            if previous < 13 { defaults.set(13.0, forKey: "moshpit.settings.fontSize") }
+            defaults.set(true, forKey: "moshpit.settings.readableFont.v1")
+        }
+        if !defaults.bool(forKey: "moshpit.settings.remoteNavy.v1") {
+            let previous = defaults.string(forKey: "moshpit.settings.themeId")
+            if previous == nil || previous == "github-dark" {
+                defaults.set("remote-navy", forKey: "moshpit.settings.themeId")
+            }
+            defaults.set(true, forKey: "moshpit.settings.remoteNavy.v1")
+        }
         readiness.markReadable(defaults)
         mirrorPushPrefs()
     }
@@ -77,12 +93,12 @@ final class AppSettings {
     // MARK: DISPLAY
 
     var fontSize: Double {
-        get { access(keyPath: \.fontSize); return get("moshpit.settings.fontSize", 9.0) }
+        get { access(keyPath: \.fontSize); return get("moshpit.settings.fontSize", 13.0) }
         set { withMutation(keyPath: \.fontSize) { defaults.set(newValue, forKey: "moshpit.settings.fontSize") } }
     }
 
     var themeId: String {
-        get { access(keyPath: \.themeId); return get("moshpit.settings.themeId", "github-dark") }
+        get { access(keyPath: \.themeId); return get("moshpit.settings.themeId", "remote-navy") }
         set { withMutation(keyPath: \.themeId) { defaults.set(newValue, forKey: "moshpit.settings.themeId") } }
     }
 

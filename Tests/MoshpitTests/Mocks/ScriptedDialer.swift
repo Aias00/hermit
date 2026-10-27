@@ -71,6 +71,9 @@ final class QuietTransport: SSHClientTransport, @unchecked Sendable {
     private var _shutdowns = 0
     var shutdowns: Int { lock.withLock { _shutdowns } }
 
+    let ptyWriter: any SSHPTYWriter
+    init(writer: any SSHPTYWriter = Writer()) { ptyWriter = writer }
+
     final class Writer: SSHPTYWriter, @unchecked Sendable {
         func write(_ data: Data) async throws {}
         func resize(cols: Int, rows: Int) async throws {}
@@ -81,7 +84,7 @@ final class QuietTransport: SSHClientTransport, @unchecked Sendable {
     func openPTY(rows: Int, cols: Int,
                  onOutput: @escaping @Sendable (Data) -> Void,
                  onEnd: @escaping @Sendable () -> Void) async throws -> any SSHPTYWriter {
-        Writer()
+        ptyWriter
     }
 
     func shutdown() async { lock.withLock { _shutdowns += 1 } }

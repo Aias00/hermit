@@ -7,6 +7,21 @@ import Testing
 /// can be pinned here; the gesture that drives it only feeds in translations.
 @Suite("Scroll motion")
 struct ScrollMotionTests {
+    @Test("Narrow remote grids fill the phone without shrinking desktop text")
+    func fitsNarrowRemoteGrid() {
+        #expect(RemoteViewportGeometry.fittedFontSize(preferred: 9.57, columns: 41, cellWidth: 8, viewportWidth: 414) > 13)
+        #expect(RemoteViewportGeometry.fittedFontSize(preferred: 13, columns: 180, cellWidth: 8, viewportWidth: 414) == 13)
+        #expect(RemoteViewportGeometry.fittedFontSize(preferred: 22, columns: 41, cellWidth: 14, viewportWidth: 414) == 22)
+        #expect(RemoteViewportGeometry.fittedFontSize(preferred: 13, columns: 2, cellWidth: 8, viewportWidth: 414) == 18)
+    }
+    @Test("A remote viewport stays at native scale and clamps local panning")
+    func remoteViewportBounds() {
+        #expect(RemoteViewportGeometry.origin(current: nil, contentHeight: 800, viewportHeight: 500) == -300)
+        #expect(RemoteViewportGeometry.origin(current: -200, contentHeight: 800, viewportHeight: 500) == -200)
+        #expect(RemoteViewportGeometry.origin(current: 50, contentHeight: 800, viewportHeight: 500) == 0)
+        #expect(RemoteViewportGeometry.origin(current: -900, contentHeight: 800, viewportHeight: 500) == -300)
+        #expect(RemoteViewportGeometry.origin(current: nil, contentHeight: 200, viewportHeight: 500) == 300)
+    }
 
     @Test("sub-row travel carries over instead of being dropped")
     func carry() {

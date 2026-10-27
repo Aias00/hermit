@@ -283,19 +283,26 @@ struct TerminalTheme: Identifiable, Codable, Equatable, Hashable {
         ansi: ["0A0C13", "E68988", "7DD49E", "E4B656", "5BD5F0", "B289F5", "5BD5F0", "F8F8FB"],
         isBuiltIn: true)
 
-    /// GitHub Dark — the app's default theme.
+    /// Classic GitHub Dark preset.
     static let githubDark = TerminalTheme(
         id: "github-dark", name: "GitHub Dark",
         background: "050507", foreground: "C9D1D9", cursor: "5FE3D8",
         ansi: ["484F58", "FF7B72", "3FB950", "D29922", "58A6FF", "BC8CFF", "39C5CF", "B1BAC4"],
         isBuiltIn: true)
 
+    /// Navy terminal surface matching the compact remote-workspace chrome.
+    static let remoteNavy = TerminalTheme(
+        id: "remote-navy", name: "Remote Navy",
+        background: "0D1B28", foreground: "BAC5D2", cursor: "8AB4F8",
+        ansi: ["263544", "E8859B", "9BCB8B", "E8D39A", "69AEF8", "BC9AE8", "77CFD3", "BAC5D2"],
+        isBuiltIn: true)
+
     static let builtIns: [TerminalTheme] = [
-        .githubDark, .liquidGlass, .bioluminescent, .dracula, .nord, .solarizedDark, .monokai, .tokyoNight
+        .remoteNavy, .githubDark, .liquidGlass, .bioluminescent, .dracula, .nord, .solarizedDark, .monokai, .tokyoNight
     ]
 
     /// The theme used when a stored `themeId` resolves to nothing.
-    static let fallback = TerminalTheme.githubDark
+    static let fallback = TerminalTheme.remoteNavy
 }
 
 // MARK: - Color hex conversion

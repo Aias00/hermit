@@ -16,6 +16,27 @@ import Testing
 @Suite("MoshTransport state machine")
 struct MoshTransportStateMachineTests {
 
+    @Test("Composer waits for the server ACK and fails when no ACK arrives")
+    func composerAcknowledgement() async throws {
+        let (transport, _, crypto) = try makeTransport()
+        let submit = Task { try await transport.sendAcknowledged(Data("draft\r".utf8), timeout: .seconds(1)) }
+        var target: UInt64 = 0
+        for _ in 0..<50 {
+            target = await transport.currentDiagnostics.lastUserNum
+            if target > 0 { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(target > 0)
+        let packet = try makeDatagram(crypto: crypto, seq: 0, id: 1, oldNum: 0, newNum: 0, ackNum: target)
+        await transport.handleDatagram(packet)
+        try await submit.value
+        do {
+            try await transport.sendAcknowledged(Data("retain\r".utf8), timeout: .milliseconds(20))
+            Issue.record("must not report an unacknowledged submission as delivered")
+        } catch {}
+        await transport.close()
+    }
+
     // MARK: Fake channel
 
     /// A `DatagramChannel` that records sends and lets a test hand datagrams to

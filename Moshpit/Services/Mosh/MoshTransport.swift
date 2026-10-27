@@ -352,6 +352,20 @@ actor MoshTransport {
         return userStates.last?.num
     }
 
+    func sendAcknowledged(_ data: Data, timeout: Duration = .seconds(12)) async throws {
+        guard !closed, let target = send(data) else { throw SSHError.sessionClosed }
+        let deadline = ContinuousClock.now + min(timeout, .milliseconds(keystrokeTTLMs))
+        while true {
+            try Task.checkCancellation()
+            guard !closed else { throw SSHError.sessionClosed }
+            // Once the transport's keystroke TTL expires, an ACK can describe
+            // a state from which the input was already pruned. Stay uncertain.
+            guard ContinuousClock.now < deadline else { throw HerdrControlClient.SubmissionError.unconfirmed }
+            if serverAckedUserNum >= target { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     func resize(cols: Int, rows: Int) {
         guard cols != self.cols || rows != self.rows else { return }
         self.cols = cols
@@ -681,7 +695,11 @@ actor MoshTransport {
             datagramsReceived: datagramsReceived,
             parseFailures: parseFailures,
             gapEvents: gapEvents,
-            appliedHostNum: appliedHostNum)
+            appliedHostNum: appliedHostNum,
+            packetsSent: sendSeq,
+            lastUserNum: userStates.last?.num ?? 0,
+            serverAckedUserNum: serverAckedUserNum,
+            channelState: String(describing: channel.state))
     }
 
     /// Monotonic milliseconds.

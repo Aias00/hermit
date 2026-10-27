@@ -37,7 +37,7 @@ func withTimeoutValue<T: Sendable>(_ seconds: Double,
 /// First resume wins, the loser is dropped — the once-guard that lets the
 /// deadline arm and the (possibly cancellation-ignoring) op arm both try to
 /// answer without a double-resume crash.
-private final class OnceContinuation<V>: @unchecked Sendable {
+final class OnceContinuation<V>: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<V, Never>?
     init(_ continuation: CheckedContinuation<V, Never>) { self.continuation = continuation }
@@ -458,8 +458,12 @@ final class SessionHub {
                                tmuxController: TmuxSessionController? = nil,
                                moshServerPid pid: Int? = nil,
                                moshHadFirstContact hadContact: Bool = false,
-                               armFirstFrame: Bool = false) {
+                               armFirstFrame: Bool = false,
+                               herdrFrameSession: SSHSession? = nil,
+                               pendingHerdrCloses: Int = 0) {
             self.moshTransport = transport
+            self.herdrFrameSSH = herdrFrameSession
+            self.herdrExpectedCloses = pendingHerdrCloses
             self.sidecarSSH = ssh
             self.herdrControl = control
             if let moshControl { self.moshControl = moshControl }
@@ -562,6 +566,17 @@ final class SessionHub {
         func releaseWindowPinsForBackground() {
             tmuxController?.releaseWindowPins()
             moshControl?.releaseWindowPins()
+            herdrFrameSuspended = true
+            herdrForegroundRecovery?.cancel()
+            herdrForegroundRecovery = nil
+            herdrRetargetTask?.cancel()
+            herdrBootFallbackTask?.cancel()
+            signalHerdrReleaseAck()
+            if herdrFrameTarget != nil {
+                herdrExpectedCloses += 1
+                herdrFrameTarget = nil
+                writeFrameCommand(HerdrFrameCommand.release)
+            }
         }
 
         /// Wait for the commands ``releaseWindowPinsForBackground()`` queued to
@@ -575,6 +590,7 @@ final class SessionHub {
         func flushBackgroundTeardown() async {
             await tmuxController?.flushPendingWrites()
             await moshControl?.flushPendingWrites()
+            await herdrWriteChain?.value
         }
 
         /// Re-pin the active window to the phone grid when the terminal returns to
@@ -582,6 +598,36 @@ final class SessionHub {
         func repinForeground() {
             tmuxController?.repinActiveWindow()
             moshControl?.repinActiveWindow()
+            resumeHerdrFrames()
+        }
+
+        /// A release ACK may be lost when iOS suspends the socket. Never leave
+        /// reattachment gated forever on that old ACK; rebuild after a bound.
+        func resumeHerdrFrames() {
+            herdrFrameSuspended = false
+            herdrControl?.quicken()
+            guard herdrFrameSSH != nil, herdrExpectedCloses > 0,
+                  herdrForegroundRecovery == nil else { return }
+            let generation = herdrFrameGeneration
+            herdrForegroundRecovery = Task { [weak self] in
+                guard let self else { return }
+                await awaitHerdrReleaseAck(timeout: herdrForegroundRecoveryDeadline)
+                // A probe already in flight must finish before reconnect(),
+                // whose reentrancy guard would otherwise silently discard this recovery.
+                while (isResuming || isReconnecting), !Task.isCancelled,
+                      !herdrFrameSuspended, herdrFrameGeneration == generation {
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+                guard !Task.isCancelled, !herdrFrameSuspended,
+                      herdrFrameGeneration == generation else {
+                    if herdrFrameGeneration == generation { herdrForegroundRecovery = nil }
+                    return
+                }
+                let lostAck = herdrExpectedCloses > 0
+                herdrForegroundRecovery = nil
+                if lostAck { await forceResume() }
+                else { herdrControl?.quicken() }
+            }
         }
 
         /// Called on the main actor with (srttMs, roaming) from the mosh
@@ -720,6 +766,12 @@ final class SessionHub {
         /// channel isn't running. Also the "am I in frame mode?" flag that
         /// `sendInput` and the scroll routing branch on.
         @ObservationIgnored private var herdrFrameTarget: String?
+        /// Authoritative grid of the latest frame; the foreground viewport requests its own size.
+        private(set) var herdrRemoteGrid: (cols: Int, rows: Int)?
+        @ObservationIgnored private var herdrFrameSuspended = false
+        @ObservationIgnored private var herdrForegroundRecovery: Task<Void, Never>?
+        @ObservationIgnored var herdrForegroundRecoveryDeadline: Duration = .milliseconds(1500)
+        @ObservationIgnored private var herdrFrameGeneration = UUID()
         /// The channel carrying frames — the session's own PTY, so retargeting
         /// costs a command, not a connection.
         @ObservationIgnored private var herdrFrameSSH: SSHSession?
@@ -872,6 +924,34 @@ final class SessionHub {
             sendInput(payload)
         }
 
+        /// Submit a draft without treating a silent input drop as success.
+        func submitLine(_ text: String) async throws {
+            guard viewModel.connState == .live else { throw SSHError.sessionClosed }
+            if let herdr = herdrControl, connection.multiplexer == .herdr {
+                guard let pane = herdr.snapshot.activePaneId else { throw SSHError.ptyNotReady }
+                try await herdr.submitLine(text, paneId: pane)
+            } else if let controller = tmuxController {
+                guard let pane = controller.snapshot.activePaneId else { throw SSHError.ptyNotReady }
+                try await controller.submitLine(text, paneId: pane)
+            } else if let transport = moshTransport {
+                await moshWriteChain?.value
+                guard viewModel.connState == .live else { throw SSHError.sessionClosed }
+                var payload = Data(text.utf8)
+                if activeTerminal?.bracketedPasteMode == true {
+                    payload = Data("\u{1b}[200~".utf8) + payload + Data("\u{1b}[201~".utf8)
+                }
+                let out = Self.moshInputKeys(payload + Data([0x0d]), inCopyMode: moshInCopyMode)
+                moshInCopyMode = false
+                try await transport.sendAcknowledged(out)
+            } else {
+                var payload = Data(text.utf8)
+                if activeTerminal?.bracketedPasteMode == true {
+                    payload = Data("\u{1b}[200~".utf8) + payload + Data("\u{1b}[201~".utf8)
+                }
+                try await viewModel.sendConfirmed(payload + Data([0x0d]))
+            }
+        }
+
         /// Single entry point for user input (keyboard, shortcut bar, paste).
         /// Routes to the correct transport so callers don't have to know
         /// whether this session is tmux / mosh / plain SSH.
@@ -899,9 +979,16 @@ final class SessionHub {
             // application-mode sequence) then never fire — the "no up/down
             // history under herdr" report. One choke point catches both the
             // D-pad and a hardware keyboard's arrows.
-            if let herdr = herdrControl, let key = Self.arrowKeyName(data),
-               let paneId = herdr.snapshot.activePaneId {
-                herdr.sendKey(key, paneId: paneId)
+            if connection.multiplexer == .herdr, connection.connectionProtocol == .ssh,
+               (herdrFrameTarget == nil || !herdrFramePainted || herdrFrameSuspended) {
+                // Never write terminal input into the shell's retarget reader.
+                herdrNotice = "终端画面正在恢复，请稍后输入。"
+                herdrControl?.quicken()
+                return
+            }
+            if let herdr = herdrControl, let paneId = herdr.snapshot.activePaneId {
+                if let key = Self.arrowKeyName(data) { herdr.sendKey(key, paneId: paneId) }
+                else { herdr.sendBytes(data, paneId: paneId) }
                 return
             }
             // (SSH+tmux scrollback is LOCAL now — copy-mode is invisible to a
@@ -1079,7 +1166,7 @@ final class SessionHub {
         /// thumb / the swipe). tmux sessions — SSH or mosh — page tmux's real
         /// scrollback via copy-mode over the control channel; a plain shell pages
         /// the local SwiftTerm buffer. Positive = older output, negative = newer.
-        func scrollActiveTerminal(lines: Int) {
+        func scrollActiveTerminal(lines: Int, herdrSource: HerdrFrameCommand.ScrollSource = .wheel) {
             // Same gate as sendInput, with one exception: a swipe on a NOT-live
             // session must never write to the wire (mosh would queue wheel or
             // copy-mode bytes and replay them after resume — the same accident
@@ -1098,7 +1185,12 @@ final class SessionHub {
                 // grabbed the mouse — Claude Code, vim) or scrollback movement.
                 // No `#{mouse_any_flag}` lookup, no copy-mode dance, no
                 // first-swipe race to self-heal.
-                writeFrameCommand(HerdrFrameCommand.scroll(up: lines > 0, lines: abs(lines)))
+                let terminal = coordinator.terminalView?.getTerminal()
+                for command in HerdrFrameCommand.scrollCommands(
+                    lines: lines, cols: terminal?.cols ?? 80, rows: terminal?.rows ?? 24,
+                    source: herdrSource) {
+                    writeFrameCommand(command)
+                }
             } else if let transport = moshTransport, let control = moshControl {
                 // mosh+tmux: a mouse app (Claude Code etc.) gets a wheel forwarded
                 // over the mosh transport — tmux routes it to the app, which
@@ -1574,6 +1666,9 @@ final class SessionHub {
         /// so mosh+herdr keeps running herdr's own TUI.
         private func startHerdrFrames(over session: SSHSession) {
             herdrFrameSSH = session
+            herdrFrameSuspended = false
+            herdrFrameGeneration = UUID()
+            let generation = herdrFrameGeneration
             // A fresh PTY, so a fresh reader loop: whatever the previous
             // channel had booted died with it.
             herdrChannelBooted = false
@@ -1584,8 +1679,13 @@ final class SessionHub {
 
             // Keystrokes, size and scroll all become protocol messages now.
             coordinator.onInput = { [weak self] data in self?.sendInput(data) }
-            coordinator.onSizeChange = { [weak self] cols, rows in
-                self?.writeFrameCommand(HerdrFrameCommand.resize(cols: cols, rows: rows))
+            // Request geometry only for actual device layout changes. Remote
+            // repaint dimensions must never trigger a resize feedback loop.
+            coordinator.onSizeChange = { _, _ in }
+            coordinator.onViewportSizeChange = { [weak self] cols, rows in
+                guard let self, !self.herdrFrameSuspended, self.herdrFrameTarget != nil,
+                      self.herdrFramePainted else { return }
+                self.writeFrameCommand(HerdrFrameCommand.resize(cols: cols, rows: rows))
             }
             coordinator.onScroll = { [weak self] lines in
                 self?.scrollActiveTerminal(lines: lines)
@@ -1594,21 +1694,32 @@ final class SessionHub {
             pumpTask = Task { [weak self] in
                 var parser = HerdrFrameParser()
                 for await chunk in session.dataStream {
-                    if Task.isCancelled { break }
+                    if Task.isCancelled || self?.herdrFrameGeneration != generation { break }
                     for frame in parser.consume(chunk) {
                         switch frame {
-                        case .screen(_, _, _, let full, let bytes):
+                        case .screen(_, let cols, let rows, let full, let bytes):
+                            if cols > 0, rows > 0,
+                               self?.herdrRemoteGrid?.cols != cols || self?.herdrRemoteGrid?.rows != rows {
+                                self?.herdrRemoteGrid = (cols, rows)
+                                coordinator.remoteGrid = (cols, rows)
+                                coordinator.resize(cols: cols, rows: rows)
+                            }
                             // Frames are ready-to-write escape sequences, and a
                             // `full` one already starts with its own clear +
                             // home — so both kinds just get fed.
                             coordinator.feed(data: bytes)
                             await MainActor.run {
-                                guard let self else { return }
+                                guard let self, self.herdrFrameGeneration == generation else { return }
                                 // Painting again means we hold the channel, so
                                 // any contention warning is stale.
                                 if self.herdrNotice != nil { self.herdrNotice = nil }
                                 if self.herdrNoticeAction != nil { self.herdrNoticeAction = nil }
+                                let firstPaint = !self.herdrFramePainted
                                 self.herdrFramePainted = true
+                                if firstPaint, let viewport = coordinator.localViewportGrid,
+                                   viewport.cols != cols || viewport.rows != rows {
+                                    self.writeFrameCommand(HerdrFrameCommand.resize(cols: viewport.cols, rows: viewport.rows))
+                                }
                                 // A retarget's veil lifts on the first full
                                 // repaint — the frame we just fed IS the new
                                 // pane's screen, so there is nothing stale left
@@ -1623,14 +1734,14 @@ final class SessionHub {
                             }
                         case .loopReady:
                             await MainActor.run {
-                                guard let self else { return }
+                                guard let self, self.herdrFrameGeneration == generation else { return }
                                 self.herdrLoopReady = true
                                 self.herdrBootFallbackTask?.cancel()
                                 self.herdrBootFallbackTask = nil
                             }
                         case .closed:
                             await MainActor.run {
-                                guard let self else { return }
+                                guard let self, self.herdrFrameGeneration == generation else { return }
                                 if self.herdrExpectedCloses > 0 {
                                     // Our own release during a retarget — the
                                     // new target is already set, leave it be.
@@ -1640,6 +1751,7 @@ final class SessionHub {
                                     // stdin, so the next target can be written
                                     // without being swallowed by it.
                                     self.signalHerdrReleaseAck()
+                                    if !self.herdrFrameSuspended { self.herdrControl?.quicken() }
                                 } else {
                                     // Somebody else took the pane, or it went
                                     // away. Either way stop claiming to render
@@ -1664,7 +1776,7 @@ final class SessionHub {
                             }
                         case .fault(let message):
                             await MainActor.run {
-                                guard let self else { return }
+                                guard let self, self.herdrFrameGeneration == generation else { return }
                                 // herdr refused the attach and said why —
                                 // version skew is the live example. Show the
                                 // words, stop claiming the pane, and back off:
@@ -1732,6 +1844,7 @@ final class SessionHub {
         /// evicted by another client's `--takeover` (herdr's direct attach is
         /// exclusive per terminal, so that can happen with the focus unchanged).
         private func retargetHerdrFrames(to paneId: String) {
+            guard !herdrFrameSuspended, herdrExpectedCloses == 0 else { return }
             if let retryAfter = herdrRetryAfter {
                 guard Date() >= retryAfter else { return }
                 herdrRetryAfter = nil
@@ -1748,6 +1861,10 @@ final class SessionHub {
                       Date().timeIntervalSince(askedAt) > Self.herdrAttachTimeout
                 else { return }
             }
+            guard herdrControl?.snapshot.panes[paneId] != nil else { return }
+            let preservedGrid = coordinator.localViewportGrid ?? Self.estimateGrid(fontSize: lastFontSize)
+            herdrRemoteGrid = preservedGrid
+            coordinator.remoteGrid = preservedGrid
             let hadTarget = herdrFrameTarget != nil
             herdrFrameTarget = paneId
             herdrFramePainted = false
@@ -1807,7 +1924,7 @@ final class SessionHub {
                 // No parser reset needed: a truncated line from the old target
                 // fails to parse and is dropped, and the new target opens with
                 // a full repaint — so at worst one dead line is skipped.
-                let grid = coordinator.lastReportedSize ?? Self.estimateGrid(fontSize: lastFontSize)
+                let grid = preservedGrid
                 if herdrLoopReady {
                     writeFrameCommand(HerdrFrameCommand.retarget(
                         target: paneId, cols: grid.cols, rows: grid.rows))
@@ -1873,7 +1990,7 @@ final class SessionHub {
                       !herdrLoopReady, !herdrFramePainted,
                       let target = herdrFrameTarget else { return }
                 Log.ssh.error("herdr retarget loop never answered — one-shot attach")
-                let grid = coordinator.lastReportedSize ?? Self.estimateGrid(fontSize: lastFontSize)
+                guard let grid = herdrRemoteGrid else { return }
                 writeFrameCommand(HerdrFrameCommand.start(
                     target: target, cols: grid.cols, rows: grid.rows,
                     customPath: connection.herdrPath))
@@ -2736,6 +2853,9 @@ final class SessionHub {
             }
             herdrFrameTarget = nil
             herdrFrameSSH = nil
+            herdrFrameGeneration = UUID()
+            herdrForegroundRecovery?.cancel()
+            herdrForegroundRecovery = nil
             herdrWriteChain = nil
             // The reader loop lives inside the PTY we're about to drop, so a
             // reconnect boots a fresh one rather than inheriting this state.
@@ -3059,6 +3179,12 @@ final class SessionHub {
         /// session.
         func resumeIfNeeded(probeTimeout: Double? = nil) async {
             guard !isStopping, !isReconnecting, !isResuming else { return }
+            if herdrFrameSSH != nil, herdrExpectedCloses > 0, !herdrFrameSuspended {
+                // The render recovery owns this transition; don't race it with
+                // an SSH probe that would gate-block its reconnect.
+                resumeHerdrFrames()
+                return
+            }
             // Nothing up yet, or nothing up any more: there is no transport
             // to probe, so redial / reconnect now instead of returning.
             if await retryIfDown(stalledDialAfter: stalledDialGrace, reason: "foreground") { return }
@@ -3357,6 +3483,7 @@ final class SessionHub {
             // and queueing commands on a channel we are about to declare dead
             // only re-lists the window as a pin the teardown must then undo.
             if !force { visibleSession?.repinForeground() }
+            else { visibleSession?.resumeHerdrFrames() }
             Task { await resumeAll(force: force) }
             guard keepAliveTimer == nil else { return }
             keepAliveTimer = Timer.scheduledTimer(withTimeInterval: keepAliveInterval, repeats: true) { [weak self] _ in

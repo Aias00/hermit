@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import UIKit
+import Metal
 import SwiftTerm
 @testable import Moshpit
 
@@ -20,6 +21,41 @@ struct TerminalHostContainerTests {
     private func makeTerminalView(frame: CGRect = .zero) -> TerminalView {
         TerminalView(frame: frame,
                      font: UIFont.monospacedSystemFont(ofSize: 12, weight: .regular))
+    }
+
+    @Test("default and saved Metal preferences preserve the terminal grid", arguments: [false, true])
+    @MainActor
+    func rendererSwitchPreservesGrid(_ hasSavedPreference: Bool) throws {
+        let key = TerminalHostContainer.metalPreferenceKey
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        let frame = CGRect(x: 0, y: 0, width: 390, height: 600)
+        let terminal = makeTerminalView(frame: frame)
+        let container = TerminalHostContainer(frame: frame)
+        if hasSavedPreference { UserDefaults.standard.set(true, forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
+        container.host(terminal)
+        #expect(!terminal.isUsingMetalRenderer)
+        let model = terminal.getTerminal()
+        let columns = model.cols
+        let rows = model.rows
+        let window = UIWindow(frame: frame)
+        window.addSubview(container)
+        if MTLCreateSystemDefaultDevice() != nil {
+            #expect(terminal.isUsingMetalRenderer)
+        }
+        // Unsupported devices keep the existing renderer; capable devices
+        // must be able to return to it without replacing terminal state.
+        UserDefaults.standard.set(false, forKey: key)
+        NotificationCenter.default.post(name: TerminalHostContainer.rendererPreferenceChanged, object: nil)
+        #expect(!terminal.isUsingMetalRenderer)
+        #expect(terminal.getTerminal() === model)
+        #expect(model.cols == columns)
+        #expect(model.rows == rows)
+        container.removeFromSuperview()
     }
 
     /// Documents the hazard that motivates the screen-sized birth frame: a

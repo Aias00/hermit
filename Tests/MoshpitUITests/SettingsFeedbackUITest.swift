@@ -19,6 +19,8 @@ final class SettingsFeedbackUITest: XCTestCase {
             app.launchArguments += ["-AppleLanguages", "(\(languages.joined(separator: ", ")))"]
         }
         app.launch()
+        app.buttons["主机与设置"].tap()
+        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         return app
     }

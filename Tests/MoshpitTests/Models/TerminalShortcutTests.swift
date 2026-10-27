@@ -211,6 +211,33 @@ struct ShortcutStoreTests {
         #expect(allBuiltin)
     }
 
+    @Test("Overflow contains complementary actions without changing saved toolbar choices")
+    func supplementaryDefaults() {
+        let store = freshStore()
+        let saved = store.toolbar
+        let extra = store.supplementaryToolbar(forHost: "test", inMultiplexer: true)
+        #expect(extra.map(\.chipLabel) == ["tab", "^C", "paste"])
+        #expect(store.toolbar == saved)
+    }
+
+    @Test("Overflow preserves host-scoped custom shortcuts and removes raw Escape aliases")
+    func supplementaryScopesAndAliases() {
+        let store = freshStore()
+        var custom = TerminalShortcut()
+        custom.key = "home"
+        custom.chipLabel = "Home"
+        custom.scopeHosts = ["host-a"]
+        store.add(custom)
+        var alias = TerminalShortcut()
+        alias.key = "x"
+        alias.payload = "\u{1b}"
+        alias.chipLabel = "custom-esc"
+        store.add(alias)
+        #expect(store.supplementaryToolbar(forHost: "host-a", inMultiplexer: true).contains { $0.id == custom.id })
+        #expect(!store.supplementaryToolbar(forHost: "host-b", inMultiplexer: true).contains { $0.id == custom.id })
+        #expect(!store.supplementaryToolbar(forHost: "host-a", inMultiplexer: true).contains { $0.id == alias.id })
+    }
+
     @Test("the core editing keys always fit a phone-width row")
     func defaultToolbarCoreKeysFitOnScreen() throws {
         // The contract CHANGED when the image chip joined the defaults: the

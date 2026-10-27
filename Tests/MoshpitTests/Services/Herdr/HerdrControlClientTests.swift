@@ -11,7 +11,7 @@ struct HerdrControlClientTests {
     /// Records every command and replies with whatever the test queued.
     final class FakeRunner: HerdrCommandRunner, @unchecked Sendable {
         /// Per-command behaviour for tests that speak more than one command.
-        enum Scripted { case reply(String), hang, fail }
+        enum Scripted { case reply(String), delayedReply(String), hang, fail }
 
         private let lock = NSLock()
         private var _commands: [String] = []
@@ -43,6 +43,9 @@ struct HerdrControlClientTests {
             switch action {
             case .reply(let text):
                 return text
+            case .delayedReply(let text):
+                try await Task.sleep(for: .milliseconds(50))
+                return text
             case .fail:
                 throw SSHError.sessionClosed
             case .hang:
@@ -52,6 +55,77 @@ struct HerdrControlClientTests {
                 throw SSHError.sessionClosed
             }
         }
+    }
+
+    @Test("Delayed text, arrows and composer submits keep acknowledged FIFO order")
+    func inputOrderingAcrossKinds() async throws {
+        let runner = FakeRunner()
+        runner.setScript { _ in .delayedReply("__moshpit_rc=0") }
+        let client = HerdrControlClient(runner: runner)
+        client.sendBytes(Data("abc".utf8), paneId: "w1:p1")
+        client.sendKey("left", paneId: "w1:p1")
+        client.sendBytes(Data("中文".utf8), paneId: "w1:p1")
+        try await client.submitLine("draft", paneId: "w1:p1")
+        let commands = runner.commands.filter { !$0.contains("api snapshot") }
+        #expect(commands.count == 4)
+        #expect(commands[0].contains("pane send-text 'w1:p1' 'abc'"))
+        #expect(commands[1].contains("pane send-keys 'w1:p1' 'left'"))
+        #expect(commands[2].contains("pane send-text 'w1:p1' '中文'"))
+        #expect(commands[3].contains("pane run 'w1:p1' 'draft'"))
+        client.stop()
+    }
+
+    @Test("An unconfirmed earlier input stops subsequent keys instead of replaying a partial command")
+    func failedInputStopsFollowingKeys() async {
+        let runner = FakeRunner(response: "__moshpit_rc=1")
+        let client = HerdrControlClient(runner: runner)
+        client.sendBytes(Data("abc".utf8), paneId: "w1:p1")
+        client.sendKey("up", paneId: "w1:p1")
+        do { try await client.flushInput(); Issue.record("must fail") } catch {}
+        #expect(runner.commands.count == 1)
+        client.stop()
+    }
+
+    @Test("Composer submits text and Enter as one acknowledged server operation")
+    func submitsOneOperation() async throws {
+        let runner = FakeRunner(response: "__moshpit_rc=0")
+        let client = HerdrControlClient(runner: runner)
+        let text = "hello 'quoted'\nsecond line"
+        try await client.submitLine(text, paneId: "w1:p2")
+        let sends = runner.commands.filter { $0.contains("pane run ") }
+        #expect(sends.count == 1)
+        #expect(sends[0].contains(HerdrLaunch.quote(text)))
+        #expect(!sends[0].contains("pane send-keys"))
+        client.stop()
+    }
+
+    @Test("Failed or unacknowledged submissions never report success or retry")
+    func rejectsUnconfirmedSend() async {
+        for reply in ["__moshpit_rc=1", "missing acknowledgement"] {
+            let runner = FakeRunner(response: reply)
+            let client = HerdrControlClient(runner: runner)
+            do {
+                try await client.submitLine("test", paneId: "w1:p2", timeout: 0.1)
+                Issue.record("must retain draft when the command is not confirmed")
+            } catch {}
+            #expect(runner.commands.filter { $0.contains("pane run ") }.count == 1)
+            client.stop()
+        }
+    }
+
+    @Test("A hung send returns an unknown result within its deadline without resending")
+    func submissionDeadline() async {
+        let runner = FakeRunner()
+        runner.setScript { _ in .hang }
+        let client = HerdrControlClient(runner: runner)
+        let began = Date()
+        do {
+            try await client.submitLine("test", paneId: "w1:p2", timeout: 0.02)
+            Issue.record("a hung command cannot be acknowledged")
+        } catch {}
+        #expect(Date().timeIntervalSince(began) < 1)
+        #expect(runner.commands.count == 1)
+        client.stop()
     }
 
     nonisolated private static let twoWorkspaces = """
@@ -369,7 +443,7 @@ struct HerdrControlClientTests {
         await settle()
 
         let sent = Array(runner.commands[before...])
-        #expect(sent.contains { $0.contains("pane send-keys 'w1:p1' up") })
+        #expect(sent.contains { $0.contains("pane send-keys 'w1:p1' 'up'") })
         // Keystroke-rate traffic must not drag a snapshot read behind every
         // keypress — a cursor move changes nothing the sheets care about.
         #expect(!sent.contains { $0.contains("api snapshot") })

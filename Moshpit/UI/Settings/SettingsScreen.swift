@@ -118,6 +118,7 @@ struct SettingsScreen: View {
                     ) { showKeys = true }
                 }
 
+                if AppSettings.agentNotificationsAvailable {
                 FormGroup(
                     title: "NOTIFICATIONS",
                     footer: "Moshpit watches the active session for agent activity and posts a local alert when your agent needs attention — natively on herdr, via the bell and hooks on tmux."
@@ -162,6 +163,7 @@ struct SettingsScreen: View {
                             showOfflineHostInfo = true
                         }
                     }
+                }
                 }
 
                 voiceGroup(settings: $settings)

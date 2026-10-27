@@ -14,6 +14,8 @@ struct ImageAttachmentOverlayView: View {
     /// Insert AND press Return. Separate from `onInsert` because the
     /// keystroke that submits a Claude Code prompt executes a shell command.
     let onSend: () -> Void
+    /// Upload progress only: the ready paths automatically join the shared draft.
+    var stagesInComposer: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -162,6 +164,7 @@ struct ImageAttachmentOverlayView: View {
             HStack(spacing: 8) {
                 pillButton(String(localized: "Cancel"), prominent: false, action: onCancel)
                 Spacer(minLength: 0)
+                if !stagesInComposer {
                 // Insert leaves the paths on the prompt so the user can add the
                 // words around them; Send presses Return too. Two levels of trust,
                 // same as dictation — a Return at a shell prompt runs the line.
@@ -175,6 +178,7 @@ struct ImageAttachmentOverlayView: View {
                            disabled: !insertable,
                            action: onSend)
                     .accessibilityIdentifier("image-attach-send")
+                }
             }
         }
     }

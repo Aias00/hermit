@@ -4,6 +4,7 @@ import QuickLook
 import SwiftUI
 import SwiftTerm
 import UIKit
+import UniformTypeIdentifiers
 
 /// Live terminal screen. The UI chrome is visual-only; SwiftTerm, tmux routing,
 /// pinch, paste, keyboard shortcuts, and swipe gestures keep their existing
@@ -14,6 +15,19 @@ struct TerminalScreen: View {
     /// (transport pill, breadcrumb, reconnect) picks up the switch immediately.
     @State private var connection: ServerConnection
     let hub: SessionHub
+    private let initialCommand: String?
+    @State private var sentInitialCommand = false
+    @State private var composerText = ""
+    @State private var composerIsSending = false
+    @State private var composerSendError: String?
+    @State private var previewFontSize: Double?
+    @State private var displayedTerminalFontSize: Double?
+    @AppStorage("moshpit.conversation.manualZoom") private var manualZoom = false
+    @AppStorage("moshpit.conversation.nativeViewportVersion") private var nativeViewportVersion = 0
+    @AppStorage("moshpit.conversation.sidebar.visible") private var showsConversationSidebar = false
+    @AppStorage("moshpit.terminal.useMetal") private var useMetalRenderer = true
+    @State private var showsExtraKeys = false
+    @AppStorage("moshpit.composer.history.v1") private var composerHistory = Data()
     /// What "leave" means here. On an iPhone the screen is pushed and pops;
     /// on an iPad it is the detail column of a split view, where there is
     /// nothing to pop, so Home supplies the action. nil = `dismiss()`.
@@ -24,9 +38,11 @@ struct TerminalScreen: View {
     let onToggleSidebar: (() -> Void)?
 
     init(connection: ServerConnection, hub: SessionHub,
-         onLeave: (() -> Void)? = nil, onToggleSidebar: (() -> Void)? = nil) {
+         onLeave: (() -> Void)? = nil, onToggleSidebar: (() -> Void)? = nil,
+         initialCommand: String? = nil) {
         self._connection = State(initialValue: connection)
         self.hub = hub
+        self.initialCommand = initialCommand
         self.onLeave = onLeave
         self.onToggleSidebar = onToggleSidebar
     }
@@ -63,6 +79,7 @@ struct TerminalScreen: View {
     /// it — `AppSettings` arrives through the environment, which `init` cannot
     /// read.
     @State private var keyboardIntent: KeyboardIntent = .unasked
+    @State private var composerFocused = false
 
     private enum KeyboardIntent {
         /// Screen just opened; nobody has asked either way.
@@ -75,6 +92,7 @@ struct TerminalScreen: View {
     private var focusPolicy: TerminalFocusPolicy {
         // A sheet must never let the pane grab the keyboard back underneath it.
         if anySheetOpen { return .resign }
+        if composerFocused && keyboardIntent != .down { return .allow }
         switch keyboardIntent {
         case .unasked: return .allow
         case .up: return .take
@@ -107,6 +125,13 @@ struct TerminalScreen: View {
     /// when the picker returns (not on chip tap) so cancelling the picker
     /// leaves no state behind.
     @State private var imageAttachment: ImageAttachmentController?
+    #if DEBUG
+    @State private var seededImageDraft = false
+    #endif
+    @State private var filePickerPresented = false
+    @State private var fileUploadTask: Task<Void, Never>?
+    @State private var fileUploadProgress: Double = 0
+    @State private var fileUploadStatus: String?
     @State private var photoPickerPresented = false
     @State private var photoSelection: [PhotosPickerItem] = []
     /// Whether the clipboard currently carries an image — drives the chip
@@ -404,11 +429,33 @@ struct TerminalScreen: View {
     /// Breaking the chain into two separately-typed expressions bounds that.
     private var contentWithLifecycle: some View {
         ZStack(alignment: .top) {
-            Ink.terminalBG.ignoresSafeArea()
+            theme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 topBar
-                terminalBody
+                HStack(spacing: 0) {
+                    if showsConversationSidebar, let snapshot = tmuxSnapshot {
+                        ConversationWorkspaceSidebar(snapshot: snapshot, hooks: multiplexerAgentHooks,
+                            selectSession: { session in
+                                if let control = active?.herdrControl { control.selectSession(session) }
+                                else { active?.tmuxControl?.selectSession(session) }
+                            }, selectPane: { pane in
+                                if let control = active?.herdrControl { control.selectPane(pane) }
+                                else { active?.tmuxControl?.selectPane(pane) }
+                            }, manage: { presentSheet { showSessionsSheet = true } },
+                            create: {
+                                if let control = active?.herdrControl { control.newSession(named: nil) }
+                                else { presentSheet { showSessionsSheet = true } }
+                            }, collapse: { showsConversationSidebar = false })
+                            .frame(width: compactChrome ? 180 : 144)
+                    }
+                    VStack(spacing: 0) {
+                        if connection.multiplexer == .herdr, let snapshot = tmuxSnapshot {
+                            herdrTabStrip(snapshot)
+                        }
+                        terminalBody
+                    }
+                }
             }
             // The pane list populates a few round-trips after attach, so retry
             // the deep-link pane selection as the snapshot fills in (attach,
@@ -497,6 +544,10 @@ struct TerminalScreen: View {
         // (the reported "can't scroll history" jank).
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                if let active {
+                    hub.visibleSession = active
+                    active.resumeHerdrFrames()
+                }
                 clipboardHasImage = UIPasteboard.general.hasImages
                 // Foreground return can land with stale keyboard-avoidance
                 // geometry (an IME was up when the app left; iOS restores the
@@ -534,6 +585,11 @@ struct TerminalScreen: View {
         } action: { compactChrome = $0 }
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomAccessory }
         .task {
+            if nativeViewportVersion < 1 {
+                manualZoom = false
+                previewFontSize = nil
+                nativeViewportVersion = 1
+            }
             if settings.raiseKeyboardOnOpen { keyboardIntent = .up }
             await connectAndAttach()
         }
@@ -592,7 +648,6 @@ struct TerminalScreen: View {
         }
     }
 
-    @State private var autoCare = HostAutoCare.shared
 
     /// Identity of the session this screen is showing — a new object (protocol
     /// switch, Install Assist's fresh session) starts from "never live" again.
@@ -603,34 +658,20 @@ struct TerminalScreen: View {
 
     var body: some View {
         contentWithLifecycle
+        .onChange(of: launchIsConnected, initial: true) { _, connected in
+            #if DEBUG
+            if connected { seedImageDraftForUITest() }
+            #endif
+            guard connected, !sentInitialCommand, let command = initialCommand, !command.isEmpty else { return }
+            sentInitialCommand = true
+            active?.sendPaste(command)
+            active?.sendInput(Data([0x0D]))
+        }
         // The shell is keyboard-like chrome — 30pt chips, one-line crumbs, a
         // fixed-height bar — and, like the system keyboard, it does not grow
         // with the reading size. Text still scales one step; the terminal's
         // own font has its own setting.
         .dynamicTypeSize(...DynamicTypeSize.xLarge)
-        // The ONE question host automation is allowed to ask, once: everything
-        // else (pairing, script updates, registration) runs silently, but the
-        // first hook install edits the user's agent config and that write needs
-        // a yes. "Not Now" asks again next app run; "Don't Ask" never does —
-        // the Host Setup sheet stays available for a change of mind.
-        .alert(
-            String(localized: "Enable agent notifications on \(connection.displayName)?"),
-            isPresented: Binding(
-                get: { autoCare.needsConsent?.id == connection.id },
-                set: { if !$0 { autoCare.dismissConsent() } })
-        ) {
-            Button(String(localized: "Enable")) {
-                if let session = active {
-                    autoCare.grantConsent(connection: connection, session: session)
-                }
-            }
-            Button(String(localized: "Not Now"), role: .cancel) { autoCare.dismissConsent() }
-            Button(String(localized: "Don't Ask Again"), role: .destructive) {
-                autoCare.decline(connection: connection)
-            }
-        } message: {
-            Text(String(localized: "Moshpit installs its hook scripts in ~/.moshpit and registers them in Claude Code's settings, so agents can reach you when they need you. Everything can be removed from Host Setup."))
-        }
         .moshpitCard(isPresented: $showError) {
             MoshpitNoticeCard(
                 icon: "bolt.slash.fill",
@@ -658,6 +699,12 @@ struct TerminalScreen: View {
                     onReconnect: { reconnect() })
             }
         }
+        .fileImporter(isPresented: $filePickerPresented, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls): uploadLocalFiles(urls)
+            case .failure(let error): fileUploadStatus = error.localizedDescription
+            }
+        }
         .photosPicker(isPresented: $photoPickerPresented,
                       selection: $photoSelection,
                       maxSelectionCount: 10,
@@ -673,6 +720,9 @@ struct TerminalScreen: View {
                 controller.start(pickedData: [data])
             }
             .ignoresSafeArea()
+        }
+        .onChange(of: imageAttachment?.phase) { _, phase in
+            if phase == .ready { finishImageAttachment() }
         }
         .onChange(of: photoSelection) { _, items in
             guard !items.isEmpty else { return }
@@ -812,6 +862,126 @@ struct TerminalScreen: View {
     // MARK: - Top bar
 
     private var topBar: some View {
+        HStack(spacing: 9) {
+            conversationIcon("chevron.left", label: "返回", identifier: onToggleSidebar == nil ? "terminal-back" : "terminal-sidebar") {
+                if let onToggleSidebar { onToggleSidebar() } else { leave() }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 7) {
+                    Text(connection.displayName).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                    Text(connection.multiplexer == .none ? connection.connectionProtocol.label : connection.multiplexer.label)
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.cyan)
+                        .padding(.horizontal, 7).padding(.vertical, 3).background(.blue.opacity(0.15), in: Capsule())
+                }
+                Text(tmuxSnapshot?.activeSessionId.flatMap { tmuxSnapshot?.sessions[$0]?.name } ?? "\(connection.username)@\(connection.host)")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            conversationIcon("sidebar.leading", label: showsConversationSidebar ? "收起工作区侧栏" : "展开工作区侧栏", identifier: "conversation-sidebar") {
+                showsConversationSidebar.toggle()
+            }
+            .foregroundStyle(showsConversationSidebar ? Color.cyan : Color(red: 0.76, green: 0.82, blue: 0.89))
+            .accessibilityAddTraits(showsConversationSidebar ? [.isSelected] : [])
+            .disabled(tmuxSnapshot == nil)
+            conversationIcon("folder", label: "远程文件", identifier: "conversation-files") { active?.openWorkingDirectory() }.disabled(!launchIsConnected)
+            Menu {
+                Button("选择会话", systemImage: "rectangle.stack") { presentSheet { showSessionsSheet = true } }.disabled(tmuxSnapshot == nil)
+                Button("选择窗格", systemImage: "rectangle.split.2x2") { presentSheet { showPaneSheet = true } }.disabled(tmuxSnapshot == nil)
+                if connection.multiplexer == .herdr {
+                    Button("自动适配字号", systemImage: "textformat.size") {
+                        previewFontSize = nil
+                        manualZoom = false
+                        settings.fontSize = 13
+                    }
+                    Button("历史上一页", systemImage: "arrow.up.doc") {
+                        active?.scrollActiveTerminal(lines: 20, herdrSource: .pageKey)
+                    }.disabled(!launchIsConnected)
+                    Button("历史下一页", systemImage: "arrow.down.doc") {
+                        active?.scrollActiveTerminal(lines: -20, herdrSource: .pageKey)
+                    }.disabled(!launchIsConnected)
+                }
+                Button("切换 SSH / Mosh", systemImage: "network") { showProtocolSwitchConfirm = true }
+                Button("放大字体", systemImage: "textformat.size.larger") { adjustTerminalFont(by: 1) }.disabled(effectiveTerminalFontSize >= 32)
+                Button("缩小字体", systemImage: "textformat.size.smaller") { adjustTerminalFont(by: -1) }.disabled(effectiveTerminalFontSize <= 8)
+                Toggle("Metal 渲染", isOn: Binding(
+                    get: { useMetalRenderer },
+                    set: { enabled in
+                        useMetalRenderer = enabled
+                        NotificationCenter.default.post(name: TerminalHostContainer.rendererPreferenceChanged, object: nil)
+                    }))
+                    .accessibilityIdentifier("terminal-metal-renderer")
+                Button("重新连接", systemImage: "arrow.clockwise", action: reconnect)
+            } label: {
+                Image(systemName: "ellipsis.circle").font(.system(size: 19)).frame(width: 34, height: 34)
+                    .background(TerminalChrome.control, in: Circle())
+            }.accessibilityLabel("终端菜单").accessibilityIdentifier("conversation-menu")
+                .accessibilityValue(String(format: "%.1f pt", effectiveTerminalFontSize))
+        }.foregroundStyle(Color(red: 0.76, green: 0.82, blue: 0.89))
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(TerminalChrome.background)
+            .adaptivePresentation(isPresented: $showWindowsSheet) {
+                if let c = active?.tmuxControl { WindowsSheet(controller: c) } else if let h = active?.herdrControl { WindowsSheet(controller: h) }
+            }
+            .adaptivePresentation(isPresented: $showSessionsSheet) {
+                if let c = active?.tmuxControl { SessionsSheet(controller: c) } else if let h = active?.herdrControl { SessionsSheet(controller: h) }
+            }
+            .adaptivePresentation(isPresented: $showPaneSheet) {
+                if let c = active?.tmuxControl { SelectPaneSheet(controller: c) } else if let h = active?.herdrControl { SelectPaneSheet(controller: h) }
+            }
+            .confirmationDialog("切换连接协议？", isPresented: $showProtocolSwitchConfirm) {
+                Button("切换") { switchProtocol() }
+                Button("取消", role: .cancel) {}
+            } message: { Text("当前终端将重新连接。") }
+    }
+
+    /// Herdr tabs belong to the focused workspace; keep them visible beside the terminal.
+    private func herdrTabStrip(_ snapshot: TmuxSnapshot) -> some View {
+        let tabs = snapshot.windows.values.filter { $0.sessionId == snapshot.activeSessionId }
+            .sorted { $0.index == $1.index ? $0.id < $1.id : $0.index < $1.index }
+        return HStack(spacing: 4) {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(tabs) { tab in
+                            Button { active?.herdrControl?.selectWindow(tab.id) } label: {
+                                HStack(spacing: 5) {
+                                    Text(tab.name).lineLimit(1)
+                                }
+                                .font(.system(size: 12, weight: snapshot.activeWindowId == tab.id ? .semibold : .regular))
+                                .frame(minWidth: 50).frame(height: 24)
+                                .foregroundStyle(snapshot.activeWindowId == tab.id ? TerminalChrome.background : TerminalChrome.foreground)
+                                .background(snapshot.activeWindowId == tab.id ? TerminalChrome.selectedTab : .clear)
+                            }
+                            .buttonStyle(.plain).id(tab.id)
+                            .accessibilityIdentifier("herdr-tab-\(tab.id)")
+                            .accessibilityAddTraits(snapshot.activeWindowId == tab.id ? [.isSelected] : [])
+                        }
+                        Button { active?.herdrControl?.newWindow(named: nil) } label: {
+                            Image(systemName: "plus").frame(width: 34, height: 24)
+                        }.buttonStyle(.plain).accessibilityLabel("新建 herdr Tab")
+                            .accessibilityIdentifier("herdr-tab-add").disabled(!launchIsConnected)
+                    }
+                }
+                .onChange(of: snapshot.activeWindowId, initial: true) { _, id in
+                    if let id { proxy.scrollTo(id, anchor: .center) }
+                }
+            }
+            Button { presentSheet { showWindowsSheet = true } } label: {
+                Image(systemName: "rectangle.stack").frame(width: 32, height: 28)
+            }.accessibilityLabel("管理 herdr Tab").accessibilityIdentifier("herdr-tab-manager")
+        }
+        .padding(.horizontal, 3)
+        .background(TerminalChrome.background)
+        .accessibilityIdentifier("herdr-tabs")
+    }
+
+    private func conversationIcon(_ icon: String, label: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 18)).frame(width: 34, height: 34)
+                .background(TerminalChrome.control, in: Circle())
+        }.buttonStyle(.plain).accessibilityLabel(label).accessibilityIdentifier(identifier)
+    }
+
+    private var legacyTopBar: some View {
         HStack(spacing: 8) {
             Button {
                 if let onToggleSidebar { onToggleSidebar() } else { leave() }
@@ -1261,6 +1431,21 @@ struct TerminalScreen: View {
                       follow: sizeFollow != nil, state: connState)
     }
 
+    private func terminalSurface(_ active: SessionHub.ActiveSession, fontSize: Double? = nil,
+                                 focus: TerminalFocusPolicy? = nil) -> some View {
+        SwiftTerminalView(
+            theme: theme,
+            fontSize: fontSize ?? settings.fontSize,
+            fontName: settings.fontName,
+            cursorShape: settings.cursorShape,
+            cursorColorId: effectiveCursorColorId,
+            cursorBlink: settings.cursorBlink,
+            coordinator: active.coordinator,
+            focusPolicy: focus ?? focusPolicy,
+            geometryHeld: geometryHold)
+            .id(ObjectIdentifier(active.coordinator))
+    }
+
     @ViewBuilder
     private var terminalContent: some View {
         if let active {
@@ -1322,29 +1507,7 @@ struct TerminalScreen: View {
                     onCreate: { herdr.newSession(named: nil) },
                     onInstall: { installPackages = ["herdr"] })
             } else {
-                SwiftTerminalView(
-                    theme: theme,
-                    fontSize: settings.fontSize,
-                    fontName: settings.fontName,
-                    cursorShape: settings.cursorShape,
-                    cursorColorId: effectiveCursorColorId,
-                    cursorBlink: settings.cursorBlink,
-                    coordinator: active.coordinator,
-                    focusPolicy: focusPolicy,
-                    geometryHeld: geometryHold)
-                    // SwiftTerminalView.updateUIView is deliberately "cosmetic
-                    // only" (see its doc) — it never re-wires the underlying
-                    // TerminalView's delegate to a NEW coordinator. Reconnecting
-                    // onto a brand-new ActiveSession (switchProtocol(), Install
-                    // Assist) mints a brand-new coordinator, and without this
-                    // `.id()` the view keeps its old identity, so SwiftUI calls
-                    // updateUIView (not makeUIView) and the screen goes stale —
-                    // frozen on the old session's last frame, deaf to new input,
-                    // while the new session's output sits buffered in a
-                    // coordinator that never got attached. Keying on the
-                    // coordinator's identity forces a fresh makeUIView exactly
-                    // when (and only when) it actually changes.
-                    .id(ObjectIdentifier(active.coordinator))
+                terminalSurface(active)
             }
         } else {
             // No session yet (the screen exists because one is being opened) —
@@ -1355,6 +1518,34 @@ struct TerminalScreen: View {
     }
 
     // MARK: - Shortcut dispatch
+
+    private var effectiveTerminalFontSize: Double {
+        previewFontSize ?? (connection.multiplexer == .herdr ? displayedTerminalFontSize : nil) ?? settings.fontSize
+    }
+    private func adjustTerminalFont(by delta: Double) {
+        let size = RemoteViewportGeometry.adjustedFontSize(displayed: effectiveTerminalFontSize, delta: delta)
+        manualZoom = true
+        previewFontSize = nil
+        settings.fontSize = size
+    }
+    private func activateTerminalKeyboard() {
+        composerFocused = false
+        keyboardIntent = .up
+        // Complete SwiftUI's field resignation before acquiring terminal focus.
+        typingCoordinator?.hostContainer?.requestFocus(.take)
+    }
+
+    private func toggleKeyboard() {
+        if keyboardIntent == .up || composerFocused {
+            keyboardIntent = .down
+            composerFocused = false
+            typingCoordinator?.terminalView?.resignFirstResponder()
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        } else {
+            keyboardIntent = .up
+            composerFocused = true
+        }
+    }
 
     /// The coordinator receiving keyboard input right now (tmux active pane,
     /// or the single mosh/SSH coordinator).
@@ -1370,6 +1561,7 @@ struct TerminalScreen: View {
             coordinator.pendingCtrl = false
             ctrlArmed = false
         } else {
+            activateTerminalKeyboard()
             Haptics.tap()
             coordinator.pendingCtrl = true
             coordinator.onPendingCtrlConsumed = { ctrlArmed = false }
@@ -1445,7 +1637,16 @@ struct TerminalScreen: View {
         applyAppearance()
         // Pinch-zoom commits persist into Settings — otherwise the next
         // appearance pass snapped the size straight back.
-        session.coordinator.onFontSizeCommit = { size in settings.fontSize = size }
+        session.coordinator.onFontSizePreview = { size in
+            if connection.multiplexer == .herdr {
+                manualZoom = true
+                previewFontSize = size
+            }
+        }
+        session.coordinator.onFontSizeCommit = { size in
+            settings.fontSize = size
+            previewFontSize = nil
+        }
         session.tmuxController?.onFontSizeCommitted = { size in settings.fontSize = size }
         // When-ready, not right-now — see the connect-path call for why.
         monitor.trackWhenReady(connection: connection, session: session)
@@ -1582,6 +1783,159 @@ struct TerminalScreen: View {
     /// Split out of the main modifier chain for the same type-checker-budget
     /// reason as `contentWithLifecycle`.
     @ViewBuilder
+    private var launchIsConnected: Bool {
+        if let active, case .connected = active.viewModel.status { return true }
+        return false
+    }
+    private var draftComposer: some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 4) {
+                TerminalComposerView(text: $composerText, isFocused: $composerFocused,
+                    onFocus: {
+                        typingCoordinator?.hostContainer?.requestFocus(.allow)
+                        disarmStickyCtrlIfNeeded()
+                        keyboardIntent = .up
+                    })
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("terminal-composer")
+                    .contextMenu {
+                        ForEach(Array(sentComposerHistory.enumerated()), id: \.offset) { _, text in
+                            Button(String(text.prefix(70))) { composerText = text }
+                        }
+                    }
+                conversationIcon("paperplane.fill", label: "发送到终端", identifier: "conversation-send") { submitComposer() }
+                    .disabled(!launchIsConnected || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || composerIsSending || imageAttachment != nil || fileUploadTask != nil)
+            }
+            .padding(.leading, 12).padding(.trailing, 3).padding(.vertical, 3)
+            .background(TerminalChrome.control.opacity(0.85), in: RoundedRectangle(cornerRadius: 22))
+            Menu {
+                Button("照片图库", systemImage: "photo") { photoPickerPresented = true }
+                if CameraCaptureView.isAvailable {
+                    Button("拍照", systemImage: "camera") { showCamera = true }
+                }
+                Button("本地文件（单个最多 20 MB）", systemImage: "doc") { filePickerPresented = true }
+                Button("服务器文件", systemImage: "folder") { active?.openWorkingDirectory() }
+            } label: {
+                Image(systemName: "paperclip").font(.system(size: 19)).frame(width: 34, height: 34)
+                    .background(TerminalChrome.control, in: Circle())
+            }
+            .accessibilityLabel("添加附件").accessibilityIdentifier("conversation-attachments")
+            .disabled(!launchIsConnected || fileUploadTask != nil || imageAttachment != nil)
+            conversationIcon("hand.draw", label: "直接使用终端键盘", identifier: "conversation-direct-input") {
+                activateTerminalKeyboard()
+            }.disabled(!launchIsConnected)
+            Menu {
+                if sentComposerHistory.isEmpty { Text("暂无发送历史") }
+                ForEach(Array(sentComposerHistory.enumerated()), id: \.offset) { _, text in
+                    Button(String(text.prefix(70))) { composerText = text }
+                }
+                Button("清空发送历史", role: .destructive) { composerHistory = Data() }
+            } label: {
+                Image(systemName: "text.bubble").font(.system(size: 18)).frame(width: 34, height: 34)
+                    .background(TerminalChrome.control, in: Circle())
+            }.accessibilityLabel("发送历史")
+        }.padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 6)
+    }
+    private var sentComposerHistory: [String] {
+        (try? JSONDecoder().decode([String].self, from: composerHistory)) ?? []
+    }
+    private func submitComposer() {
+        guard launchIsConnected, !composerIsSending, imageAttachment == nil, fileUploadTask == nil,
+              !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let active else { return }
+        let text = composerText
+        composerSendError = nil
+        composerIsSending = true
+        Task { @MainActor in
+            defer { composerIsSending = false }
+            do {
+                try await active.submitLine(text)
+                var history = sentComposerHistory
+                history.removeAll { $0 == text }; history.insert(text, at: 0)
+                if let data = try? JSONEncoder().encode(Array(history.prefix(30))) { composerHistory = data }
+                if composerText == text { composerText = "" }
+            } catch {
+                composerSendError = error.localizedDescription
+            }
+        }
+    }
+    private var supplementaryKeysPanel: some View {
+        let shortcuts = shortcutStore.supplementaryToolbar(
+            forHost: connection.displayName,
+            inMultiplexer: active?.tmuxControl != nil || active?.herdrControl != nil)
+        return VStack(spacing: 12) {
+            HStack {
+                Text("补充快捷键").font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button { showsExtraKeys = false } label: {
+                    Image(systemName: "xmark").frame(width: 30, height: 30)
+                }.accessibilityLabel("关闭补充快捷键").accessibilityIdentifier("conversation-extra-keys-close")
+            }
+            if shortcuts.isEmpty {
+                Text("暂无补充快捷键，可在快捷键设置中添加。")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        ForEach(shortcuts) { shortcut in
+                            Button {
+                                showsExtraKeys = false
+                                send(shortcut: shortcut)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if shortcut.kind == .paste { Image(systemName: "doc.on.clipboard") }
+                                    Text(shortcut.kind == .paste ? "粘贴" : shortcut.chipLabel)
+                                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                                }.frame(maxWidth: .infinity).frame(height: 40)
+                                    .background(TerminalChrome.control, in: RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain).accessibilityLabel(shortcut.kind == .paste ? "粘贴" : shortcut.summary)
+                        }
+                    }
+                }.frame(height: min(200, CGFloat((shortcuts.count + 1) / 2) * 48))
+            }
+        }.padding(14).frame(width: 290)
+            .foregroundStyle(TerminalChrome.foreground).background(TerminalChrome.background)
+            .accessibilityElement(children: .contain).accessibilityIdentifier("conversation-extra-keys")
+    }
+
+    private var conversationKeyBar: some View {
+        HStack(spacing: 5) {
+            Button("Ctrl", action: toggleStickyCtrl)
+                .accessibilityIdentifier("conversation-ctrl")
+                .foregroundStyle(ctrlArmed ? .cyan : .white.opacity(0.8))
+                .accessibilityLabel(ctrlArmed ? "取消 Ctrl 修饰键" : "启用一次 Ctrl 修饰键")
+                .accessibilityAddTraits(ctrlArmed ? [.isSelected] : [])
+                .disabled(!launchIsConnected)
+            Button("Esc") {
+                disarmStickyCtrlIfNeeded()
+                active?.sendInput(Data([0x1B]))
+            }.disabled(!launchIsConnected)
+            Button { showsExtraKeys.toggle() } label: { Image(systemName: "square.grid.2x2") }
+                .accessibilityLabel("更多快捷键")
+                .accessibilityIdentifier("conversation-more-keys")
+                .foregroundStyle(showsExtraKeys ? Color.cyan : Color(red: 0.72, green: 0.80, blue: 0.88))
+                .accessibilityAddTraits(showsExtraKeys ? [.isSelected] : [])
+                .popover(isPresented: $showsExtraKeys, arrowEdge: .bottom) {
+                    supplementaryKeysPanel.presentationCompactAdaptation(.popover)
+                }
+            Button { sendArrow("up") } label: { Image(systemName: "arrow.up") }.accessibilityLabel("向上").disabled(!launchIsConnected)
+            Button { sendArrow("down") } label: { Image(systemName: "arrow.down") }.accessibilityLabel("向下").disabled(!launchIsConnected)
+            Button { sendArrow("left") } label: { Image(systemName: "arrow.left") }.accessibilityLabel("向左").disabled(!launchIsConnected)
+            Button { sendArrow("right") } label: { Image(systemName: "arrow.right") }
+                .accessibilityLabel("向右").accessibilityIdentifier("conversation-arrow-right")
+                .disabled(!launchIsConnected)
+            if settings.voiceInputEnabled {
+                Button { toggleDictation() } label: { Image(systemName: dictation == nil ? "mic" : "mic.fill") }.accessibilityLabel("语音输入")
+            }
+            Button { toggleKeyboard() } label: {
+                Image(systemName: keyboardIntent == .up ? "keyboard.chevron.compact.down" : "keyboard")
+            }.accessibilityLabel(keyboardIntent == .up ? "收起键盘" : "展开键盘")
+                .accessibilityIdentifier("conversation-keyboard-toggle")
+        }.font(.system(size: 15, weight: .medium)).buttonStyle(ConversationKeyStyle())
+            .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 10)
+    }
+
     private var bottomAccessory: some View {
         VStack(spacing: 0) {
             if let dictation {
@@ -1598,32 +1952,36 @@ struct TerminalScreen: View {
                     onCancel: { cancelImageAttachment() },
                     onRetry: { imageAttachment.retry() },
                     onInsert: { finishImageAttachment() },
-                    onSend: { finishImageAttachment(submit: true) })
+                    onSend: { finishImageAttachment(submit: true) },
+                    stagesInComposer: true)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if let preview = active?.remotePreview, preview.showsHUD {
                 RemotePreviewHUD(model: preview, onDismiss: { dismissRemotePreview() })
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            ShortcutBarView(
-                shortcuts: shortcutStore.toolbar(
-                    forHost: connection.displayName,
-                    inMultiplexer: active?.tmuxControl != nil || active?.herdrControl != nil),
-                onTap: send(shortcut:),
-                compact: compactChrome,
-                ctrlArmed: ctrlArmed,
-                onArrow: sendArrow,
-                onScroll: scrollHistory,
-                keyboardDown: keyboardIntent != .up,
-                onToggleKeyboard: { keyboardIntent = keyboardIntent == .up ? .down : .up },
-                micActive: dictation != nil,
-                onMic: settings.voiceInputEnabled ? { toggleDictation() } : nil,
-                imageHistory: active?.imageUploads.entries ?? [],
-                clipboardHasImage: clipboardHasImage,
-                onImagePasteboard: { beginClipboardImageAttachment() },
-                onImageCamera: CameraCaptureView.isAvailable ? { presentSheet { showCamera = true } } : nil,
-                onImageHistory: { insertUploadedImage($0) })
+            if let status = fileUploadStatus {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(status).font(.system(size: 13)).lineLimit(3)
+                        Spacer()
+                        Button(fileUploadTask == nil ? "关闭" : "取消") {
+                            fileUploadTask?.cancel()
+                            if fileUploadTask == nil { fileUploadStatus = nil }
+                        }
+                    }
+                    if fileUploadTask != nil { ProgressView(value: fileUploadProgress) }
+                }.padding(12).background(.white.opacity(0.07))
+            }
+            if let sendError = composerSendError ?? active?.herdrControl?.inputError {
+                Text(sendError).font(.system(size: 12)).foregroundStyle(.orange)
+                    .padding(.horizontal, 14).padding(.top, 6)
+            }
+            draftComposer
+            conversationKeyBar
         }
+        .foregroundStyle(Color(red: 0.72, green: 0.80, blue: 0.88))
+        .background(TerminalChrome.background)
         .animation(.easeOut(duration: 0.2), value: dictation == nil)
         .animation(.easeOut(duration: 0.2), value: imageAttachment == nil)
         .animation(.easeOut(duration: 0.2), value: active?.remotePreview?.showsHUD ?? false)
@@ -1690,12 +2048,31 @@ struct TerminalScreen: View {
         return controller
     }
 
+    #if DEBUG
+    /// Exercises the real upload and staging pipeline without automating Photos UI.
+    /// Confined to the explicitly seeded, isolated local test connection.
+    private func seedImageDraftForUITest() {
+        guard !seededImageDraft, connection.displayName == "Isolated-UI-Lab", connection.host == "127.0.0.1",
+              ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_IMAGE_DRAFT"),
+              let controller = makeImageAttachmentController() else { return }
+        seededImageDraft = true
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4))
+        let image = renderer.image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        if let data = image.pngData() { controller.start(pickedData: [data]) }
+    }
+    #endif
+
     /// Re-insert a previously uploaded image's path (from the chip's
     /// long-press menu) — no re-upload, the file is already on the server.
     private func insertUploadedImage(_ entry: ImageUploadLog.Entry) {
         disarmStickyCtrlIfNeeded()
-        active?.sendPaste(ImageAttachmentPipeline.insertText(
-            forRemotePaths: [entry.remotePath], style: activePaneInsertStyle))
+        composerText += ImageAttachmentPipeline.insertText(
+            forRemotePaths: [entry.remotePath], style: activePaneInsertStyle)
+        composerFocused = true
+        keyboardIntent = .up
         Haptics.tap()
     }
 
@@ -1714,19 +2091,61 @@ struct TerminalScreen: View {
         return .forAgent(agent)
     }
 
-    /// Paste the uploaded paths at the prompt. `sendPaste` (not raw bytes) so
-    /// bracketed-paste apps receive them as one block; `submit` appends the
-    /// Return AFTER the paste for the same reason dictation does — a CR inside
-    /// the ESC[200~…201~ wrapper is a literal newline, not a submit.
+    /// Images join the same editable draft as text; only the shared paper-plane
+    /// action commits it through the acknowledged submit path.
     private func finishImageAttachment(submit: Bool = false) {
         guard let controller = imageAttachment,
               let text = controller.insertText(style: activePaneInsertStyle) else { return }
-        active?.sendPaste(text)
-        if submit {
-            active?.sendInput(Data([0x0D]))
-        }
-        Haptics.success()
+        composerText += text
         imageAttachment = nil
+        composerFocused = true
+        keyboardIntent = .up
+        Haptics.success()
+        if submit { submitComposer() }
+    }
+
+    /// Upload through the existing private SSH upload directory, never through the PTY.
+    private func uploadLocalFiles(_ urls: [URL]) {
+        guard !urls.isEmpty, fileUploadTask == nil, let active else { return }
+        fileUploadProgress = 0
+        fileUploadStatus = "准备上传…"
+        fileUploadTask = Task { @MainActor in
+            defer { fileUploadTask = nil }
+            var completed = 0
+            do {
+                let ssh = try await active.acquireFileTransferSSH()
+                for url in urls {
+                    try Task.checkCancellation()
+                    fileUploadProgress = 0
+                    fileUploadStatus = "上传 \(completed + 1)/\(urls.count)：\(url.lastPathComponent)"
+                    let data = try await Task.detached {
+                        let scoped = url.startAccessingSecurityScopedResource()
+                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+                        guard values.isRegularFile == true else {
+                            throw NSError(domain: "Attachment", code: 1, userInfo: [NSLocalizedDescriptionKey: "请选择普通文件，文件夹请先压缩。"])
+                        }
+                        guard let size = values.fileSize, size <= 20 * 1024 * 1024 else {
+                            throw NSError(domain: "Attachment", code: 2, userInfo: [NSLocalizedDescriptionKey: "单个文件不能超过 20 MB。"])
+                        }
+                        return try Data(contentsOf: url)
+                    }.value
+                    try Task.checkCancellation()
+                    let name = UUID().uuidString + "-" + url.lastPathComponent
+                    let path = try await ssh.uploadToUploadsDirectory(data, named: name) { progress in
+                        Task { @MainActor in fileUploadProgress = progress }
+                    }
+                    // Preserve every completed upload even if a later file fails.
+                    composerText += ImageAttachmentPipeline.insertText(forRemotePaths: [path], style: .barePath)
+                    completed += 1
+                }
+                fileUploadStatus = "已上传 \(completed) 个文件，路径已加入草稿。"
+                Haptics.success()
+            } catch {
+                let reason = Task.isCancelled ? "已取消上传" : "上传失败：\(error.localizedDescription)"
+                fileUploadStatus = completed > 0 ? "\(reason)；已完成的 \(completed) 个文件路径已保留在草稿。" : reason
+            }
+        }
     }
 
     private func cancelImageAttachment() {
@@ -1888,11 +2307,6 @@ struct PaneTerminalHost: UIViewRepresentable {
         // The scroll/zoom gesture is installed by the coordinator's attach(to:)
         // when the controller mints this pane's terminal, so it's already on by
         // the time we host it here — no need (and idempotent if it weren't).
-        if focusPolicy == .take {
-            DispatchQueue.main.async { [weak terminal] in
-                _ = terminal?.becomeFirstResponder()
-            }
-        }
         // A pane/window switch re-hosts a *persistent* terminal (its `.id` flips).
         // SwiftTerm only repaints on new output or input, so an idle switched-to
         // pane keeps showing whatever pixels it last drew — stale/garbled from a
@@ -1907,31 +2321,14 @@ struct PaneTerminalHost: UIViewRepresentable {
         container.host(terminal)
         coordinator?.hostContainer = container
         container.geometryHeld = geometryHeld
+        container.requestFocus(focusPolicy)
         return container
     }
 
     func updateUIView(_ uiView: TerminalHostContainer, context: Context) {
         guard let terminal = uiView.terminalView else { return }
         if uiView.geometryHeld != geometryHeld { uiView.geometryHeld = geometryHeld }
-        switch focusPolicy {
-        case .take:
-            if !terminal.isFirstResponder, terminal.window != nil {
-                DispatchQueue.main.async { [weak terminal] in
-                    _ = terminal?.becomeFirstResponder()
-                }
-            }
-        case .allow:
-            // Nobody has asked for the keyboard: leave first responder exactly
-            // as the user left it, so a tap on the pane can raise it.
-            break
-        case .resign:
-            if terminal.isFirstResponder {
-                // Keyboard put away (toggle) or a sheet is up — drop it.
-                DispatchQueue.main.async { [weak terminal] in
-                    _ = terminal?.resignFirstResponder()
-                }
-            }
-        }
+        uiView.requestFocus(focusPolicy)
     }
 }
 
@@ -3505,5 +3902,13 @@ struct MoshDiagnosticsView: View {
             Spacer(minLength: 20)
             Text("\(value)").font(Face.mono(12, .bold)).foregroundStyle(Ink.primary)
         }
+    }
+}
+
+private struct ConversationKeyStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.frame(maxWidth: .infinity).frame(height: 34)
+            .background(configuration.isPressed ? TerminalChrome.control.opacity(0.7) : TerminalChrome.control, in: Capsule())
+            .contentShape(Rectangle())
     }
 }

@@ -13,6 +13,17 @@ struct HerdrFrameChannelTests {
         return #"{"type":"terminal.frame","seq":\#(seq),"encoding":"ansi","width":\#(width),"height":\#(height),"full":\#(full),"bytes":"\#(bytes)"}"#
     }
 
+    @Test("Shared panes retain remote geometry and wait when it is unknown")
+    func preservesRemoteGeometry() {
+        let pane = PaneInfo(id: "p", windowId: "t", width: 180, height: 48)
+        let grid = HerdrFrameCommand.preservedGrid(pane: pane)
+        #expect(grid?.cols == 180)
+        #expect(grid?.rows == 48)
+        #expect(HerdrFrameCommand.preservedGrid(pane: nil) == nil)
+        let invalid = PaneInfo(id: "p", windowId: "t", width: 0, height: 48)
+        #expect(HerdrFrameCommand.preservedGrid(pane: invalid) == nil)
+    }
+
     // MARK: - Parsing
 
     @Test("A whole frame line decodes to ready-to-feed bytes")
@@ -206,6 +217,26 @@ struct HerdrFrameChannelTests {
         #expect(down["direction"] as? String == "down")
         #expect(down["lines"] as? Int == 1)   // clamped
         #expect(down["source"] as? String == "page_key")
+    }
+
+    @Test("Wheel batches preserve drag distance and address the content area")
+    func scrollBatch() throws {
+        let commands = HerdrFrameCommand.scrollCommands(lines: 5, cols: 80, rows: 40)
+        #expect(commands.count == 5)
+        for command in commands {
+            let object = try #require(JSONSerialization.jsonObject(with: Data(command.utf8)) as? [String: Any])
+            #expect(object["lines"] as? Int == 1)
+            #expect(object["column"] as? Int == 40)
+            #expect(object["row"] as? Int == 20)
+            #expect(object["direction"] as? String == "up")
+        }
+        #expect(HerdrFrameCommand.scrollCommands(lines: 0, cols: 80, rows: 40).isEmpty)
+        #expect(HerdrFrameCommand.scrollCommands(lines: Int.min, cols: 0, rows: 0).count == 24)
+        let page = HerdrFrameCommand.scrollCommands(lines: -20, cols: 80, rows: 40, source: .pageKey)
+        #expect(page.count == 1)
+        let object = try #require(JSONSerialization.jsonObject(with: Data(page[0].utf8)) as? [String: Any])
+        #expect(object["source"] as? String == "page_key")
+        #expect(object["direction"] as? String == "down")
     }
 
     @Test("Release is the detach message, not a kill")

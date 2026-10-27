@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/Cluas/SwiftTerm.git",
+  "revision": "dd7f2cd47507e4ed9501835739eb26af3a5ed4bc",
+  "scope": "Library sources and license; library-only package manifest",
+  "patches": [
+    "Classify color glyphs using the font color-glyph trait before inspecting pixels; antialiasing fringes on ordinary glyphs must not bypass ANSI foreground tinting.",
+    "Place Metal text and decorations on the same fixed cell grid as CoreGraphics, including fallback-font runs.",
+    "Use grayscale font antialiasing on iOS to match UIKit text stroke weight.",
+    "Preserve sub-row scroll displacement in Metal row geometry and invalidate cached rows when that displacement changes.",
+    "Reuse the UIKit caret for iOS Metal rendering to preserve IME composition, focus and blinking behavior.",
+    "Rasterize native-size fonts with a scaled CGContext to preserve color emoji bitmap-strike metrics."
+  ]
+}

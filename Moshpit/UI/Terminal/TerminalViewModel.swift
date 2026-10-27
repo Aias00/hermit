@@ -277,6 +277,19 @@ final class TerminalViewModel {
         }
     }
 
+    func sendConfirmed(_ data: Data) async throws {
+        guard connState == .live, let session else { throw SSHError.sessionClosed }
+        let previous = writeChain
+        let operation = Task { @MainActor [weak self] in
+            await previous?.value
+            try Task.checkCancellation()
+            guard let self, self.connState == .live, self.session === session else { throw SSHError.sessionClosed }
+            try await session.write(data)
+        }
+        writeChain = Task { _ = try? await operation.value }
+        try await operation.value
+    }
+
     /// Propagates a viewport size change to the remote PTY. As with ``send``,
     /// transient errors are ignored; persistent failures will surface via the
     /// status path when the read loop tears down.

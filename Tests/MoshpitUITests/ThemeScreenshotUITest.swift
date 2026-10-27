@@ -20,8 +20,11 @@ final class ThemeScreenshotUITest: XCTestCase {
     func testCaptureThemeScreens() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
+        app.buttons["主机与设置"].tap()
+        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         let themeRow = app.staticTexts["Theme"]
@@ -62,8 +65,11 @@ final class ThemeScreenshotUITest: XCTestCase {
     func testCaptureAppearanceScreens() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
+        app.buttons["主机与设置"].tap()
+        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         attach(app, "10-settings-appearance-rows")

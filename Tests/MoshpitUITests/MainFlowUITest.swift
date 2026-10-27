@@ -15,10 +15,11 @@ final class MainFlowUITest: XCTestCase {
         // Stand on the mainland side of the storefront line, so the Settings
         // footer check below is a positive control for the filing number.
         app.launchArguments += [MainlandStorefrontArgs.mainland, MainlandStorefrontArgs.code]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
         // 1. Home: large "Attach" title
-        XCTAssertTrue(app.staticTexts["Moshpit"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 5),
                       "Moshpit title should be visible at launch")
 
         // 2. ＋ opens Add Connection
@@ -26,7 +27,7 @@ final class MainFlowUITest: XCTestCase {
         XCTAssertTrue(addButton.waitForExistence(timeout: 3))
         addButton.tap()
 
-        XCTAssertTrue(app.navigationBars["Add Connection"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["新建 Host"].waitForExistence(timeout: 3))
 
         // 3. Save is disabled until Name + Host are filled
         let saveButton = app.buttons["save-connection"]
@@ -37,7 +38,9 @@ final class MainFlowUITest: XCTestCase {
         // rows (roam, ports, prediction) only exist while the toggle is ON.
         // "Roam on Cellular: ON" under a disabled Mosh was a lie about what
         // would happen, so their absence here is the designed state.
-        XCTAssertTrue(app.staticTexts["Use Mosh"].exists)
+        XCTAssertTrue(app.reveal(app.buttons["connection-advanced"]))
+        app.buttons["connection-advanced"].tap()
+        XCTAssertTrue(app.reveal(app.staticTexts["Use Mosh"]))
         XCTAssertFalse(app.staticTexts["Roam on Cellular"].exists,
                        "mosh tuning rows must stay hidden while Use Mosh is off")
         app.switches["toggle-use-mosh"].tap()
@@ -51,10 +54,12 @@ final class MainFlowUITest: XCTestCase {
                       "PEM editor should appear after switching to SSH Key auth")
 
         // 6. Cancel back to home
-        app.navigationBars["Add Connection"].buttons["Cancel"].tap()
-        XCTAssertTrue(app.staticTexts["Moshpit"].waitForExistence(timeout: 3))
+        app.navigationBars["新建 Host"].buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 3))
 
         // 7. Gear opens Settings with prototype groups
+        app.buttons["主机与设置"].tap()
+        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Font"].exists)
@@ -114,7 +119,7 @@ final class MainFlowUITest: XCTestCase {
 
         // 10. Done returns home
         app.navigationBars["Settings"].buttons["Done"].tap()
-        XCTAssertTrue(app.staticTexts["Moshpit"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 3))
     }
 
     /// The other side of the storefront line: bought anywhere but the mainland
@@ -124,9 +129,12 @@ final class MainFlowUITest: XCTestCase {
     func testFilingNumberHiddenOutsideMainland() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET", MainlandStorefrontArgs.mainland, "USA"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Moshpit"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 5))
 
+        app.buttons["主机与设置"].tap()
+        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 3))
         // The build-identity line proves the footer rendered before we assert
@@ -147,12 +155,13 @@ final class MainFlowUITest: XCTestCase {
     func testAddAndDeleteConnection() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET"]   // empty store, under the free cap
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Moshpit"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 5))
 
         // Add a connection named "QA-Delete".
         app.buttons["home-add"].tap()
-        XCTAssertTrue(app.navigationBars["Add Connection"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["新建 Host"].waitForExistence(timeout: 3))
 
         let name = app.textFields.firstMatch
         name.tap()
@@ -172,7 +181,7 @@ final class MainFlowUITest: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 3), "new connection card should appear")
 
         // Long-press → context menu → Delete Connection → confirm.
-        let deleteItem = app.buttons["Delete Connection"]
+        let deleteItem = app.buttons["删除主机"]
         pressForMenu(card, until: deleteItem, "context menu should offer delete")
         deleteItem.tap()
 

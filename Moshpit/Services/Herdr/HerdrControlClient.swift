@@ -162,6 +162,10 @@ final class HerdrControlClient: MultiplexerControlling {
     }
 
     func stop() {
+        inputGeneration = UUID()
+        inputTail?.cancel()
+        inputTail = nil
+        pendingText = nil
         pollTask?.cancel()
         pollTask = nil
     }
@@ -567,25 +571,96 @@ final class HerdrControlClient: MultiplexerControlling {
     /// `send` without the trailing snapshot poll — for keystroke-rate traffic
     /// (arrow keys), where a poll per keypress is churn with nothing to learn:
     /// a cursor move changes no tree state the sheets care about.
-    private func sendQuiet(_ subcommand: String) {
-        Task { [weak self] in
-            _ = try? await self?.run(subcommand)
+    @ObservationIgnored private var inputTail: Task<Void, Error>?
+    @ObservationIgnored private var inputGeneration = UUID()
+    private(set) var inputError: String?
+
+    /// Registered synchronously, before any task can run: keyboard text,
+    /// semantic keys and composer submits share the same acknowledged FIFO.
+    private func enqueueInput(_ command: @escaping @MainActor () throws -> String,
+                              timeout: Double = 12) -> Task<Void, Error> {
+        let previous = inputTail
+        let generation = inputGeneration
+        let task = Task { @MainActor [weak self] in
+            try await previous?.value
+            try Task.checkCancellation()
+            guard let self, self.inputGeneration == generation else { throw SubmissionError.unconfirmed }
+            let subcommand = try command()
+            let accepted = await withTimeoutValue(timeout) { @MainActor in
+                let result = try await self.run(subcommand)
+                guard let code = result.exitCode else { throw SubmissionError.unconfirmed }
+                return code == 0
+            }
+            guard let accepted else { throw SubmissionError.unconfirmed }
+            guard accepted else { throw SubmissionError.rejected }
+        }
+        inputTail = task
+        Task { @MainActor [weak self] in
+            do { try await task.value }
+            catch { self?.inputError = error.localizedDescription }
+        }
+        return task
+    }
+
+    private final class PendingText {
+        let pane: String
+        var text: String
+        var started = false
+        init(pane: String, text: String) { self.pane = pane; self.text = text }
+    }
+    @ObservationIgnored private var pendingText: PendingText?
+
+    func sendBytes(_ data: Data, paneId: String) {
+        guard !data.isEmpty else { return }
+        if data == Data([0]) { sendKey("ctrl+space", paneId: paneId); return }
+        guard let text = String(data: data, encoding: .utf8) else {
+            inputError = "暂不支持该按键编码，未发送。"
+            return
+        }
+        if text.contains("\0") {
+            let parts = text.components(separatedBy: "\0")
+            for (index, part) in parts.enumerated() {
+                if !part.isEmpty { sendBytes(Data(part.utf8), paneId: paneId) }
+                if index < parts.count - 1 { sendKey("ctrl+space", paneId: paneId) }
+            }
+            return
+        }
+        if let pendingText, !pendingText.started, pendingText.pane == paneId {
+            pendingText.text += text
+            return
+        }
+        let pending = PendingText(pane: paneId, text: text)
+        pendingText = pending
+        _ = enqueueInput {
+            pending.started = true
+            return "pane send-text \(HerdrLaunch.quote(pending.pane)) \(HerdrLaunch.quote(pending.text))"
         }
     }
 
-    /// Send a SEMANTIC key to a pane — herdr encodes it server-side against
-    /// the pane's REAL terminal modes. This exists because the client cannot
-    /// know those modes over herdr: arrow variants (`ESC[A` vs `ESC OA`,
-    /// DECCKM) are chosen from the LOCAL emulator's state everywhere else,
-    /// but the frame channel feeds that emulator absolutely-positioned
-    /// repaints that never carry mode changes — so the flag never flips, the
-    /// app keeps sending the normal-mode variant, and zsh widgets bound via
-    /// terminfo (`kcuu1` IS the application-mode sequence) never fire: the
-    /// "no up/down history under herdr" report. `pane send-keys up` recalls
-    /// history against the live server (verified, both directions), because
-    /// the encoder that honors application_cursor lives where the truth is.
     func sendKey(_ key: String, paneId: String) {
-        sendQuiet("pane send-keys \(HerdrLaunch.quote(paneId)) \(key)")
+        pendingText = nil // Semantic keys are ordering barriers.
+        _ = enqueueInput { "pane send-keys \(HerdrLaunch.quote(paneId)) \(HerdrLaunch.quote(key))" }
+    }
+
+    func flushInput() async throws { try await inputTail?.value }
+
+    enum SubmissionError: LocalizedError {
+        case rejected, unconfirmed
+        var errorDescription: String? {
+            switch self {
+            case .rejected: return "远端未接受发送，草稿已保留。"
+            case .unconfirmed: return "发送结果未确认，草稿已保留。请先检查远端是否收到，避免重复发送。"
+            }
+        }
+    }
+
+    /// One server operation pastes TEXT and encodes Enter against the real
+    /// pane modes. It neither depends on a rendering attach nor races two writes.
+    func submitLine(_ text: String, paneId: String, timeout: Double = 12) async throws {
+        pendingText = nil
+        let task = enqueueInput({ "pane run \(HerdrLaunch.quote(paneId)) \(HerdrLaunch.quote(text))" }, timeout: timeout)
+        try await task.value
+        quicken()
     }
 
     // MARK: Immersive zoom (mosh renderer)

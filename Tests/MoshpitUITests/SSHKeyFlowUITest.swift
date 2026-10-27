@@ -24,12 +24,13 @@ final class SSHKeyFlowUITest: XCTestCase {
         let keyName = "qa-\(UUID().uuidString.prefix(6).lowercased())"
         let app = XCUIApplication()
         app.launchArguments += ["-MOSHPIT_RESET", "-MOSHPIT_AUTOCARE_OFF"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Moshpit"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 5))
 
         // Add Connection → SSH Key → key picker → generate.
         app.buttons["home-add"].tap()
-        XCTAssertTrue(app.navigationBars["Add Connection"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["新建 Host"].waitForExistence(timeout: 3))
         app.buttons["SSH Key"].firstMatch.tap()
         let pickerRow = app.buttons["key-picker-row"].firstMatch
         XCTAssertTrue(app.reveal(pickerRow))
@@ -64,7 +65,7 @@ final class SSHKeyFlowUITest: XCTestCase {
         addKeyBar.buttons["Generate"].tap()
 
         // Back on Add Connection with the new key already chosen.
-        XCTAssertTrue(app.navigationBars["Add Connection"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.navigationBars["新建 Host"].waitForExistence(timeout: 5),
                       "generating from the picker should land back on Add Connection")
         XCTAssertFalse(addKeyBar.exists)
         let selected = app.buttons["key-picker-row"].firstMatch
@@ -72,9 +73,11 @@ final class SSHKeyFlowUITest: XCTestCase {
         let label = [selected.label, selected.value as? String ?? ""].joined(separator: " ")
         XCTAssertTrue(label.contains(keyName), "the generated key should be selected, got '\(label)'")
         attach(app, "02-add-connection-key-selected")
-        app.navigationBars["Add Connection"].buttons["Cancel"].tap()
+        app.navigationBars["新建 Host"].buttons["Cancel"].tap()
 
         // Settings → SSH Keys → long-press → Delete Key → confirm card.
+        app.buttons["主机与设置"].tap()
+        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         let keysRow = app.staticTexts["SSH Keys"].firstMatch

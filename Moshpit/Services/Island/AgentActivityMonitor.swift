@@ -269,6 +269,7 @@ final class AgentActivityMonitor {
     /// distinction (heuristics vs native `agent_status`) once the concrete
     /// controller is known.
     func trackWhenReady(connection: ServerConnection, session: SessionHub.ActiveSession) {
+        guard AppSettings.agentNotificationsAvailable else { return }
         guard settings.liveActivityEnabled || settings.notificationsEnabled else { return }
         // Subscribe to every controller this session will ever wire, not just
         // the first: a mid-session reconnect rebuilds the controller, and the
@@ -1008,7 +1009,7 @@ final class AgentActivityMonitor {
     }
 
     private func requestNotificationAuthorizationIfNeeded() {
-        guard settings.notificationsEnabled else { return }
+        guard AppSettings.agentNotificationsAvailable, settings.notificationsEnabled else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 }
