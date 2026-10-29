@@ -514,7 +514,7 @@ struct SettingsScreen: View {
     private func voiceGroup(settings: Bindable<AppSettings>) -> some View {
         FormGroup(
             title: "VOICE INPUT",
-            footer: "Dictate commands and prompts from the mic key on the terminal bar. Speech is transcribed entirely on-device — your voice never leaves this device, and nothing is typed until you tap Insert."
+            footer: "Dictate from the terminal's mic key, review the text, then add it to your draft. Apple and Whisper recognize speech locally. Choosing Doubao sends your recording to Volcengine for recognition."
         ) {
             ToggleRow(
                 label: "Enable Voice Input",
@@ -528,6 +528,7 @@ struct SettingsScreen: View {
                         title: String(localized: "Recognition"),
                         value: settings.wrappedValue.voiceEngine.displayName)
                 }
+                .accessibilityIdentifier("settings-voice-recognition")
 
                 if settings.wrappedValue.voiceEngine == .whisper {
                     NavigationLink {
@@ -539,13 +540,29 @@ struct SettingsScreen: View {
                     }
                 }
 
-                NavigationLink {
-                    VoiceLanguageView()
-                } label: {
-                    settingsValueRow(
-                        title: String(localized: "Language"),
-                        value: voiceLanguageName(settings.wrappedValue))
+                if settings.wrappedValue.voiceEngine == .doubao {
+                    NavigationLink {
+                        DoubaoVoiceSettingsView()
+                    } label: {
+                        Text("Configure Doubao").foregroundStyle(Ink.primary)
+                    }
+                    .accessibilityIdentifier("settings-doubao-configuration")
+                } else {
+                    NavigationLink {
+                        VoiceLanguageView()
+                    } label: {
+                        settingsValueRow(
+                            title: String(localized: "Language"),
+                            value: voiceLanguageName(settings.wrappedValue))
+                    }
                 }
+
+                NavigationLink {
+                    VoiceInputTestView()
+                } label: {
+                    Text("Recording test").foregroundStyle(Ink.primary)
+                }
+                .accessibilityIdentifier("settings-voice-test")
             }
         }
     }

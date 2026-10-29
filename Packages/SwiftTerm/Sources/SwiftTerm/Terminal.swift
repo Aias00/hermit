@@ -631,8 +631,14 @@ open class Terminal {
         }
     }
     
+    /// Changes even when a program disables and re-enables mouse reporting in
+    /// one output chunk. Hosts can invalidate queued pointer input across that
+    /// boundary instead of delivering it to the newly foregrounded program.
+    public private(set) var mouseModeGeneration: UInt64 = 0
+
     public private(set) var mouseMode: MouseMode = .off {
         didSet {
+            if oldValue != mouseMode { mouseModeGeneration &+= 1 }
             tdel?.mouseModeChanged (source: self)
         }
     }
@@ -5780,7 +5786,9 @@ open class Terminal {
         //print ("got \(mouseProtocol)")
         switch mouseProtocol {
         case .x10:
-            sendResponse(cc.CSI, "M", [UInt8(buttonFlags+32), min (UInt8(255), UInt8(32 + x+1)), min (UInt8(255), UInt8(32+y+1))])
+            // Clamp before conversion: a wide terminal's center can exceed
+            // the legacy protocol's 223-cell limit and UInt8 would trap.
+            sendResponse(cc.CSI, "M", [UInt8(buttonFlags+32), UInt8(min(222, max(0, x)) + 33), UInt8(min(222, max(0, y)) + 33)])
         case .sgr:
             let bflags : Int = ((buttonFlags & 3) == 3) ? (buttonFlags & ~3) : buttonFlags
             let m = ((buttonFlags & 3) == 3) ? "m" : "M"
@@ -5788,7 +5796,6 @@ open class Terminal {
         case .sgrPixel:
             let bflags : Int = ((buttonFlags & 3) == 3) ? (buttonFlags & ~3) : buttonFlags
             let m = ((buttonFlags & 3) == 3) ? "m" : "M"
-            print ("\(pixelX);\(pixelY)")
             sendResponse(cc.CSI, "<\(bflags);\(pixelX);\(pixelY)\(m)")
             
         case .urxvt:

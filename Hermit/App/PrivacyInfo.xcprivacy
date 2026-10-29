@@ -18,9 +18,10 @@
   matching category here if that ever changes — a missing declaration is
   rejected at upload, and a stale over-declaration is its own kind of lie.
 
-  Nothing is collected and nothing is tracked: SSH credentials live in the
-  local Keychain, everything else in local UserDefaults, and there is no
-  Hermit server for any of it to be sent to.
+  No tracking. Apple and Whisper recognition remain on-device. The optional
+  Doubao engine sends recorded audio directly to Volcengine using the user's
+  own provider account key; audio is declared for app functionality and as
+  linked to that account. Hermit has no intermediary speech server.
 -->
 <plist version="1.0">
 <dict>
@@ -29,7 +30,20 @@
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
 	<key>NSPrivacyCollectedDataTypes</key>
-	<array/>
+	<array>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeAudioData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>
 		<dict>

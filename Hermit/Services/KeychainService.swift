@@ -53,6 +53,7 @@ enum KeychainError: Error, Equatable, CustomStringConvertible {
 /// from inside the kernel call).
 protocol KeychainBackend: Sendable {
     func save(secret: Data, account: String, requireBiometry: Bool) throws
+    func savePreservingAccessPolicy(secret: Data, account: String, requireBiometry: Bool) throws
     func load(account: String, prompt: String) throws -> Data
     func delete(account: String) throws
     func exists(account: String) -> Bool
@@ -71,9 +72,31 @@ extension KeychainBackend {
     func saveForSync(secret: Data, account: String, requireBiometry: Bool) throws {
         try save(secret: secret, account: account, requireBiometry: requireBiometry)
     }
+    func savePreservingAccessPolicy(secret: Data, account: String, requireBiometry: Bool) throws {
+        try saveForSync(secret: secret, account: account, requireBiometry: requireBiometry)
+    }
 }
 
 // MARK: - System keychain backend
+
+/// The Security entry points, injected together so failure-path tests exercise
+/// the production backend without reading or changing the system keychain.
+struct KeychainItemOperations: Sendable {
+    var update: @Sendable (CFDictionary, CFDictionary) -> OSStatus
+    var add: @Sendable (CFDictionary) -> OSStatus
+    var delete: @Sendable (CFDictionary) -> OSStatus
+    var copyMatching: @Sendable (CFDictionary) -> (OSStatus, CFTypeRef?)
+
+    static let system = Self(
+        update: { SecItemUpdate($0, $1) },
+        add: { SecItemAdd($0, nil) },
+        delete: { SecItemDelete($0) },
+        copyMatching: { query in
+            var item: CFTypeRef?
+            let status = SecItemCopyMatching(query, &item)
+            return (status, item)
+        })
+}
 
 /// Production backend that talks to Apple's Keychain Services.
 ///
@@ -85,13 +108,16 @@ extension KeychainBackend {
 final class SystemKeychainBackend: KeychainBackend, @unchecked Sendable {
     private let service: String
     private let accessGroup: String?
+    private let items: KeychainItemOperations
     private let syncContextLock = NSLock()
     private var syncContext: LAContext?
 
     init(service: String = Bundle.main.bundleIdentifier ?? "com.cluas.moshpit",
-         accessGroup: String? = nil) {
+         accessGroup: String? = nil,
+         items: KeychainItemOperations = .system) {
         self.service = service
         self.accessGroup = accessGroup
+        self.items = items
     }
 
     /// Common attributes for every keychain operation. `kSecUseDataProtectionKeychain`
@@ -117,6 +143,12 @@ final class SystemKeychainBackend: KeychainBackend, @unchecked Sendable {
         // Always delete first so save is idempotent (overwrite semantics).
         try? delete(account: account)
 
+        let status = items.add(try newItem(secret: secret, account: account,
+                                         requireBiometry: requireBiometry) as CFDictionary)
+        guard status == errSecSuccess else { throw KeychainError(osStatus: status) }
+    }
+
+    private func newItem(secret: Data, account: String, requireBiometry: Bool) throws -> [String: Any] {
         var query = baseQuery(account: account)
         query[kSecValueData as String] = secret
 
@@ -138,10 +170,7 @@ final class SystemKeychainBackend: KeychainBackend, @unchecked Sendable {
             query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         }
 
-        let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw KeychainError(osStatus: status)
-        }
+        return query
     }
 
     func load(account: String, prompt: String) throws -> Data {
@@ -178,11 +207,26 @@ final class SystemKeychainBackend: KeychainBackend, @unchecked Sendable {
     /// Updates retain its local access-control policy; new items get the
     /// policy requested by their SSH key metadata.
     func saveForSync(secret: Data, account: String, requireBiometry: Bool) throws {
-        let status = SecItemUpdate(baseQuery(account: account) as CFDictionary,
-                                  [kSecValueData as String: secret] as CFDictionary)
+        try savePreservingAccessPolicy(secret: secret, account: account, requireBiometry: requireBiometry)
+    }
+
+    /// Replace only the value of an existing item. Its accessibility and
+    /// biometric policy stay intact; requireBiometry applies only to creation.
+    /// Never delete on failure, including a concurrent insert after notFound.
+    func savePreservingAccessPolicy(secret: Data, account: String, requireBiometry: Bool) throws {
+        let query = baseQuery(account: account) as CFDictionary
+        let value = [kSecValueData as String: secret] as CFDictionary
+        var status = items.update(query, value)
         if status == errSecItemNotFound {
-            try save(secret: secret, account: account, requireBiometry: requireBiometry)
-        } else if status != errSecSuccess { throw KeychainError(osStatus: status) }
+            status = items.add(try newItem(secret: secret, account: account,
+                                           requireBiometry: requireBiometry) as CFDictionary)
+            if status == errSecDuplicateItem {
+                // Another writer created the item between update and add.
+                // Retry an in-place value update, preserving its policy too.
+                status = items.update(query, value)
+            }
+        }
+        guard status == errSecSuccess else { throw KeychainError(osStatus: status) }
     }
 
     private func load(account: String, context: LAContext) throws -> Data {
@@ -192,8 +236,7 @@ final class SystemKeychainBackend: KeychainBackend, @unchecked Sendable {
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         query[kSecUseAuthenticationContext as String] = context
 
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let (status, item) = items.copyMatching(query as CFDictionary)
         guard status == errSecSuccess else {
             throw KeychainError(osStatus: status)
         }
@@ -205,7 +248,7 @@ final class SystemKeychainBackend: KeychainBackend, @unchecked Sendable {
 
     func delete(account: String) throws {
         let query = baseQuery(account: account)
-        let status = SecItemDelete(query as CFDictionary)
+        let status = items.delete(query as CFDictionary)
         // Treat "not found" as success — delete is idempotent.
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError(osStatus: status)
@@ -220,7 +263,7 @@ final class SystemKeychainBackend: KeychainBackend, @unchecked Sendable {
         let context = LAContext()
         context.interactionNotAllowed = true
         query[kSecUseAuthenticationContext as String] = context
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        let (status, _) = items.copyMatching(query as CFDictionary)
         return status == errSecSuccess || status == errSecInteractionNotAllowed
     }
 }
@@ -391,6 +434,15 @@ actor KeychainService {
             throw KeychainError.invalidData
         }
         try backend.save(secret: data, account: ref, requireBiometry: requireBiometry)
+    }
+
+    /// Atomically replaces an existing value without changing its access
+    /// controls. Use when editing a credential whose policy is already set.
+    func savePasswordPreservingAccessPolicy(_ password: String, forRef ref: String,
+                                           requireBiometry: Bool = true) throws {
+        guard let data = password.data(using: .utf8) else { throw KeychainError.invalidData }
+        try backend.savePreservingAccessPolicy(secret: data, account: ref,
+                                              requireBiometry: requireBiometry)
     }
 
     func loadPassword(forRef ref: String,

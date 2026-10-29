@@ -69,6 +69,9 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
         /// Last successful remote context read. Activity delivery/renewal must
         /// never make a cached remote task look newly verified.
         public var observedAt: Date?
+        /// Numeric result of an explicitly finished plain SSH shell command.
+        /// Command text, arguments and paths never enter the activity payload.
+        public var commandExitCode: Int?
 
         public var statusDate: Date { observedAt ?? updatedAt }
 
@@ -77,7 +80,7 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
                     deepLink: String, updatedAt: Date, isBackground: Bool? = nil,
                     transportName: String? = nil, workspaceName: String? = nil,
                     programName: String? = nil, taskState: TaskState? = nil,
-                    observedAt: Date? = nil) {
+                    observedAt: Date? = nil, commandExitCode: Int? = nil) {
             self.connectionCount = connectionCount
             self.headlineName = headlineName
             self.connectionState = connectionState
@@ -92,6 +95,7 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
             self.programName = programName
             self.taskState = taskState
             self.observedAt = observedAt
+            self.commandExitCode = commandExitCode
         }
     }
 

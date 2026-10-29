@@ -258,14 +258,11 @@ extension TerminalView: UITextInput {
             textInputStorage.replaceSubrange(rangeToReplace.fullRange(in: textInputStorage), with: newText)
             // Figure out the new selection range
             let rangeStartIndex = rangeStartPosition.offset
-            let newTextRange = Range(selectedRange, in: newText)!
-            let newTextRangeOffset = newText.distance(from: newText.startIndex, to: newTextRange.lowerBound)
-            let newTextRangeLength = newText.distance(from: newTextRange.lowerBound, to: newTextRange.upperBound)
-
-            let selectionStartIndex = rangeStartIndex + newTextRangeOffset
+            let selection = compositionSelection(selectedRange, in: newText)
+            let selectionStartIndex = rangeStartIndex + selection.lowerBound
             _markedTextRange = TextRange(from: rangeStartPosition, maxOffset: newText.count, in: textInputStorage) 
             _selectedTextRange = TextRange(from: TextPosition(offset: selectionStartIndex),
-                                           to: TextPosition(offset: selectionStartIndex + newTextRangeLength))
+                                           to: TextPosition(offset: rangeStartIndex + selection.upperBound))
         } else {
             textInputStorage.removeSubrange(rangeToReplace.fullRange(in: textInputStorage))
             _markedTextRange = nil
@@ -274,6 +271,26 @@ extension TerminalView: UITextInput {
 
         endTextInputEdit()
         updateIMECompositionOverlay()
+    }
+
+    /// The IME supplies UTF-16 offsets, while our shadow buffer uses Character
+    /// offsets. Candidate replacement can leave a stale range, and an offset
+    /// may land inside a surrogate pair or a composed emoji. Clamp without
+    /// overflowing (including NSNotFound), then keep whole grapheme clusters.
+    /// A caret snaps forward; a selection expands to contain touched clusters.
+    private func compositionSelection(_ range: NSRange, in text: String) -> Range<Int> {
+        var boundaries = [0]
+        for character in text {
+            boundaries.append(boundaries.last! + String(character).utf16.count)
+        }
+        let utf16Count = boundaries.last!
+        let start = min(max(0, range.location), utf16Count)
+        let length = min(max(0, range.length), utf16Count - start)
+        let end = start + length
+        let upper = boundaries.firstIndex { $0 >= end }!
+        if length == 0 { return upper..<upper }
+        let lower = boundaries.lastIndex { $0 <= start }!
+        return lower..<upper
     }
 
     /// Show/update/hide the composition overlay at the cursor position,

@@ -81,8 +81,11 @@ final class TerminalHostContainer: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        if window == nil { onDetached?() }
         applyRendererPreference()
     }
+
+    var onDetached: (() -> Void)?
 
     @objc private func applyRendererPreference() {
         // Metal needs an attached surface. Reused panes pick up the preference
@@ -640,7 +643,9 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// Called when the terminal wants to send bytes upstream (typed
         /// keystrokes, paste, control sequences). Hook this up to
         /// `SSHService.write` (single pane) or `TmuxControlClient` (split).
-        var onInput: ((Data) -> Void)?
+        var onInput: ((Data) -> Void)? {
+            didSet { cancelPendingWheel() }
+        }
 
         /// Called when the visible grid changes size — forward to the
         /// remote side via `SSHService.resize` / `tmux refresh-client -C`.
@@ -728,6 +733,12 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// Sub-row finger travel not yet turned into a wheel tick / server-side
         /// row. Reset when a drag starts.
         private var rowCarry = ScrollRowCarry()
+        private var wheelQueue = TerminalWheelQueue()
+        private var wheelWork: DispatchWorkItem?
+        private var wheelGeneration: UInt64 = 0
+        private var wheelMouseGeneration: UInt64?
+        private var sendingWheel = false
+        private var remoteFeedDepth = 0
 
         /// One text row in points — the unit that turns finger travel into rows.
         var cellHeight: CGFloat {
@@ -874,6 +885,8 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// screen, then judge and redraw them. Never feed over them: the
         /// server diffs against the screen it thinks we have.
         private func liftingPredictions(on view: TerminalView, _ body: () -> Void) {
+            remoteFeedDepth += 1
+            defer { remoteFeedDepth -= 1 }
             guard let prediction else { body(); return }
             let terminal = view.getTerminal()
             prediction.withdraw(from: terminal)
@@ -921,6 +934,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// Notify the scroll owner that a gesture/drag is starting. Lets tmux
         /// panes refresh the active pane's mouse flag before the first tick.
         func scrollWillBegin() {
+            cancelPendingWheel()
             rowCarry.reset()
             onScrollBegin?()
         }
@@ -996,16 +1010,71 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// negotiated mouse protocol and routes them out through ``send`` →
         /// ``onInput`` — the same path as a typed key, so no copy-mode is
         /// involved and typing afterwards just works. Button 64 = wheel-up
-        /// (older), 65 = wheel-down (newer); clamped so a fast flick doesn't
-        /// fire dozens. No output-hold — the app repaints itself.
+        /// (older), 65 = wheel-down (newer). Send at most six per display
+        /// interval, preserving the rest of a fast flick. No output-hold —
+        /// the app repaints itself.
         func sendWheel(lines: Int) {
-            guard lines != 0, let terminal = terminalView?.getTerminal() else { return }
-            let button = lines > 0 ? 64 : 65
-            let count = min(abs(lines), 6)
-            let x = max(1, terminal.cols / 2), y = max(1, terminal.rows / 2)
-            for _ in 0..<count {
-                terminal.sendEvent(buttonFlags: button, x: x, y: y, pixelX: x, pixelY: y)
+            guard lines != 0, let terminal = terminalView?.getTerminal(),
+                  localAppWantsMouse, onInput != nil else { return }
+            if let previous = wheelMouseGeneration, previous != terminal.mouseModeGeneration {
+                cancelPendingWheel()
             }
+            wheelMouseGeneration = terminal.mouseModeGeneration
+            if wheelQueue.enqueue(lines) {
+                wheelWork?.cancel()
+                wheelWork = nil
+                wheelGeneration &+= 1
+            }
+            if wheelWork == nil { flushWheel() }
+        }
+
+        /// A reconnect, view switch, new drag or typed key invalidates unsent
+        /// wheel input. It must never reach the next session or foreground app.
+        func cancelPendingWheel() {
+            wheelGeneration &+= 1
+            wheelWork?.cancel()
+            wheelWork = nil
+            wheelQueue.reset()
+            wheelMouseGeneration = nil
+        }
+
+        private func flushWheel() {
+            guard let view = terminalView, view.window != nil, !view.isHidden,
+                  UIApplication.shared.applicationState != .background,
+                  localAppWantsMouse, onInput != nil,
+                  view.getTerminal().mouseModeGeneration == wheelMouseGeneration else {
+                cancelPendingWheel()
+                return
+            }
+            let terminal = view.getTerminal()
+            let batch = wheelQueue.take(limit: 6)
+            guard batch != 0 else { return }
+            let button = batch > 0 ? 64 : 65
+            let x = max(0, terminal.cols / 2), y = max(0, terminal.rows / 2)
+            let pixelX = max(1, Int(view.bounds.width / 2))
+            let pixelY = max(1, Int(view.bounds.height / 2))
+            let generation = wheelGeneration
+            sendingWheel = true
+            for _ in 0..<abs(batch) {
+                guard wheelGeneration == generation else { break }
+                terminal.sendEvent(buttonFlags: button, x: x, y: y, pixelX: pixelX, pixelY: pixelY)
+            }
+            sendingWheel = false
+            guard wheelGeneration == generation else { return }
+            // Keep the slot occupied for one interval even when this batch
+            // exhausted the queue: frequent small callbacks share the same
+            // rate limit as one large delta.
+            let work = DispatchWorkItem { [weak self, weak view] in
+                guard let self, self.wheelGeneration == generation else { return }
+                self.wheelWork = nil
+                guard let view, self.terminalView === view else {
+                    self.cancelPendingWheel()
+                    return
+                }
+                self.flushWheel()
+            }
+            wheelWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0, execute: work)
         }
 
         /// Report a left click at a 0-based, viewport-relative cell — "put the
@@ -1036,6 +1105,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// (TestFlight 351 crash, 2026-08-17). `scrollLocal` learned this
         /// same lesson first; the click path just hadn't caught up.
         func clickLocal(col: Int, row: Int) {
+            cancelPendingWheel()
             guard localAppWantsMouse, let terminal = terminalView?.getTerminal() else { return }
             // 0 = left button press, 3 = release (SwiftTerm's `encodeButton`
             // convention, which its own tap handler uses).
@@ -1115,6 +1185,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// connection belong to a dead screen, and replaying them would garble
         /// the fresh one (the remote repaints from scratch anyway).
         func discardScrollHold() {
+            cancelPendingWheel()
             scrollHeld = false
             heldFeed.removeAll()
             heldBytes = 0
@@ -1147,6 +1218,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// ("重连后满屏乱码"). Screen, scrollback and modes stay untouched.
         /// Call at every (re)connect boundary, before the new stream feeds.
         func resetInputParser() {
+            cancelPendingWheel()
             terminalView?.getTerminal().discardPendingInput()
         }
 
@@ -1158,8 +1230,13 @@ struct SwiftTerminalView: UIViewRepresentable {
         private var inputModeObserver: NSObjectProtocol?
         private var keyboardObserver: NSObjectProtocol?
         private var keyboardDidObserver: NSObjectProtocol?
+        private var backgroundObserver: NSObjectProtocol?
 
         deinit {
+            wheelWork?.cancel()
+            if let backgroundObserver {
+                NotificationCenter.default.removeObserver(backgroundObserver)
+            }
             if let inputModeObserver {
                 NotificationCenter.default.removeObserver(inputModeObserver)
             }
@@ -1195,6 +1272,8 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// ``onGridReport``.
         weak var hostContainer: TerminalHostContainer? {
             didSet {
+                oldValue?.onDetached = nil
+                hostContainer?.onDetached = { [weak self] in self?.cancelPendingWheel() }
                 hostContainer?.remoteGrid = remoteGrid
                 hostContainer?.onViewportLaidOut = { [weak self] cols, rows in
                     self?.reportViewport(cols: cols, rows: rows)
@@ -1413,6 +1492,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// frame arrives. A deliberate clean veil reads as a transition; a beat
         /// of garbled stale text reads as a bug.
         func veilForSwitch() {
+            cancelPendingWheel()
             guard let tv = terminalView else { return }
             if transitionCover == nil {
                 let veil = UIView()
@@ -1475,7 +1555,13 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// tmux controller calls this explicitly when minting persistent
         /// terminals outside of the SwiftUI representable lifecycle.
         func attach(to terminalView: TerminalView) {
+            cancelPendingWheel()
             self.terminalView = terminalView
+            if backgroundObserver == nil {
+                backgroundObserver = NotificationCenter.default.addObserver(
+                    forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+                ) { [weak self] _ in self?.cancelPendingWheel() }
+            }
             // Install scroll/zoom here (not in makeUIView) so it covers tmux
             // panes too — those are minted by the controller and only ever go
             // through this attach, never through the SwiftUI representable.
@@ -1590,6 +1676,11 @@ struct SwiftTerminalView: UIViewRepresentable {
         var onReturnSend: (() -> Void)?
 
         func send(source: TerminalView, data: ArraySlice<UInt8>) {
+            if sendingWheel || remoteFeedDepth > 0 {
+                onInput?(Data(data))
+                return
+            }
+            cancelPendingWheel()
             // Typing means "I'm done reading" — resume live output and snap to
             // the bottom (the flush makes SwiftTerm follow the tail again).
             releaseScrollHold()

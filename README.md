@@ -46,6 +46,13 @@ have since changed.
 - On-device Apple speech recognition and optional local Whisper models. Stop to
   review text, change language and recognize the recording again, restore the
   original result, or edit before adding it to the draft.
+- Local technical vocabulary for supported Apple recognizers and Whisper.
+  Compare local engines using the same recording in Settings, with preparation,
+  first-text and finalization timings. Vocabulary stays outside cloud requests
+  and iCloud synchronization.
+- Optional Doubao cloud transcription with your own API key, plus a recording
+  test page in Settings that works without an SSH connection. The selected
+  cloud provider receives audio only when you stop for transcription or retry.
 - One draft and paper-plane action for sending text to the remote terminal;
   review and cancellation keep text local.
 - Connection and reported task status in Live Activities. Updates pause when
@@ -60,8 +67,10 @@ have since changed.
 
 - Passwords and private keys use the iOS Keychain. The iCloud settings control
   whether eligible credentials also synchronize between devices.
-- Voice recording and recognition stay on the device. Temporary retry audio is
-  released when the voice review is accepted or cancelled.
+- Apple and Whisper recognition stay on the device. Selecting Doubao sends
+  recordings to Volcengine for recognition; its account terms and charges apply.
+  Its API key stays in the device Keychain and is excluded from SSH credential
+  sync. Temporary retry audio is released when review is accepted or cancelled.
 - Host installation and session creation use explicit app actions. SSH host-key
   verification applies across the supported connection transports.
 

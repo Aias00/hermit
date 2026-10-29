@@ -399,6 +399,40 @@ final class AppSettings {
         set { withMutation(keyPath: \.whisperModelId) { defaults.set(newValue, forKey: "moshpit.settings.whisperModel") } }
     }
 
+    /// Short recognition hints, stored locally and intentionally excluded from
+    /// CloudSyncPreferences. Invalid edits preserve the previously saved list.
+    var voiceVocabulary: String {
+        get { access(keyPath: \.voiceVocabulary); return get("hermit.settings.voiceVocabulary", "") }
+        set {
+            let validation = VoiceVocabulary.validate(newValue)
+            guard validation.issue == nil else { return }
+            withMutation(keyPath: \.voiceVocabulary) {
+                defaults.set(validation.text, forKey: "hermit.settings.voiceVocabulary")
+            }
+        }
+    }
+
+    var voiceContextualStrings: [String] {
+        let validation = VoiceVocabulary.validate(voiceVocabulary)
+        return validation.issue == nil ? validation.terms : []
+    }
+
+    /// Cloud provider resource identifier, never an API credential. Keeping
+    /// the engine and its configuration local avoids enabling uploads on a
+    /// second device merely because preferences were synced.
+    var doubaoResourceID: String {
+        get {
+            access(keyPath: \.doubaoResourceID)
+            return get("moshpit.settings.doubaoResourceID", DoubaoVoiceClient.defaultResourceID)
+        }
+        set {
+            withMutation(keyPath: \.doubaoResourceID) {
+                defaults.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines),
+                             forKey: "moshpit.settings.doubaoResourceID")
+            }
+        }
+    }
+
     /// Snapshot of everything a dictation session needs, taken when the mic
     /// key is tapped.
     var dictationRequest: DictationRequest {
@@ -406,6 +440,8 @@ final class AppSettings {
             engine: voiceEngine,
             appleLocaleId: voiceInputLocaleId,
             whisperLanguage: whisperLanguage,
-            whisperModelId: whisperModelId)
+            whisperModelId: whisperModelId,
+            doubaoResourceID: doubaoResourceID,
+            contextualStrings: voiceEngine == .doubao ? [] : voiceContextualStrings)
     }
 }

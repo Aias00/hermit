@@ -7,7 +7,8 @@ import UIKit
 /// `AppSettings.voiceEngineId`.
 enum VoiceEngineKind: String, CaseIterable, Identifiable, Sendable {
     /// Apple's on-device transcribers (SpeechAnalyzer on iOS 26, otherwise
-    /// SFSpeechRecognizer). Nothing to download, but each session is locked to
+    /// SFSpeechRecognizer). System language assets may download on first use;
+    /// each session is locked to
     /// exactly one locale — Apple exposes no code-switching mode.
     case apple
     /// Local Whisper through WhisperKit. A single multilingual model covers
@@ -15,6 +16,9 @@ enum VoiceEngineKind: String, CaseIterable, Identifiable, Sendable {
     /// one language and ends in "git rebase --onto" survives intact. Costs a
     /// several-hundred-MB download and more time per utterance.
     case whisper
+    /// Explicitly selected cloud transcription. Recording is uploaded only
+    /// when the user stops for transcription; it is never a local fallback.
+    case doubao
 
     var id: String { rawValue }
 
@@ -22,15 +26,18 @@ enum VoiceEngineKind: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .apple: return String(localized: "Apple (built in)")
         case .whisper: return String(localized: "Whisper (local model)")
+        case .doubao: return String(localized: "Doubao (cloud)")
         }
     }
 
     var summary: String {
         switch self {
         case .apple:
-            return String(localized: "No download. One language per session.")
+            return String(localized: "Uses Apple's on-device models. Language assets may download on first use.")
         case .whisper:
             return String(localized: "Downloads a model. Around 100 languages, and copes with a sentence that mixes two.")
+        case .doubao:
+            return String(localized: "Uploads the recording to Volcengine when you stop. Requires your own API key.")
         }
     }
 }

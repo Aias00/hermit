@@ -180,55 +180,55 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Die Spracheingabe nutzt das Mikrofon, damit du Befehle und Prompts direkt ins Terminal sprechen kannst. Audio wird auf diesem Gerät in Text umgewandelt, mit Apples Sprachmodell oder einem geladenen Whisper-Modell, und nirgendwohin hochgeladen."
+            "value": "Hermit verwendet das Mikrofon zur Spracheingabe. Apple und Whisper erkennen Sprache auf diesem Gerät. Wenn du Doubao wählst, wird die Aufnahme beim Stoppen oder Wiederholen zur Erkennung an Volcengine gesendet."
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Voice input uses the microphone so you can dictate commands and prompts into your terminal. Your audio is transcribed on this device — by Apple's speech models or by a Whisper model you download — and is never uploaded anywhere."
+            "value": "Hermit uses the microphone for voice input. Apple and Whisper recognize on this device. If you choose Doubao, stopping or retrying sends your recording to Volcengine for recognition."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "La entrada de voz usa el micrófono para que puedas dictar comandos y prompts directamente al terminal. El audio se transcribe en este dispositivo, con el modelo de voz de Apple o con un modelo Whisper que hayas descargado, y no se sube a ningún sitio."
+            "value": "Hermit usa el micrófono para la entrada de voz. Apple y Whisper reconocen en este dispositivo. Si eliges Doubao, al detener o reintentar se envía la grabación a Volcengine para reconocerla."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La saisie vocale utilise le micro pour que vous puissiez dicter commandes et prompts directement dans le terminal. L’audio est transcrit sur cet appareil, avec le modèle vocal d’Apple ou un modèle Whisper que vous avez téléchargé, et n’est envoyé nulle part."
+            "value": "Hermit utilise le microphone pour la saisie vocale. Apple et Whisper reconnaissent la parole sur cet appareil. Avec Doubao, arrêter ou réessayer envoie votre enregistrement à Volcengine pour la reconnaissance."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "音声入力はマイクを使い、コマンドやプロンプトをターミナルに向けて話せるようにします。音声はこの端末上で、Apple の音声モデルまたはダウンロードした Whisper モデルによって書き起こされ、どこにもアップロードされません。"
+            "value": "Hermit は音声入力にマイクを使用します。Apple と Whisper は端末内で認識します。Doubao を選ぶと、停止または再試行時に録音を Volcengine に送信して認識します。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "음성 입력에 마이크를 사용해 명령과 프롬프트를 터미널에 말로 입력할 수 있습니다. 오디오는 Apple 음성 모델이나 다운로드한 Whisper 모델로 이 기기에서 텍스트로 바뀌며, 어디에도 업로드되지 않습니다."
+            "value": "Hermit은 음성 입력에 마이크를 사용합니다. Apple과 Whisper는 기기에서 인식합니다. Doubao를 선택하면 중지하거나 다시 시도할 때 녹음이 Volcengine으로 전송되어 인식됩니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "A entrada de voz usa o microfone para você ditar comandos e prompts direto no terminal. O áudio é transcrito neste aparelho, com o modelo de voz da Apple ou com um modelo Whisper que você baixou, e não é enviado para lugar nenhum."
+            "value": "O Hermit usa o microfone para entrada de voz. Apple e Whisper reconhecem neste aparelho. Ao escolher Doubao, parar ou tentar novamente envia a gravação à Volcengine para reconhecimento."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "语音输入要用麦克风，这样你可以把命令和提示词直接说进终端。音频在这台设备上转写，用 Apple 的语音模型或你下载的 Whisper 模型，不会上传到任何地方。"
+            "value": "Hermit 使用麦克风录入语音。Apple 和 Whisper 在本机识别；选择豆包后，停止转写或重试会将录音发送到火山引擎识别。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "語音輸入需要使用麥克風，這樣你可以把指令和提示詞直接說進終端機。音訊會在這部裝置上轉寫，用 Apple 的語音模型或你下載的 Whisper 模型，不會上傳到任何地方。"
+            "value": "Hermit 使用麥克風輸入語音。Apple 和 Whisper 在本機辨識；選擇豆包後，停止轉寫或重試會將錄音傳送至火山引擎辨識。"
           }
         }
       }
@@ -238,55 +238,55 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Das Diktat erkennt Sprache auf dem Gerät. Weder deine Stimme noch der erkannte Text verlassen dieses Gerät; Hermit nutzt keine serverseitige Erkennung."
+            "value": "Wenn Apple gewählt ist, verwendet Hermit die Spracherkennung auf dem Gerät. Doubao ist eine separate Cloud-Option, die Aufnahmen beim Stoppen oder Wiederholen an Volcengine sendet."
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Dictation runs on-device speech recognition. Your voice and transcripts never leave this device — Hermit does not use server-based recognition."
+            "value": "Hermit uses Apple's on-device speech recognition when Apple is selected. Doubao is a separate cloud option that sends recordings to Volcengine when you stop or retry."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "El dictado reconoce la voz en el propio dispositivo. Ni tu voz ni la transcripción salen de él; Hermit no usa reconocimiento en servidores."
+            "value": "Al elegir Apple, Hermit usa el reconocimiento en el dispositivo. Doubao es una opción de nube independiente que envía grabaciones a Volcengine al detener o reintentar."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La dictée reconnaît la parole sur l’appareil. Ni votre voix ni la transcription ne quittent cet appareil ; Hermit n’utilise aucune reconnaissance côté serveur."
+            "value": "Avec Apple, Hermit utilise la reconnaissance vocale sur l’appareil. Doubao est une option cloud distincte qui envoie les enregistrements à Volcengine lorsque vous arrêtez ou réessayez."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "音声入力は端末内で音声認識を行います。音声も書き起こしもこの端末を離れず、Hermit はサーバー側の認識を使いません。"
+            "value": "Apple を選択すると、Hermit は端末内の音声認識を使います。Doubao は別のクラウドオプションで、停止または再試行時に録音を Volcengine に送信します。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "받아쓰기는 기기 안에서 음성을 인식합니다. 음성과 변환된 텍스트는 이 기기를 벗어나지 않으며, Hermit은 서버 측 인식을 사용하지 않습니다."
+            "value": "Apple을 선택하면 Hermit은 기기 내 음성 인식을 사용합니다. Doubao는 중지하거나 다시 시도할 때 녹음을 Volcengine으로 보내는 별도의 클라우드 옵션입니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O ditado reconhece a fala no próprio aparelho. Nem sua voz nem a transcrição saem dele; o Hermit não usa reconhecimento em servidor."
+            "value": "Ao escolher Apple, o Hermit usa o reconhecimento no aparelho. Doubao é uma opção de nuvem separada que envia gravações à Volcengine ao parar ou tentar novamente."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "听写在本机做语音识别。你的语音和转写文字都不会离开这台设备，Hermit 不使用服务器端识别。"
+            "value": "选择 Apple 时，Hermit 使用 Apple 的设备端语音识别。豆包是单独的云识别选项，会在停止转写或重试时将录音发送到火山引擎。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "聽寫在裝置上進行語音辨識。你的語音和轉寫文字都不會離開這部裝置，Hermit 不使用伺服器端辨識。"
+            "value": "選擇 Apple 時，Hermit 使用 Apple 的裝置端語音辨識。豆包是獨立的雲端辨識選項，會在停止轉寫或重試時將錄音傳送至火山引擎。"
           }
         }
       }

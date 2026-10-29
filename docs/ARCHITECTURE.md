@@ -51,7 +51,7 @@ Hermit/
       PushService.swift         remote agent notifications, app side (§7.1, docs/PUSH.md)
       Island/                   AgentActivityMonitor, the producer of agent status (§6)
       Install/                  one install engine: hooks + pairing, over SSH exec
-      Voice/                    on-device dictation engines
+      Voice/                    local Apple/Whisper and optional Doubao dictation
   Resources/    Asset catalog, app icon + alternates, fonts, Localizable.xcstrings
 
 Extensions/      The three app extensions, one target each, named after
@@ -101,6 +101,28 @@ changing the draft or keyboard focus; it works even with an empty draft or a
 hidden keyboard. Terminal taps still allow direct remote typing. Opening the
 keyboard normally selects the draft, and modal pickers save and restore both
 the previous input target and keyboard visibility.
+
+Voice capture has its own serialized lifecycle in `MicrophoneAudioSource`.
+Input-device/format changes, media-services resets and unexpected engine stops
+end the current recording once; retained audio and text remain available for
+explicit review/retry. Redundant notifications with the same running input are
+ignored. Capture is not silently restarted across an unknown audio gap.
+
+Apple Analyzer and Whisper share `DictationBufferConverter`: it preserves
+converter state between buffers and drains pending samples before a format
+change or normal end of input. Cancellation discards pending samples. The
+explicit Doubao upload path retains its separate bounded PCM converter.
+
+`VoiceVocabulary` validates local hints (100 terms, 64 characters each, 4,096
+characters total). Supported Apple Dictation/legacy engines receive context;
+SpeechTranscriber's priority is unchanged and no vocabulary support is assumed
+for it. Whisper adds whole terms to its existing primer within a 192-token
+budget. Hints are snapshotted per recording and excluded from cloud requests
+and iCloud synchronization. Diagnostics retain numeric per-attempt timings,
+never transcripts or vocabulary. The standalone test page can explicitly replay
+one recording through another local engine without changing saved preferences;
+manual edits must be undone before replacement, and comparison results remain
+in memory on that page.
 
 The interesting logic is in `Services/`. Four files carry most of the weight:
 
@@ -443,3 +465,48 @@ live login, Keychain reuse, expiry and several SSH operations have been exercise
 Existing-channel SSH setup waits for actual authentication before opening command
 or terminal channels. Live stability and the official-client comparison remain
 unpassed; see the [implementation and verification record](design/cloudflare-access-implementation.md).
+
+## Terminal input, shell observations and transfers
+
+The local mouse route batches same-direction wheel ticks in groups of up to six
+per 1/60-second interval, retaining excess motion. A reversal immediately replaces
+unsent motion in the old direction.
+Typing, submitting a draft, a new drag, reconnecting, leaving the view or entering
+the background cancels the queue. Automatic terminal replies do not cancel it.
+The terminal's mouse-mode generation also prevents queued input from reaching a
+new mouse application after an off/on transition. This does not replace the
+separate tmux/herdr scrolling routes.
+
+`ShellIntegrationTracker` observes only a plain SSH connection's original output
+stream, before rendering or scrollback replay. OSC 133/633 command events update
+the connection Live Activity; OSC 7/633/1337 directory reports update file
+browsing. The parser retains no command line or arguments. Directory paths stay
+out of the activity payload. A remote shell must already emit these events:
+Hermit does not install shell hooks, and output silence never implies completion.
+Nonzero exits display their status code and do not count as successful tasks.
+Reconnect/stop boundaries reset both the parser and its observation generation.
+
+Folder uploads own a cancellable batch and isolate each file's progress callbacks.
+`CancellableTransfer` releases the caller even if dialing or an SSH request ignores
+Swift task cancellation. Late dial results cannot begin a file or retire a newer
+batch. Each upload uses a Citadel `SSHChildChannelScope` for its own SFTP and exec
+children; cancellation closes only those children, preserves the terminal and
+preview reader, and prevents later requests or an exec fallback from starting.
+The scope is sticky so a channel created after cancellation closes immediately.
+
+Downloads use unique sibling temporary files and publish with an atomic local
+rename after success, preserving an existing copy on failure. Both upload routes
+write into independently created mode-0700 sibling directories. SFTP publishes
+with standard non-overwriting rename; exec uses `link` to atomically publish the
+complete decoded file without overwriting an existing name or treating a target
+directory as a container. Exec fails closed if `link` or filesystem hard links are
+unavailable. Cancellation cannot retract a publish already accepted by the server.
+Cleanup has a separate child-channel scope and a one-second deadline. It runs only
+after confirmed scratch-directory creation and removes only known scratch files
+and that empty directory, never the target. A lost creation reply can leave a
+private directory because the client cannot confirm its ownership.
+
+Doubao API key replacement updates the Keychain value in place, preserving its
+existing access policy. Only item-not-found permits Add; a concurrent Add conflict
+retries Update. Failed replacement never deletes the old item. The settings screen
+refreshes credential availability after errors without reading a key into a field.

@@ -3,7 +3,7 @@
 [English](README.md) · **中文**
 
 **Hermit 是 iPhone 和 iPad 上的 SSH / Mosh 终端，用于在远程机器上操作 coding agent。**
-支持 tmux、herdr、直连 SSH、Cloudflare Access 和内置 Tailscale，提供本地语音输入，
+支持 tmux、herdr、直连 SSH、Cloudflare Access 和内置 Tailscale，提供本地及可选云端语音输入，
 并在锁屏和灵动岛展示连接与任务状态。
 
 Hermit 在本仓库维护，基于 [Cluas 的 Moshpit](https://github.com/Cluas/moshpit)
@@ -38,6 +38,10 @@ Hermit 在本仓库维护，基于 [Cluas 的 Moshpit](https://github.com/Cluas/
 
 - Apple 设备端语音识别和可选的本地 Whisper 模型。停止录音后可以审阅、编辑、
   换语言重新识别或恢复最初结果，再加入草稿。
+- 本地技术词表支持项目名和工具名；录音测试可使用同一段录音对比本地引擎，
+  展示准备、首字及结束等待耗时。词表不发送到豆包，也不通过 iCloud 同步。
+- 可选豆包云识别，使用自己的 API Key。设置中的录音测试无需连接 SSH；
+  选择云识别后，停止转写或重试会将录音发送到火山引擎。
 - 草稿通过飞机按钮发送到远端；语音审阅和取消只处理本地内容。
 - 实时活动展示连接状态和已上报的任务状态。iOS 挂起 App 时停止更新，返回前台后恢复。
 - 继承 Moshpit 的 agent 通知、图片分享和远程 worktree 工作流。远程推送需要配置
@@ -47,7 +51,8 @@ Hermit 在本仓库维护，基于 [Cluas 的 Moshpit](https://github.com/Cluas/
 **数据与主机操作**
 
 - 密码和私钥保存在 iOS Keychain；可同步的凭据是否跨设备同步，由 iCloud 设置控制。
-- 录音和识别均在设备上进行；接受或取消语音审阅后释放临时重识别录音。
+- Apple 与 Whisper 在本地识别；豆包将录音发送到火山引擎，适用所用服务的条款和计费。
+  豆包 API Key 保存在本机 Keychain，不纳入 SSH 凭据同步；接受或取消审阅后释放临时录音。
 - 主机安装和创建会话由用户在 App 中明确操作，各种连接传输均保留 SSH 主机密钥校验。
 
 任何 SSH 服务器均可使用。Mosh、tmux、herdr 按需安装，App 内提供安装说明。

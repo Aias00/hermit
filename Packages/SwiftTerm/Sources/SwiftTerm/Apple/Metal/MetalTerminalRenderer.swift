@@ -201,9 +201,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
     private var atlasResetHandled = false
     private var cursorBlinkTimer: Timer?
     private var cursorBlinkOn = true
-    private let frameSemaphore = DispatchSemaphore(value: 1)
-    private var pendingRedraw = false
-    private let redrawLock = NSLock()
+    private let frameGate = MetalFrameGate()
 #if DEBUG
     private var debugFrameCount = 0
     private var debugLastLogTime = CFAbsoluteTimeGetCurrent()
@@ -306,12 +304,9 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
             }
         }
 #endif
-        if frameSemaphore.wait(timeout: .now()) != .success {
-            markPendingRedraw()
-            return
-        }
+        guard frameGate.beginFrame() else { return }
         guard let terminalView = terminalView else {
-            frameSemaphore.signal()
+            frameGate.abandonFrame()
             return
         }
         let scale = terminalView.backingScaleFactor()
@@ -350,8 +345,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
         }
 #endif
         guard let drawable, let passDescriptor else {
-            markPendingRedraw()
-            frameSemaphore.signal()
+            frameGate.abandonFrame(needsRedraw: true)
             return
         }
 #if canImport(os)
@@ -398,16 +392,13 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                 os_signpost(.end, log: MetalTerminalRenderer.profileLog, name: "Metal.Encode", signpostID: encodeID)
             }
 #endif
-            frameSemaphore.signal()
+            frameGate.abandonFrame(needsRedraw: true)
             return
         }
-        let frameSemaphore = self.frameSemaphore
-        commandBuffer.addCompletedHandler { [weak self, weak view] _ in
-            frameSemaphore.signal()
-            guard let self, let view else {
-                return
-            }
-            if self.consumePendingRedraw() {
+        let frameGate = self.frameGate
+        commandBuffer.addCompletedHandler { [weak view] _ in
+            let needsRedraw = frameGate.completeFrame()
+            if needsRedraw, let view {
                 DispatchQueue.main.async {
                     view.setNeedsDisplay(view.bounds)
                 }
@@ -525,20 +516,6 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
 #endif
     }
 
-
-    private func markPendingRedraw() {
-        redrawLock.lock()
-        pendingRedraw = true
-        redrawLock.unlock()
-    }
-
-    private func consumePendingRedraw() -> Bool {
-        redrawLock.lock()
-        let needsRedraw = pendingRedraw
-        pendingRedraw = false
-        redrawLock.unlock()
-        return needsRedraw
-    }
 
     private func buildDrawData(scale: CGFloat) -> DrawData {
         guard let terminalView = terminalView else {

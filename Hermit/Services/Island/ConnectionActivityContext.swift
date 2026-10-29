@@ -11,6 +11,11 @@ struct ConnectionActivityContext: Equatable, Sendable {
     var taskState: String?
     var paneID: String?
 
+    static func make(command: ShellCommandObservation?) -> Self {
+        guard let command else { return Self() }
+        return Self(programName: "Shell", taskState: command.phase == .running ? "working" : "done")
+    }
+
     static func make(snapshot: TmuxSnapshot, hooks: [String: AgentHook],
                      hooksLoaded: Bool) -> Self {
         let knownHooks = hooksLoaded ? hooks : [:]

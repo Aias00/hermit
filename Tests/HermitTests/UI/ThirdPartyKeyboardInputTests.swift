@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import UIKit
-import SwiftTerm
+@testable import SwiftTerm
 @testable import Moshpit
 
 /// What the terminal says back to a keyboard, and what a keyboard's own edits
@@ -16,7 +16,7 @@ import SwiftTerm
 /// sentence stopped half-way. And when the selection reached the phantom
 /// newline parked at the front of the buffer, putting it back pressed Return
 /// on the remote: half a command run, half a prompt sent.
-@Suite("third-party keyboard input")
+@Suite("third-party keyboard input", .serialized)
 @MainActor
 struct ThirdPartyKeyboardInputTests {
 
@@ -145,5 +145,104 @@ struct ThirdPartyKeyboardInputTests {
         rig.view.insertText("\n")
 
         #expect(rig.remote.bytes.last == 13)
+    }
+
+    @Test("IME selections tolerate stale UTF-16 ranges and never split a grapheme")
+    func compositionSelectionBoundaries() throws {
+        let rig = try Rig()
+        defer { rig.window.isHidden = true; rig.view.updateUiClosed() }
+        let cases: [(String, NSRange, Range<Int>)] = [
+            ("你好", NSRange(location: NSNotFound, length: 0), 2..<2),
+            ("你", NSRange(location: 8, length: Int.max), 1..<1),
+            ("你好", NSRange(location: 1, length: Int.max), 1..<2),
+            ("😀x", NSRange(location: 1, length: 0), 1..<1),
+            ("😀x", NSRange(location: 1, length: 1), 0..<1),
+            ("e\u{0301}x", NSRange(location: 1, length: 1), 0..<1),
+            ("👩🏽‍💻x", NSRange(location: 3, length: 0), 1..<1),
+            ("", NSRange(location: NSNotFound, length: Int.max), 0..<0)
+        ]
+        for (text, selection, expected) in cases {
+            rig.view.setMarkedText(text, selectedRange: selection)
+            let marked = try #require(rig.view.markedTextRange)
+            let selected = try #require(rig.view.selectedTextRange)
+            #expect(rig.view.text(in: marked) == text)
+            #expect(rig.view.offset(from: marked.start, to: selected.start) == expected.lowerBound)
+            #expect(rig.view.offset(from: marked.start, to: selected.end) == expected.upperBound)
+            #expect(rig.remote.bytes.isEmpty, "a candidate update stays on the device")
+        }
+    }
+
+    @Test("Committing Chinese, emoji and combining text preserves every space")
+    func compositionCommitPreservesText() throws {
+        let rig = try Rig()
+        defer { rig.window.isHidden = true; rig.view.updateUiClosed() }
+        let text = " 你好  👩🏽‍💻 e\u{0301} \t"
+        rig.view.setMarkedText(text, selectedRange: NSRange(location: text.utf16.count, length: 0))
+        #expect(rig.remote.bytes.isEmpty)
+        rig.view.unmarkText()
+        #expect(rig.remote.text == text)
+        #expect(rig.view.markedTextRange == nil)
+        #expect(rig.buffer == "\n" + text)
+        rig.view.unmarkText()
+        #expect(rig.remote.text == text, "a second unmark must not commit again")
+    }
+
+    @Test("Deleting composed emoji and accents never backspaces remote text")
+    func compositionDeletionStaysLocal() throws {
+        let rig = try Rig()
+        defer { rig.window.isHidden = true; rig.view.updateUiClosed() }
+        rig.view.insertText("prefix")
+        rig.view.setMarkedText("你👩🏽‍💻e\u{0301}", selectedRange: NSRange(location: NSNotFound, length: 0))
+        for expected in ["你👩🏽‍💻", "你", ""] {
+            rig.view.deleteBackward()
+            #expect(rig.buffer == "\nprefix" + expected)
+            #expect(rig.remote.text == "prefix")
+        }
+        #expect(rig.view.markedTextRange == nil)
+        rig.view.deleteBackward()
+        #expect(rig.remote.bytes == Array("prefix".utf8) + [0x7f])
+    }
+
+    @Test("Cancelling a shortened candidate sends no text or deletion")
+    func compositionCancellationStaysLocal() throws {
+        let rig = try Rig()
+        defer { rig.window.isHidden = true; rig.view.updateUiClosed() }
+        rig.view.insertText("prefix")
+        rig.view.setMarkedText("ni hao", selectedRange: NSRange(location: 6, length: 0))
+        rig.view.setMarkedText("你", selectedRange: NSRange(location: 6, length: 0))
+        rig.view.setMarkedText(nil, selectedRange: NSRange(location: NSNotFound, length: 0))
+        #expect(rig.buffer == "\nprefix")
+        #expect(rig.view.markedTextRange == nil)
+        #expect(rig.remote.text == "prefix")
+        rig.view.insertText("!")
+        #expect(rig.remote.text == "prefix!")
+    }
+
+    @Test("Remote output and narrow layouts preserve composition and its caret", arguments: [false, true])
+    func compositionSurvivesOutputAndResize(_ metal: Bool) throws {
+        let rig = try Rig()
+        defer { rig.window.isHidden = true; rig.view.updateUiClosed() }
+        if metal { try rig.view.setUseMetal(true) }
+        rig.view.insertText("prefix")
+        let text = "你好 👩🏽‍💻 e\u{0301}"
+        rig.view.setMarkedText(text, selectedRange: NSRange(location: text.utf16.count, length: 0))
+        for width in [230.0, 540.0, 390.0] {
+            rig.view.frame.size.width = width
+            rig.view.setNeedsLayout()
+            rig.view.layoutIfNeeded()
+            rig.view.feed(text: "\r\nremote-output> ")
+            rig.view.updateDisplay()
+            let marked = try #require(rig.view.markedTextRange)
+            let label = try #require(rig.view.imeCompositionLabel)
+            let caret = try #require(rig.view.caretView)
+            #expect(rig.view.text(in: marked) == text)
+            #expect(label.attributedText?.string == text)
+            #expect(abs(caret.frame.minX - label.frame.maxX) <= 1,
+                    "a repaint must not move the caret before the composing text")
+            #expect(abs(caret.frame.minY - label.frame.minY) <= 1)
+            #expect(rig.remote.text == "prefix", "layout and output cannot commit local composition")
+        }
+        rig.view.unmarkText()
+        #expect(rig.remote.text == "prefix" + text)
     }
 }

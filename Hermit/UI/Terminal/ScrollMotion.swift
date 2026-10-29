@@ -20,3 +20,28 @@ struct ScrollRowCarry {
 
     mutating func reset() { remainder = 0 }
 }
+
+/// Wheel ticks waiting for the next display interval. Reversing direction
+/// discards unsent motion in the old direction so it cannot fight the finger.
+struct TerminalWheelQueue {
+    private(set) var pending = 0
+
+    @discardableResult
+    mutating func enqueue(_ lines: Int) -> Bool {
+        guard lines != 0 else { return false }
+        let reversed = pending != 0 && (pending > 0) != (lines > 0)
+        if reversed { pending = 0 }
+        let (sum, overflow) = pending.addingReportingOverflow(lines)
+        pending = overflow ? (lines > 0 ? Int.max : Int.min) : sum
+        return reversed
+    }
+
+    mutating func take(limit: Int) -> Int {
+        guard limit > 0 else { return 0 }
+        let batch = min(limit, max(-limit, pending))
+        pending -= batch
+        return batch
+    }
+
+    mutating func reset() { pending = 0 }
+}

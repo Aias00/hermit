@@ -12,6 +12,10 @@
     "Use a weak CADisplayLink target and invalidate the link at terminal deallocation so discarded panes release their buffers and GPU resources.",
     "Map CoreText UTF-16 glyph indices to terminal grapheme cells in both renderers; preserve mark offsets and size backgrounds and decorations by cells rather than glyph count.",
     "Version Kitty image payloads and cached rows/textures, and redraw on same-ID replacement so updates beyond the first 64 bytes remain visible.",
-    "Resize only occupied history rows; avoid scanning or materializing unused scrollback capacity when keyboard geometry changes."
+    "Resize only occupied history rows; avoid scanning or materializing unused scrollback capacity when keyboard geometry changes.",
+    "Clamp IME UTF-16 candidate selections to grapheme boundaries without changing committed text or whitespace.",
+    "Atomically coalesce skipped Metal draws with GPU completion; release failed frames without busy retries.",
+    "Expose a mouse-mode generation so hosts can discard queued pointer input when a program disables and re-enables reporting in one output chunk.",
+    "Clamp legacy mouse coordinates before UInt8 conversion and remove pixel-protocol coordinate logging."
   ]
 }

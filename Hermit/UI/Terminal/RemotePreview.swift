@@ -57,10 +57,9 @@ enum RemotePreviewCache {
         let final = localURL(for: entry, scope: files.scope)
         let fm = FileManager.default
         try fm.createDirectory(at: final.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let partial = final.deletingLastPathComponent().appendingPathComponent(".partial")
-        try await files.channel().downloadRemoteFile(entry.path, to: partial, progress: progress)
-        try? fm.removeItem(at: final)
-        try fm.moveItem(at: partial, to: final)
+        // The channel stages and atomically publishes its download. A fixed
+        // `.partial` here let a thumbnail and an explicit open share a writer.
+        try await files.channel().downloadRemoteFile(entry.path, to: final, progress: progress)
         return final
     }
 
@@ -399,6 +398,11 @@ final class RemoteFolderModel {
     var openFailure: String?
     /// An upload under way, as a fraction — shown above the grid.
     private(set) var uploading: Double?
+    private(set) var uploadName: String?
+    private(set) var cancellingUpload = false
+    @ObservationIgnored private var uploadWork: Task<Void, Never>?
+    @ObservationIgnored private var uploadID: UUID?
+    @ObservationIgnored private var uploadFileID: UUID?
     /// A create / rename / delete / upload that didn't go through.
     var editFailure: EditFailure?
     /// Every name in the folder, hidden and unpreviewable ones included: what
@@ -526,27 +530,73 @@ final class RemoteFolderModel {
 
     /// Files picked in the Files app, uploaded under their own names (a
     /// taken name gets Finder's " 2").
-    func upload(files urls: [URL]) async {
+    func startUpload(files urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        startUpload { model in await model.upload(files: urls) }
+    }
+
+    func startUpload(photos items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        startUpload { model in await model.upload(photos: items) }
+    }
+
+    private func startUpload(_ operation: @escaping @MainActor (RemoteFolderModel) async -> Void) {
+        guard uploadWork == nil else { return }
+        let id = UUID()
+        uploadID = id
+        uploading = 0
+        cancellingUpload = false
+        editFailure = nil
+        uploadWork = Task { [weak self] in
+            guard let self else { return }
+            // Cancel can arrive before this task gets its first main-actor
+            // turn. Still retire the batch, without starting any file work.
+            if !Task.isCancelled { await operation(self) }
+            guard self.uploadID == id else { return }
+            self.uploadFileID = nil
+            self.uploadID = nil
+            self.uploadWork = nil
+            self.uploading = nil
+            self.uploadName = nil
+            self.cancellingUpload = false
+            // A dismissed/cancelled batch must not launch a fresh directory
+            // scan or thumbnail download after its last request returns.
+            if !Task.isCancelled { await self.load() }
+        }
+    }
+
+    func cancelUpload() {
+        guard uploadWork != nil else { return }
+        cancellingUpload = true
+        uploadFileID = nil // reject progress already queued on the main actor
+        uploadWork?.cancel()
+    }
+
+    private func upload(files urls: [URL]) async {
         for url in urls {
+            guard !Task.isCancelled else { return }
             let scoped = url.startAccessingSecurityScopedResource()
             await upload(local: url, named: url.lastPathComponent)
             if scoped { url.stopAccessingSecurityScopedResource() }
         }
-        await load()
     }
 
     /// Photos go through the same pipeline as an attached image — re-encoded
     /// so no location or other metadata leaves the phone, and named
     /// `IMG-<time>-<rand>` rather than after the library entry.
-    func upload(photos items: [PhotosPickerItem]) async {
+    private func upload(photos items: [PhotosPickerItem]) async {
         for item in items {
+            guard !Task.isCancelled else { return }
             guard let raw = try? await item.loadTransferable(type: Data.self),
+                  !Task.isCancelled,
                   let processed = await Task.detached(operation: { try? ImageAttachmentPipeline.process(raw) }).value
             else {
+                guard !Task.isCancelled else { return }
                 editFailure = EditFailure(title: String(localized: "Couldn't upload"),
                                           message: String(localized: "Couldn't read that photo."))
                 continue
             }
+            guard !Task.isCancelled else { return }
             let staged = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             do {
                 try processed.data.write(to: staged)
@@ -557,23 +607,41 @@ final class RemoteFolderModel {
             }
             try? FileManager.default.removeItem(at: staged)
         }
-        await load()
     }
 
     private func upload(local: URL, named name: String) async {
+        guard !Task.isCancelled else { return }
         let name = RemoteFileEdits.uniqueName(name, taken: allNames)
         allNames.insert(name)
+        let fileID = UUID()
+        uploadFileID = fileID
+        uploadName = name
         uploading = 0
-        defer { uploading = nil }
+        defer { if uploadFileID == fileID { uploadFileID = nil } }
         do {
-            try await files.channel().uploadRemoteFile(
+            // Dialling may be waiting on a network response that ignores
+            // task cancellation. Retire this batch promptly; a late channel
+            // belongs to the cancelled attempt and must never start a file.
+            let channel = try await CancellableTransfer.run { @MainActor [self] in
+                try Task.checkCancellation()
+                let channel = try await files.channel()
+                try Task.checkCancellation()
+                return channel
+            }
+            try Task.checkCancellation()
+            try await channel.uploadRemoteFile(
                 from: local, to: RemoteFileEdits.child(name, of: folder.path)) { [weak self] fraction in
                 Task { @MainActor in
-                    if self?.uploading != nil { self?.uploading = fraction }
+                    guard let self, self.uploadFileID == fileID, !self.cancellingUpload,
+                          fraction.isFinite else { return }
+                    self.uploading = max(self.uploading ?? 0, min(1, max(0, fraction)))
                 }
             }
         } catch is CancellationError {
+            allNames.remove(name)
         } catch {
+            allNames.remove(name)
+            guard !Task.isCancelled else { return }
             editFailure = EditFailure(title: String(localized: "Couldn't upload"),
                                       message: RemotePreviewCache.message(for: error))
         }
@@ -730,11 +798,11 @@ struct RemoteFolderView: View {
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             photoItems = []
-            Task { await model.upload(photos: items) }
+            model.startUpload(photos: items)
         }
         .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result, !urls.isEmpty else { return }
-            Task { await model.upload(files: urls) }
+            model.startUpload(files: urls)
         }
         .alert("New Folder", isPresented: $showNewFolder) {
             TextField("Name", text: $newFolderName)
@@ -759,6 +827,7 @@ struct RemoteFolderView: View {
             }
         }
         .task { await model.load() }
+        .onDisappear { model.cancelUpload() }
         .refreshable { await model.load() }
         .quickLookPreview($model.previewURL, in: model.previewItems)
         .alert(String(localized: "CAN'T OPEN"), isPresented: Binding(
@@ -862,15 +931,31 @@ struct RemoteFolderView: View {
 
     private func uploadStrip(_ fraction: Double) -> some View {
         HStack(spacing: 10) {
-            Text(String(localized: "UPLOADING \(Int(fraction * 100))%"))
-                .font(Face.mono(10, .semibold))
-                .kerning(1.2)
-                .foregroundStyle(Ink.accent)
-                .fixedSize()
-            ProgressView(value: fraction)
-                .tint(Ink.accent)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text(model.cancellingUpload
+                         ? String(localized: "CANCELLING…")
+                         : String(localized: "UPLOADING \(Int(fraction * 100))%"))
+                        .font(Face.mono(10, .semibold))
+                        .foregroundStyle(Ink.accent)
+                        .fixedSize()
+                    if let name = model.uploadName {
+                        Text(name)
+                            .font(Face.text(11))
+                            .foregroundStyle(Ink.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                ProgressView(value: fraction).tint(Ink.accent)
+            }
+            Button("Cancel") { model.cancelUpload() }
+                .font(Face.text(12, .semibold))
+                .disabled(model.cancellingUpload)
+                .accessibilityIdentifier("remote-folder-upload-cancel")
         }
         .padding(.horizontal, 2)
+        .accessibilityIdentifier("remote-folder-upload-progress")
     }
 
     /// An image or video: a square thumbnail, cropped to fill — the base

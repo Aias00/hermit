@@ -10,11 +10,26 @@ private struct ActivityPresentation {
     var task: ConnectionActivityAttributes.TaskState? {
         state.connectionState == .connected ? state.taskState : nil
     }
-    var label: String { task?.label ?? state.connectionState.label }
-    var symbol: String { task?.symbol ?? state.connectionState.symbol }
+    var shellFinished: Bool { task == .done && state.programName == "Shell" }
+    var commandFailed: Bool { shellFinished && state.commandExitCode.map { $0 != 0 } == true }
+    var label: String {
+        if shellFinished {
+            if let code = state.commandExitCode {
+                return String(localized: "Command exited with status \(code)")
+            }
+            return String(localized: "Command finished")
+        }
+        return task?.label ?? state.connectionState.label
+    }
+    var symbol: String {
+        if commandFailed { return "xmark.circle" }
+        if shellFinished && state.commandExitCode == nil { return "terminal" }
+        return task?.symbol ?? state.connectionState.symbol
+    }
     var color: Color {
         if historical { return .secondary }
-        if task == .attention || state.connectionState == .reconnecting { return .orange }
+        if commandFailed || task == .attention || state.connectionState == .reconnecting { return .orange }
+        if shellFinished && state.commandExitCode == nil { return .cyan }
         if task == .done { return .green }
         return .cyan
     }

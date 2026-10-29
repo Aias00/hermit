@@ -17,10 +17,8 @@ import MoshpitKit
 /// 2. **DictationTranscriber** (iOS 26+) — the on-device keyboard-dictation
 ///    model, covering many locales the large model doesn't yet.
 /// 3. **SFSpeechRecognizer** (iOS 18–25) — *on-device only*. The server
-///    variant is deliberately never used: the mic/speech purpose strings and
-///    the privacy label promise audio never leaves the device, so a locale
-///    without on-device support reads as unavailable rather than silently
-///    shipping audio to Apple.
+///    variant is deliberately never used: choosing a local engine must not
+///    silently upload audio. Doubao is a separate, explicit cloud choice.
 enum DictationEngineFactory {
     /// All engines that can serve the request, best first. The controller
     /// works down the list at prepare/start time: a transcriber whose locale
@@ -34,6 +32,9 @@ enum DictationEngineFactory {
     /// language is Automatic.
     static func candidates(request: DictationRequest,
                            spokenLanguages: [String]) async throws -> [DictationEngine] {
+        if request.engine == .doubao {
+            return [DoubaoDictationEngine(resourceID: request.doubaoResourceID)]
+        }
         var engines: [DictationEngine] = []
         if request.engine == .whisper,
            let variant = WhisperModelStore.resolvedVariant(preferring: request.whisperModelId) {
@@ -42,10 +43,11 @@ enum DictationEngineFactory {
                 store: WhisperModelStore.shared,
                 variant: variant,
                 language: language,
-                label: whisperLabel(variant: variant, language: language)))
+                label: whisperLabel(variant: variant, language: language),
+                contextualStrings: request.contextualStrings))
         }
         let locale = await appleLocale(request: request, spokenLanguages: spokenLanguages)
-        engines.append(contentsOf: await appleEngines(locale: locale))
+        engines.append(contentsOf: await appleEngines(locale: locale, contextualStrings: request.contextualStrings))
         guard !engines.isEmpty else {
             if request.engine == .whisper, request.whisperModelId.isEmpty,
                WhisperModelStore.resolvedVariant(preferring: "") == nil {
@@ -59,7 +61,7 @@ enum DictationEngineFactory {
 
     /// Apple's transcribers for a locale, best first. Empty when none of them
     /// can do that language on this device.
-    private static func appleEngines(locale: Locale) async -> [DictationEngine] {
+    private static func appleEngines(locale: Locale, contextualStrings: [String] = []) async -> [DictationEngine] {
         var engines: [DictationEngine] = []
         if #available(iOS 26.0, *) {
             if let match = await SpeechTranscriber.supportedLocale(equivalentTo: locale) {
@@ -71,12 +73,12 @@ enum DictationEngineFactory {
             }
             if let match = await DictationTranscriber.supportedLocale(equivalentTo: locale) {
                 engines.append(ModernDictationEngine(module: .dictation(DictationTranscriber(
-                    locale: match, preset: .progressiveLongDictation))))
+                    locale: match, preset: .progressiveLongDictation)), contextualStrings: contextualStrings))
             }
         }
         if let recognizer = SFSpeechRecognizer(locale: locale),
            recognizer.supportsOnDeviceRecognition {
-            engines.append(LegacyDictationEngine(recognizer: recognizer))
+            engines.append(LegacyDictationEngine(recognizer: recognizer, contextualStrings: contextualStrings))
         }
         return engines
     }
@@ -142,12 +144,16 @@ final class ModernDictationEngine: DictationEngine {
     }
 
     private let module: Module
+    private let contextualStrings: [String]
     private let updateContinuation: AsyncThrowingStream<DictationUpdate, Error>.Continuation
+    /// Serializes converter, input delivery and termination against the tap.
+    private let lock = NSLock()
     private let converter = DictationBufferConverter()
     private var analyzer: SpeechAnalyzer?
     private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     private var analyzerFormat: AVAudioFormat?
     private var resultsTask: Task<Void, Never>?
+    private var acceptingAudio = false
     /// Set by `cancel()` so a torn-down results stream ends quietly instead
     /// of surfacing a cancellation as a user-visible error.
     private var cancelled = false
@@ -156,8 +162,9 @@ final class ModernDictationEngine: DictationEngine {
     /// the volatile hypothesis is replaced by every non-final result.
     private var finalized = ""
 
-    init(module: Module) {
+    init(module: Module, contextualStrings: [String] = []) {
         self.module = module
+        self.contextualStrings = VoiceVocabulary.normalized(contextualStrings)
         (updates, updateContinuation) = AsyncThrowingStream.makeStream()
     }
 
@@ -205,49 +212,116 @@ final class ModernDictationEngine: DictationEngine {
 
     func start() async throws {
         let analyzer = SpeechAnalyzer(modules: [module.speechModule])
-        self.analyzer = analyzer
-        analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(
+        let format = await SpeechAnalyzer.bestAvailableAudioFormat(
             compatibleWith: [module.speechModule])
+        // Contextual vocabulary is supported by DictationTranscriber. Keep
+        // SpeechTranscriber first in the factory without implying this hint
+        // changes its model or silently switching engines to honor a word list.
+        if case .dictation = module, !contextualStrings.isEmpty {
+            let context = AnalysisContext()
+            context.contextualStrings[.general] = contextualStrings
+            try await analyzer.setContext(context)
+        }
+        try Task.checkCancellation()
         let (inputSequence, inputContinuation) = AsyncStream<AnalyzerInput>.makeStream()
-        self.inputContinuation = inputContinuation
-        // Subscribe to results BEFORE starting analysis so nothing is missed.
-        resultsTask = Task { [weak self] in await self?.consumeResults() }
-        try await analyzer.start(inputSequence: inputSequence)
-    }
-
-    func append(_ buffer: AVAudioPCMBuffer) {
-        guard let inputContinuation else { return }
+        try lock.withLock {
+            guard !cancelled else { throw CancellationError() }
+            self.analyzer = analyzer
+            analyzerFormat = format
+            self.inputContinuation = inputContinuation
+            acceptingAudio = true
+            // Subscribe before starting analysis so no early result is lost.
+            resultsTask = Task { [weak self] in await self?.consumeResults() }
+        }
         do {
-            let converted: AVAudioPCMBuffer
-            if let analyzerFormat {
-                converted = try converter.convert(buffer, to: analyzerFormat)
-            } else {
-                converted = buffer
-            }
-            inputContinuation.yield(AnalyzerInput(buffer: converted))
+            try await analyzer.start(inputSequence: inputSequence)
+            try Task.checkCancellation()
+            try lock.withLock { if cancelled { throw CancellationError() } }
         } catch {
-            // A malformed buffer isn't fatal to the session — drop it.
-            Log.voice.error("buffer conversion failed: \(error.localizedDescription)")
+            cancel()
+            throw error
         }
     }
 
+    func append(_ buffer: AVAudioPCMBuffer) {
+        let failedAnalyzer: SpeechAnalyzer? = lock.withLock {
+            guard acceptingAudio, !cancelled, let inputContinuation else { return nil }
+            do {
+                for converted in try converter.append(buffer, to: analyzerFormat ?? buffer.format) {
+                    inputContinuation.yield(AnalyzerInput(buffer: converted))
+                }
+                return nil
+            } catch {
+                // A missing chunk must not become a successful transcription
+                // of an incomplete recording. The controller retains PCM for
+                // an explicit retry and preserves any already visible text.
+                return failAudioLocked(error)
+            }
+        }
+        if let failedAnalyzer { Task { await failedAnalyzer.cancelAndFinishNow() } }
+    }
+
     func finishAudio() async {
-        inputContinuation?.finish()
-        inputContinuation = nil
-        // Flush the tail of the audio into a final result; the results
-        // stream then ends, which ends `updates` via consumeResults().
-        try? await analyzer?.finalizeAndFinishThroughEndOfInput()
+        var failedAnalyzer: SpeechAnalyzer?
+        let work: (SpeechAnalyzer, Task<Void, Never>?)? = lock.withLock {
+            guard acceptingAudio, !cancelled, let analyzer, let inputContinuation else { return nil }
+            acceptingAudio = false
+            do {
+                // Closing the analyzer input does not flush AVAudioConverter.
+                // Deliver its EOS tail first, then finish the recognizer input.
+                for tail in try converter.finish() {
+                    inputContinuation.yield(AnalyzerInput(buffer: tail))
+                }
+                inputContinuation.finish()
+                self.inputContinuation = nil
+                return (analyzer, resultsTask)
+            } catch {
+                failedAnalyzer = failAudioLocked(error)
+                return nil
+            }
+        }
+        if let failedAnalyzer { await failedAnalyzer.cancelAndFinishNow() }
+        guard let (analyzer, resultsTask) = work else { return }
+        do {
+            try await analyzer.finalizeAndFinishThroughEndOfInput()
+        } catch {
+            if !lock.withLock({ cancelled }), !(error is CancellationError) {
+                updateContinuation.finish(throwing: error)
+            }
+            await analyzer.cancelAndFinishNow()
+        }
         await resultsTask?.value
     }
 
     func cancel() {
+        let analyzer: SpeechAnalyzer? = lock.withLock {
+            cancelled = true
+            acceptingAudio = false
+            converter.discard()
+            inputContinuation?.finish()
+            inputContinuation = nil
+            resultsTask?.cancel()
+            resultsTask = nil
+            updateContinuation.finish()
+            defer { self.analyzer = nil }
+            return self.analyzer
+        }
+        if let analyzer { Task { await analyzer.cancelAndFinishNow() } }
+    }
+
+    /// Called with `lock` held. No raw audio or recognizer output is logged.
+    private func failAudioLocked(_ error: Error) -> SpeechAnalyzer? {
+        acceptingAudio = false
         cancelled = true
+        converter.discard()
+        // Publish the failure before ending analyzer input. Otherwise its
+        // results stream could end normally first and hide the dropped audio.
+        updateContinuation.finish(throwing: error)
         inputContinuation?.finish()
         inputContinuation = nil
         resultsTask?.cancel()
-        updateContinuation.finish()
-        let analyzer = analyzer
-        Task { await analyzer?.cancelAndFinishNow() }
+        Log.voice.error("dictation audio conversion failed")
+        return analyzer
     }
 
     private func consumeResults() async {
@@ -264,7 +338,7 @@ final class ModernDictationEngine: DictationEngine {
             }
             updateContinuation.finish()
         } catch {
-            if cancelled || error is CancellationError {
+            if lock.withLock({ cancelled }) || error is CancellationError {
                 updateContinuation.finish()
             } else {
                 updateContinuation.finish(throwing: error)
@@ -273,56 +347,109 @@ final class ModernDictationEngine: DictationEngine {
     }
 
     private func ingest(text: String, isFinal: Bool) {
-        var volatileText = ""
-        if isFinal {
-            finalized = DictationTranscript.join(finalized, text)
-        } else {
-            volatileText = text
+        lock.withLock {
+            guard !cancelled else { return }
+            var volatileText = ""
+            if isFinal {
+                finalized = DictationTranscript.join(finalized, text)
+            } else {
+                volatileText = text
+            }
+            updateContinuation.yield(DictationUpdate(
+                finalizedText: finalized, volatileText: volatileText))
         }
-        updateContinuation.yield(DictationUpdate(
-            finalizedText: finalized, volatileText: volatileText))
     }
 }
 
-/// Converts mic-native buffers (typically 48 kHz float) to the analyzer's
-/// preferred format (typically 16 kHz). One converter instance is reused
-/// across buffers; `primeMethod = .none` avoids the converter swallowing the
-/// first frames of real-time audio as priming.
+/// One continuous PCM stream, including the resampler's final buffered audio.
+/// Owners serialize append/finish/discard with their engine lifecycle lock.
+/// Every returned buffer owns its storage; an audio tap may reuse its input
+/// immediately after append returns, including when no conversion is needed.
 final class DictationBufferConverter {
     private var converter: AVAudioConverter?
+    private var ended = false
 
-    func convert(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> AVAudioPCMBuffer {
-        guard buffer.format != format else { return buffer }
-        if converter == nil
-            || converter?.inputFormat != buffer.format
-            || converter?.outputFormat != format {
-            converter = AVAudioConverter(from: buffer.format, to: format)
-            converter?.primeMethod = .none
+    func append(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) throws -> [AVAudioPCMBuffer] {
+        guard !ended else { throw CancellationError() }
+        guard buffer.frameLength <= buffer.frameCapacity,
+              buffer.format.sampleRate.isFinite, buffer.format.sampleRate > 0,
+              format.sampleRate.isFinite, format.sampleRate > 0,
+              buffer.format.channelCount > 0, format.channelCount > 0 else {
+            throw Self.conversionFailure
         }
-        guard let converter else {
-            throw DictationFailure.engine(String(localized: "Audio format conversion unavailable."))
+        guard buffer.frameLength > 0 else { return [] }
+        var result: [AVAudioPCMBuffer] = []
+        if let converter, converter.inputFormat != buffer.format || converter.outputFormat != format {
+            result = try finishSegment()
         }
-        let ratio = format.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + 16
-        guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
-            throw DictationFailure.engine(String(localized: "Audio buffer allocation failed."))
-        }
-        var consumed = false
-        var conversionError: NSError?
-        let status = converter.convert(to: converted, error: &conversionError) { _, inputStatus in
-            if consumed {
-                inputStatus.pointee = .noDataNow
-                return nil
+        if converter == nil {
+            guard let created = AVAudioConverter(from: buffer.format, to: format) else {
+                throw Self.conversionFailure
             }
+            // Normal priming plus EOS draining preserves the recording's
+            // intended duration and tail. `.none` can leave padding delay.
+            created.primeMethod = .normal
+            converter = created
+        }
+        guard let converter else { throw Self.conversionFailure }
+        var consumed = false
+        result.append(contentsOf: try drain(converter, ending: false) { _, inputStatus in
+            guard !consumed else { inputStatus.pointee = .noDataNow; return nil }
             consumed = true
             inputStatus.pointee = .haveData
             return buffer
+        })
+        return result
+    }
+
+    func finish() throws -> [AVAudioPCMBuffer] {
+        guard !ended else { return [] }
+        ended = true
+        return try finishSegment()
+    }
+
+    func discard() {
+        ended = true
+        converter = nil
+    }
+
+    private func finishSegment() throws -> [AVAudioPCMBuffer] {
+        guard let converter else { return [] }
+        defer { self.converter = nil }
+        return try drain(converter, ending: true) { _, inputStatus in
+            inputStatus.pointee = .endOfStream
+            return nil
         }
-        if let conversionError { throw conversionError }
-        guard status != .error else {
-            throw DictationFailure.engine(String(localized: "Audio format conversion failed."))
+    }
+
+    private func drain(_ converter: AVAudioConverter, ending: Bool,
+                       input: @escaping AVAudioConverterInputBlock) throws -> [AVAudioPCMBuffer] {
+        var buffers: [AVAudioPCMBuffer] = []
+        while true {
+            guard let output = AVAudioPCMBuffer(pcmFormat: converter.outputFormat, frameCapacity: 4_096) else {
+                throw Self.conversionFailure
+            }
+            var error: NSError?
+            let status = converter.convert(to: output, error: &error, withInputFrom: input)
+            guard error == nil, status != .error else { throw Self.conversionFailure }
+            if output.frameLength > 0 { buffers.append(output) }
+            switch status {
+            case .endOfStream:
+                guard ending else { throw Self.conversionFailure }
+                return buffers
+            case .inputRanDry:
+                guard !ending else { throw Self.conversionFailure }
+                return buffers
+            case .haveData:
+                guard output.frameLength > 0 else { throw Self.conversionFailure }
+            case .error: throw Self.conversionFailure
+            @unknown default: throw Self.conversionFailure
+            }
         }
-        return converted
+    }
+
+    private static var conversionFailure: DictationFailure {
+        .engine(String(localized: "Audio format conversion failed."))
     }
 }
 
@@ -332,8 +459,8 @@ final class DictationBufferConverter {
 /// speech-recognition authorization, and it re-reports the whole utterance on
 /// every partial callback (so no accumulation here — the latest callback IS
 /// the transcript). Recognition is ALWAYS forced on-device — the factory only
-/// mints this engine when the device supports it, keeping the "audio never
-/// leaves the device" promise unconditional.
+/// mints this engine when the device supports it, so Apple's local selection
+/// cannot silently become a cloud request.
 final class LegacyDictationEngine: DictationEngine {
     let updates: AsyncThrowingStream<DictationUpdate, Error>
 
@@ -344,13 +471,15 @@ final class LegacyDictationEngine: DictationEngine {
     }
 
     private let recognizer: SFSpeechRecognizer
+    private let contextualStrings: [String]
     private let updateContinuation: AsyncThrowingStream<DictationUpdate, Error>.Continuation
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var cancelled = false
 
-    init(recognizer: SFSpeechRecognizer) {
+    init(recognizer: SFSpeechRecognizer, contextualStrings: [String] = []) {
         self.recognizer = recognizer
+        self.contextualStrings = VoiceVocabulary.normalized(contextualStrings)
         (updates, updateContinuation) = AsyncThrowingStream.makeStream()
     }
 
@@ -366,6 +495,7 @@ final class LegacyDictationEngine: DictationEngine {
         request.shouldReportPartialResults = true
         request.taskHint = .dictation
         request.addsPunctuation = true
+        request.contextualStrings = contextualStrings
         // Unconditional — never fall back to Apple's server (see class doc).
         request.requiresOnDeviceRecognition = true
         self.request = request
@@ -408,84 +538,6 @@ final class LegacyDictationEngine: DictationEngine {
         request?.endAudio()
         task?.cancel()
         updateContinuation.finish()
-    }
-}
-
-// MARK: - Microphone capture
-
-/// AVAudioEngine wrapper feeding raw input-format buffers to the engine and a
-/// 0…1 loudness to the overlay's level meter. Session category stays
-/// `.playAndRecord` so a terminal bell can still sound during dictation.
-final class MicrophoneAudioSource: DictationAudioSource {
-    private let audioEngine = AVAudioEngine()
-    private var tapInstalled = false
-    private var interruptionObserver: NSObjectProtocol?
-
-    func requestPermission() async -> Bool {
-        switch AVAudioApplication.shared.recordPermission {
-        case .granted: return true
-        case .denied: return false
-        default: return await AVAudioApplication.requestRecordPermission()
-        }
-    }
-
-    func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void,
-               onLevel: @escaping @Sendable (Float) -> Void,
-               onInterruption: @escaping @Sendable () -> Void) throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .spokenAudio,
-                                options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP])
-        try session.setActive(true, options: [])
-
-        let input = audioEngine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw DictationFailure.audioCapture(String(localized: "No audio input is available."))
-        }
-        if tapInstalled { input.removeTap(onBus: 0) }
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-            onBuffer(buffer)
-            onLevel(Self.loudness(of: buffer))
-        }
-        tapInstalled = true
-        audioEngine.prepare()
-        try audioEngine.start()
-
-        interruptionObserver = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.interruptionNotification,
-            object: session, queue: nil
-        ) { note in
-            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-            if raw.flatMap(AVAudioSession.InterruptionType.init(rawValue:)) == .began {
-                onInterruption()
-            }
-        }
-    }
-
-    func stop() {
-        if let interruptionObserver {
-            NotificationCenter.default.removeObserver(interruptionObserver)
-            self.interruptionObserver = nil
-        }
-        if tapInstalled {
-            audioEngine.inputNode.removeTap(onBus: 0)
-            tapInstalled = false
-        }
-        if audioEngine.isRunning { audioEngine.stop() }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-    }
-
-    /// RMS mapped through dB so the meter moves in speech's dynamic range
-    /// (-50 dB floor → 0, full scale → 1) instead of hugging zero.
-    private static func loudness(of buffer: AVAudioPCMBuffer) -> Float {
-        guard let channel = buffer.floatChannelData?[0] else { return 0 }
-        let frames = Int(buffer.frameLength)
-        guard frames > 0 else { return 0 }
-        var sum: Float = 0
-        for i in 0 ..< frames { sum += channel[i] * channel[i] }
-        let rms = sqrt(sum / Float(frames))
-        let db = 20 * log10(max(rms, 1e-7))
-        return max(0, min(1, (db + 50) / 50))
     }
 }
 

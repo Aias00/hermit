@@ -141,8 +141,9 @@ packages:
     # revision are recorded in Packages/SwiftTerm/UPSTREAM.json.
     path: Packages/SwiftTerm
   Citadel:
-    url: https://github.com/orlandos-nl/Citadel.git
-    from: "0.7.0"
+    # Local 0.12.1 snapshot: opt-in cancellation owns only the transfer's
+    # SSH child channels. See Packages/Citadel/UPSTREAM.json.
+    path: Packages/Citadel
   # Local Whisper for dictation (Settings → VOICE INPUT → Recognition).
   # Apple's own transcribers take exactly ONE locale and have no
   # code-switching mode, so a sentence carrying English command names inside
@@ -348,16 +349,10 @@ targets:
         # for the recording session, the speech key because the iOS 18–25 path
         # goes through SFSpeechRecognizer (which gates on that permission).
         #
-        # The "on-device / never uploaded" wording is a real, load-bearing
-        # promise about AUDIO, and it holds for both engines: Apple's path
-        # refuses server recognition outright (DictationEngineFactory, all OS
-        # versions), and the Whisper path runs a CoreML model locally. What
-        # does touch the network is the one-time Whisper MODEL download from
-        # Hugging Face — weights in, nothing out — which is why the strings
-        # below say "audio" rather than a blanket "nothing leaves the device".
-        # Keep code and copy in lockstep if either ever changes.
-        NSMicrophoneUsageDescription: "Voice input uses the microphone so you can dictate commands and prompts into your terminal. Your audio is transcribed on this device — by Apple's speech models or by a Whisper model you download — and is never uploaded anywhere."
-        NSSpeechRecognitionUsageDescription: "Dictation runs on-device speech recognition. Your voice and transcripts never leave this device — Hermit does not use server-based recognition."
+        # Apple and Whisper remain local. Doubao is an explicit cloud choice
+        # and uploads only on Stop/Transcribe or a requested retry.
+        NSMicrophoneUsageDescription: "Hermit uses the microphone for voice input. Apple and Whisper recognize on this device. If you choose Doubao, stopping or retrying sends your recording to Volcengine for recognition."
+        NSSpeechRecognitionUsageDescription: "Hermit uses Apple's on-device speech recognition when Apple is selected. Doubao is a separate cloud option that sends recordings to Volcengine when you stop or retry."
         # MUST live here, not just in Info.plist: XcodeGen regenerates that file
         # from this block, so a key added to the plist by hand silently vanishes
         # at the next `xcodegen generate`. Without this key iOS drops UDP to LAN

@@ -39,12 +39,14 @@ struct WhisperDictationEngineTests {
     actor SuspendedTranscriber: WhisperTranscribing {
         let barrier = WorkBarrier()
         private(set) var calls = 0
+        private(set) var sampleCounts: [Int] = []
         private(set) var cancellationObserved = false
 
         func warmUp(variant: String) async throws {}
 
         func transcribe(samples: [Float], language: String?, variant: String) async throws -> String {
             calls += 1
+            sampleCounts.append(samples.count)
             let call = calls
             if call == 1 {
                 await withTaskCancellationHandler {
@@ -168,6 +170,8 @@ struct WhisperDictationEngineTests {
         /// Sample counts each `transcribe` call saw, in order.
         private(set) var sampleCounts: [Int] = []
         private(set) var languages: [String?] = []
+        private(set) var contextualSnapshots: [[String]] = []
+        private(set) var lastSamples: [Float] = []
         private var warmUpError: Error?
         /// Delay before each answer, to keep a preview in flight.
         private var latency: Duration = .zero
@@ -186,12 +190,19 @@ struct WhisperDictationEngineTests {
 
         func transcribe(samples: [Float], language: String?, variant _: String) async throws -> String {
             sampleCounts.append(samples.count)
+            lastSamples = samples
             languages.append(language)
             if latency != .zero { try? await Task.sleep(for: latency) }
             guard !answers.isEmpty else { return "" }
             let answer = answers[min(index, answers.count - 1)]
             index += 1
             return answer
+        }
+
+        func transcribe(samples: [Float], language: String?, variant: String,
+                        contextualStrings: [String]) async throws -> String {
+            contextualSnapshots.append(contextualStrings)
+            return try await transcribe(samples: samples, language: language, variant: variant)
         }
     }
 
@@ -286,11 +297,96 @@ struct WhisperDictationEngineTests {
         await engine.finishAudio()
         for try await _ in engine.updates {}
 
-        // One second in at 48 kHz stereo must arrive as ~one second of 16 kHz
-        // mono — a third of the frames, not all of them and not none.
+        // EOS must include the resampler tail, not merely get close enough
+        // to one second while omitting the final speech samples.
         let counts = await store.sampleCounts
         let seen = try #require(counts.last)
-        #expect(seen > 15_000 && seen < 17_000)
+        #expect(seen == 16_000)
+    }
+
+    @Test("Final Whisper decoding receives the resampler's audible tail")
+    func finalPassReceivesResampledEndPulse() async throws {
+        let store = ScriptedTranscriber(answers: ["tail"])
+        let engine = makeEngine(store)
+        try await engine.start()
+        let format = try #require(AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                               sampleRate: 48_000, channels: 1, interleaved: false))
+        let input = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000))
+        input.frameLength = 48_000
+        let channel = try #require(input.floatChannelData?[0])
+        channel.initialize(repeating: 0, count: 48_000)
+        for index in 47_940..<48_000 { channel[index] = 0.75 }
+        engine.append(input)
+        await engine.finishAudio()
+        for try await _ in engine.updates {}
+        let samples = await store.lastSamples
+        #expect(samples.count == 16_000)
+        #expect(samples.suffix(20).contains { abs($0) > 0.1 })
+    }
+
+    @Test("A cancelled foreign-format recording never drains or decodes its retained tail")
+    func cancelDiscardsResampledTail() async throws {
+        let store = ScriptedTranscriber(answers: ["must not appear"])
+        let engine = makeEngine(store)
+        try await engine.start()
+        let format = try #require(AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                               sampleRate: 48_000, channels: 1, interleaved: false))
+        let input = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000))
+        input.frameLength = 48_000
+        input.floatChannelData?[0].initialize(repeating: 0.25, count: 48_000)
+        engine.append(input)
+        engine.cancel()
+        engine.append(input)
+        await engine.finishAudio()
+        var updates: [DictationUpdate] = []
+        for try await update in engine.updates { updates.append(update) }
+        #expect(updates.isEmpty)
+        #expect(await store.sampleCounts.isEmpty)
+    }
+
+    @Test("Once finalization starts, late microphone callbacks cannot extend the recording")
+    func finalizationSealsMicrophoneInput() async throws {
+        let store = SuspendedTranscriber()
+        let engine = WhisperDictationEngine(store: store, variant: "test", language: "zh", label: "test")
+        try await engine.start()
+        engine.append(try buffer(frames: 16_000))
+        let finish = Task { await engine.finishAudio() }
+        #expect(await eventually { await store.calls == 1 })
+        engine.append(try buffer(frames: 16_000 * 15))
+        #expect(engine.finalizeTimeout == .seconds(20))
+        await store.release()
+        await finish.value
+        for try await _ in engine.updates {}
+        #expect(await store.sampleCounts == [16_000])
+    }
+
+    @Test("Concurrent finish requests produce a single final decoding")
+    func finishesOnlyOnce() async throws {
+        let store = ScriptedTranscriber(answers: ["one"])
+        let engine = makeEngine(store)
+        try await engine.start()
+        engine.append(try buffer(frames: 16_000))
+        async let first: Void = engine.finishAudio()
+        async let second: Void = engine.finishAudio()
+        _ = await (first, second)
+        var updates: [DictationUpdate] = []
+        for try await update in engine.updates { updates.append(update) }
+        #expect(await store.sampleCounts == [16_000])
+        #expect(updates == [.init(finalizedText: "one", volatileText: "")])
+    }
+
+    @Test("A recording snapshots its local vocabulary for the model")
+    func vocabularyReachesModel() async throws {
+        let store = ScriptedTranscriber(answers: ["Hermit"])
+        var vocabulary = ["Hermit", "kubectl"]
+        let engine = WhisperDictationEngine(store: store, variant: "test", language: "zh", label: "test",
+                                           contextualStrings: vocabulary)
+        vocabulary = ["different session"]
+        try await engine.start()
+        engine.append(try buffer(frames: 16_000))
+        await engine.finishAudio()
+        for try await _ in engine.updates {}
+        #expect(await store.contextualSnapshots == [["Hermit", "kubectl"]])
     }
 
     @Test("Too little audio is never sent to the model")
@@ -350,6 +446,28 @@ struct WhisperDictationEngineTests {
         #expect(engine.finalizeTimeout >= .seconds(120))
 
         engine.cancel()
+        #expect(engine.finalizeTimeout == .seconds(20))
+    }
+
+    @Test("The pre-EOS finalization budget includes pending resampler audio and rounds upward")
+    func budgetIncludesPendingTail() async throws {
+        let store = ScriptedTranscriber(answers: ["ok"])
+        let engine = makeEngine(store)
+        try await engine.start()
+        let format = try #require(AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                               sampleRate: 48_000, channels: 1, interleaved: false))
+        // Just over one minute. The converter has not received EOS, and
+        // rounding down would erase the fractional second from the budget.
+        let frameCount: AVAudioFrameCount = 48_000 * 60 + 1
+        let input = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount))
+        input.frameLength = frameCount
+        input.floatChannelData?[0].initialize(repeating: 0.25, count: Int(frameCount))
+        engine.append(input)
+        #expect(engine.finalizeTimeout == .seconds(121))
+        engine.cancel()
+        #expect(engine.finalizeTimeout == .seconds(20))
+        engine.append(input)
+        #expect(engine.finalizeTimeout == .seconds(20))
     }
 
     @Test("Cancel stops the session without emitting a transcript")

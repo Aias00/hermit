@@ -135,6 +135,7 @@ struct TerminalScreen: View {
     /// Minted on mic tap (not at screen init) so idle terminals never touch
     /// audio plumbing.
     @State private var dictation: VoiceDictationController?
+    @State private var dictationStartTask: Task<Void, Never>?
     @State private var dictationFinishTask: Task<Void, Never>?
     /// Live image-attachment flow; non-nil while its overlay is up. Minted
     /// when the picker returns (not on chip tap) so cancelling the picker
@@ -599,6 +600,11 @@ struct TerminalScreen: View {
         // Code streams output starved the scrollback swipe of touch events
         // (the reported "can't scroll history" jank).
         .onChange(of: scenePhase) { _, phase in
+            if phase == .background, let dictation,
+               (dictation.currentRequest?.engine ?? settings.voiceEngine) == .doubao,
+               dictation.isListening || dictationStartTask != nil || dictationFinishTask != nil {
+                cancelDictation()
+            }
             if phase == .active {
                 if let active {
                     hub.visibleSession = active
@@ -2429,8 +2435,7 @@ struct TerminalScreen: View {
            ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_VOICE_DRAFT") {
             if ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_VOICE_REVIEW") {
                 let controller = VoiceDictationController.previewForReviewUITest()
-                dictation = controller
-                Task { await controller.start(DictationRequest()) }
+                startDictation(controller, request: DictationRequest())
                 return
             }
             let failure: DictationFailure? = ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_VOICE_FAILURE")
@@ -2440,8 +2445,18 @@ struct TerminalScreen: View {
         }
         #endif
         let controller = VoiceDictationController()
+        startDictation(controller, request: settings.dictationRequest)
+    }
+
+    private func startDictation(_ controller: VoiceDictationController, request: DictationRequest) {
+        dictationStartTask?.cancel()
         dictation = controller
-        Task { await controller.start(settings.dictationRequest) }
+        dictationStartTask = Task { @MainActor in
+            guard !Task.isCancelled, self.dictation === controller, scenePhase != .background else { return }
+            await controller.start(request)
+            guard !Task.isCancelled, self.dictation === controller else { return }
+            dictationStartTask = nil
+        }
     }
 
     private func stopDictationForReview() {
@@ -2503,6 +2518,8 @@ struct TerminalScreen: View {
     }
 
     private func cancelDictation() {
+        dictationStartTask?.cancel()
+        dictationStartTask = nil
         dictationFinishTask?.cancel()
         dictationFinishTask = nil
         dictation?.cancel()

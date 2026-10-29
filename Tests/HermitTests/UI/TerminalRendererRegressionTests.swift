@@ -229,6 +229,33 @@ struct TerminalRendererRegressionTests {
                 "Old red pixels must disappear after image replacement, metal=\(metal)")
     }
 
+    @Test("Output after narrow and restored layouts replaces the previous frame", arguments: [false, true])
+    func finalOutputAfterResize(_ metal: Bool) async throws {
+        let (window, terminal) = makeFixture()
+        defer { window.isHidden = true; terminal.updateUiClosed() }
+        let device = metal ? try #require(MTLCreateSystemDefaultDevice()) : nil
+        terminal.feed(text: "\u{1b}[?25l\u{1b}[38;2;255;0;0mOLD-FRAME")
+        let initial: CGImage
+        if let device { initial = try await captureMetal(terminal, device: device, scale: window.screen.scale) }
+        else { initial = try captureCore(terminal, scale: window.screen.scale) }
+        #expect(inkBounds(initial, channel: 0) != nil)
+
+        for width in [230.0, 540.0, 390.0] {
+            terminal.frame.size.width = width
+            terminal.setNeedsLayout()
+            terminal.layoutIfNeeded()
+            terminal.feed(text: "\u{1b}[2J\u{1b}[H\u{1b}[38;2;0;255;0mFINAL-\(Int(width))")
+            terminal.updateDisplay()
+        }
+        let final: CGImage
+        if let device { final = try await captureMetal(terminal, device: device, scale: window.screen.scale) }
+        else { final = try captureCore(terminal, scale: window.screen.scale) }
+        #expect(inkBounds(final, channel: 1) != nil,
+                "the final green output must reach the drawable after the last resize")
+        #expect(inkBounds(final, channel: 0) == nil,
+                "resizing must not leave cached pixels from the old red frame")
+    }
+
     private func makeFixture() -> (UIWindow, TerminalView) {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 240))
         let controller = UIViewController()

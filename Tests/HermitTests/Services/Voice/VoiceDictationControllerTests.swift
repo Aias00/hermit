@@ -203,7 +203,15 @@ struct VoiceDictationControllerTests {
         #expect(controller.phase == .ready && controller.canRetryRecording)
         #expect(controller.originalTranscript == "original words")
         #expect(audio.stopped && audio.permissionRequests == 1 && audio.startCalls == 1)
+        let firstMetrics = try #require(controller.metrics)
+        #expect(firstMetrics.outcome == .completed && !firstMetrics.isRetry)
+        #expect(firstMetrics.audioSeconds == 0.01)
+        #expect(firstMetrics.firstTextSeconds != nil && firstMetrics.finalizationSeconds != nil)
         await controller.retry(DictationRequest(appleLocaleId: "en-US"))
+        let retryMetrics = try #require(controller.metrics)
+        #expect(retryMetrics.id != firstMetrics.id && retryMetrics.isRetry)
+        #expect(retryMetrics.audioSeconds == firstMetrics.audioSeconds)
+        #expect(retryMetrics.outcome == .completed)
         #expect(requests.map(\.appleLocaleId) == ["", "en-US"])
         #expect(second.started && second.firstSamples == [0.25])
         #expect(audio.permissionRequests == 1 && audio.startCalls == 1)
@@ -213,6 +221,7 @@ struct VoiceDictationControllerTests {
         #expect(controller.transcript == "original words" && controller.currentRequest?.appleLocaleId == "")
         #expect(await controller.finish() == "original words")
         #expect(controller.phase == .idle && !controller.canRetryRecording && controller.originalTranscript.isEmpty)
+        #expect(controller.metrics == retryMetrics)
         // A retained tap callback cannot repopulate the cache after insertion.
         audio.onBuffer?(input)
         #expect(!controller.canRetryRecording && first.appended == 1)
@@ -524,6 +533,35 @@ struct VoiceDictationControllerTests {
 
         let text = await controller.finish()
         #expect(text == "tail the logs")
+    }
+
+    @Test("Cloud recording interruption keeps retry audio without uploading")
+    func cloudInterruptionDoesNotUpload() async throws {
+        let engine = FakeEngine()
+        let audio = FakeAudioSource()
+        let controller = makeController(engine: engine, audio: audio)
+        await controller.start(DictationRequest(engine: .doubao))
+        audio.onBuffer?(try pcm())
+        audio.onInterruption?()
+        #expect(await waitUntil(controller.phase == .interrupted))
+        #expect(audio.stopped && engine.cancelCalled)
+        #expect(!engine.finishAudioCalled)
+        #expect(controller.canRetryRecording)
+        controller.cancel()
+        #expect(!controller.canRetryRecording)
+    }
+
+    @Test("Cloud finalization preserves a safe provider failure for correction")
+    func cloudFailureIsActionable() async {
+        let engine = FakeEngine()
+        engine.finishError = DictationFailure.engine("API key rejected")
+        let audio = FakeAudioSource()
+        let controller = makeController(engine: engine, audio: audio)
+        await controller.start(DictationRequest(engine: .doubao))
+        await controller.stopForReview()
+        #expect(controller.phase == .failed(.engine("API key rejected")))
+        #expect(controller.transcript.isEmpty)
+        controller.cancel()
     }
 
     @Test("Engine failure mid-listen surfaces and stops capture")

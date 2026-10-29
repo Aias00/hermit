@@ -343,6 +343,29 @@ paste still lives. No first responder involved — the fourth member of the
 
 **Upstream candidate:** yes.
 
+## 18. Composition selections, Metal completion and queued mouse input
+
+The local snapshot in `Packages/SwiftTerm` now clamps the keyboard's UTF-16
+composition selection to valid grapheme boundaries. Stale candidate ranges,
+surrogate-pair offsets and `NSNotFound` no longer force-unwrap an invalid
+Swift range. The composed text, including spaces and newlines, is unchanged.
+
+`MetalFrameGate` records a busy frame and pending redraw under one lock.
+The previous semaphore-then-flag sequence could lose the final redraw if GPU
+completion ran between the two operations. Failed drawable/encoder creation
+releases the frame without spinning while the surface is unavailable.
+
+`Terminal.mouseModeGeneration` lets Hermit discard queued wheel input across
+an off/on transition, even when both sequences arrive in one output chunk.
+Repeated announcements of the same mode keep the generation unchanged.
+Legacy mouse coordinates are clamped before conversion to `UInt8`, avoiding
+a trap on wide terminals; pixel mouse reports no longer print coordinates.
+
+Regression coverage lives in `ThirdPartyKeyboardInputTests`,
+`TerminalRendererRegressionTests`, `TerminalFrameGateTests` and
+`TerminalWheelDeliveryTests`. The host batches wheel ticks separately from
+the terminal encoder, retaining the existing negotiated mouse protocol.
+
 ## Fork maintenance
 
 - **Where the fork lives:** [github.com/Cluas/SwiftTerm](https://github.com/Cluas/SwiftTerm),
@@ -364,3 +387,23 @@ paste still lives. No first responder involved — the fourth member of the
 - **Exit plan:** if the patches above land upstream and a tagged upstream
   release includes them, drop the fork and move the dependency back to
   `migueldeicaza/SwiftTerm` at that release.
+
+## Citadel upload cancellation scope
+
+`Packages/Citadel` carries the library sources and license from Citadel 0.12.1,
+revision `ae8562f895de06ccb86fdb1cbb65fd99c8976e12`; the manifest excludes the
+upstream example application and its CLI-only dependency. `UPSTREAM.json` records
+the source pin. Runtime package dependencies keep the previously resolved versions.
+
+The local patch adds an optional `SSHChildChannelScope` to SFTP and exec entry
+points. Registering and cancelling a scope is thread-safe. Only child channels
+opened by the operation are registered. Requests check the scope on their event
+loop immediately before submission, including each SFTP write chunk and exec
+request. A late-created child closes without sending an operation. Default `nil`
+keeps existing PTY, download and other exec call sites unchanged. Hermit separately
+races non-cooperative awaits against cancellation using `CancellableTransfer`.
+
+Regression coverage: `SSHChildChannelScopeTests`, `CancellableTransferTests`,
+`RemoteFolderCancellationTests`, `RemoteTransferTests`, and opt-in real loopback
+`SSHUploadIntegrationTests`. When upgrading Citadel, replay this patch and verify
+that cancelling an upload preserves the already-open PTY and preview file handle.

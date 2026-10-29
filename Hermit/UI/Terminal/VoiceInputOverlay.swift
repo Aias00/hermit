@@ -20,6 +20,7 @@ extension DictationRequest {
     /// A per-recording choice must also reach Apple's fallback if a local
     /// Whisper model cannot load. No saved preference is changed here.
     func selectingReviewLanguage(_ id: String) -> Self {
+        guard engine != .doubao else { return self }
         var request = self
         guard id != "auto" else {
             request.appleLocaleId = ""
@@ -36,7 +37,8 @@ extension DictationRequest {
     }
 }
 
-/// Recording and review stay local. Only Add to Draft accepts this text;
+/// Local engines keep audio on-device; explicitly selected cloud engines
+/// upload at stop. Only Add to Draft accepts the recognized text;
 /// the shared paper plane remains the action that sends it to the terminal.
 struct DictationOverlayView: View {
     let controller: VoiceDictationController
@@ -47,6 +49,8 @@ struct DictationOverlayView: View {
     let onReviewFocus: () -> Void
     let initialRequest: DictationRequest
     var isFinishing = false
+    var acceptTitle: String = String(localized: "Add to Draft")
+    var onReviewEditsChange: (Bool) -> Void = { _ in }
 
     @State private var review = DictationReviewDraft()
     @State private var selectedRequest = DictationRequest()
@@ -73,10 +77,19 @@ struct DictationOverlayView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
+            if selectedRequest.engine == .doubao {
+                Text("Stopping or retrying sends this recording to Volcengine for recognition.")
+                    .font(Face.text(11)).foregroundStyle(Ink.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("dictation-cloud-disclosure")
+            }
             content
             languageControls
             actions
         }
+        // This overlay also appears inside a Form row. Automatic button
+        // styling can turn sibling actions into a shared row activation.
+        .buttonStyle(.plain)
         .padding(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
         .background(Ink.modalBG.opacity(0.97), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -90,18 +103,25 @@ struct DictationOverlayView: View {
             review.receive(controller.transcript)
         }
         .onChange(of: controller.transcript) { _, value in review.receive(value) }
+        .onChange(of: review.hasEdits) { _, edited in onReviewEditsChange(edited) }
         .onChange(of: controller.currentRequest) { _, value in
             if let value { selectedRequest = value }
         }
         .onChange(of: reviewFocused) { _, focused in
             if focused { onReviewFocus() }
         }
-        .task {
-            if initialRequest.engine == .apple {
-                languages = await VoiceLocaleCatalog.options()
+        .task(id: selectedRequest.engine) {
+            let engine = selectedRequest.engine
+            let options: [VoiceLocaleCatalog.Option]
+            if engine == .apple {
+                options = await VoiceLocaleCatalog.options()
+            } else if engine == .whisper {
+                options = WhisperLanguageCatalog.options().map { .init(id: $0.id, name: $0.name) }
             } else {
-                languages = WhisperLanguageCatalog.options().map { .init(id: $0.id, name: $0.name) }
+                options = []
             }
+            guard !Task.isCancelled, selectedRequest.engine == engine else { return }
+            languages = options
         }
     }
 
@@ -201,6 +221,7 @@ struct DictationOverlayView: View {
     @ViewBuilder
     private var languageControls: some View {
         HStack(spacing: 12) {
+            if selectedRequest.engine != .doubao {
             Menu {
                 languageOption("auto", name: String(localized: "Automatic"))
                 let common = selectedRequest.engine == .apple ? ["zh-CN", "en-US"] : ["zh", "en"]
@@ -220,6 +241,7 @@ struct DictationOverlayView: View {
             .disabled(busy || review.hasEdits)
             .accessibilityIdentifier("dictation-language")
             .accessibilityValue(languageID)
+            }
             if isReview {
                 Button("Recognize again") {
                     reviewFocused = false
@@ -249,7 +271,7 @@ struct DictationOverlayView: View {
                 }.font(Face.text(11))
             } else if let reason = controller.retryUnavailableReason {
                 Text(reason).font(Face.text(11)).foregroundStyle(Ink.secondary)
-            } else {
+            } else if selectedRequest.engine != .doubao {
                 Text(selectedRequest.engine == .apple && languageID == "auto"
                      ? "Automatic follows your system and keyboard languages. This choice applies to this recording only."
                      : "Language applies to this recording only.")
@@ -276,12 +298,13 @@ struct DictationOverlayView: View {
             }.accessibilityIdentifier("dictation-cancel")
             Spacer(minLength: 0)
             if controller.isListening && !controller.isReplaying {
-                pillButton(String(localized: "Stop and review"), prominent: true,
+                pillButton(selectedRequest.engine == .doubao
+                           ? String(localized: "Stop and transcribe") : String(localized: "Stop and review"), prominent: true,
                            systemImage: "stop.fill", disabled: isFinishing, action: onStop)
                     .accessibilityIdentifier("dictation-stop")
             } else if isReview {
                 let failed = { if case .failed = controller.phase { return true }; return false }()
-                pillButton(failed ? String(localized: "Keep recognized text") : String(localized: "Add to Draft"),
+                pillButton(failed ? String(localized: "Keep recognized text") : acceptTitle,
                            prominent: true, systemImage: "text.insert",
                            disabled: isFinishing || review.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
                     reviewFocused = false

@@ -332,6 +332,55 @@ final class SessionHub {
         /// are asked directly instead).
         @ObservationIgnored private var reportedDirectory: String?
 
+        /// Explicit OSC command markers from the current plain SSH stream.
+        /// Multiplexer snapshots and mosh screen diffs must never be replayed
+        /// through this observer: old output is not a new command event.
+        private(set) var plainSSHCommand: ShellCommandObservation?
+        @ObservationIgnored private var plainSSHIntegration = ShellIntegrationTracker()
+        @ObservationIgnored private var plainSSHObservationID: UUID?
+
+        @discardableResult
+        func beginPlainSSHObservation() -> UUID {
+            resetPlainSSHObservation()
+            let generation = UUID()
+            plainSSHObservationID = generation
+            return generation
+        }
+
+        func observePlainSSHOutput(_ data: Data, generation: UUID, now: Date = Date()) {
+            guard plainSSHObservationID == generation, !isStopping else { return }
+            let previousDirectory = plainSSHIntegration.workingDirectory
+            plainSSHIntegration.feed(data, now: now)
+            if plainSSHCommand != plainSSHIntegration.command {
+                plainSSHCommand = plainSSHIntegration.command
+            }
+            if previousDirectory != plainSSHIntegration.workingDirectory {
+                reportedDirectory = plainSSHIntegration.workingDirectory
+                coordinator.pathLinks?.invalidateWorkingDirectory()
+            }
+        }
+
+        private func resetPlainSSHObservation() {
+            plainSSHObservationID = nil
+            plainSSHIntegration = ShellIntegrationTracker()
+            plainSSHCommand = nil
+            reportedDirectory = nil
+        }
+
+        private func startPlainSSHOutputPump(over session: SSHSession) {
+            let generation = beginPlainSSHObservation()
+            let coordinator = self.coordinator
+            pumpTask = Task { [weak self] in
+                for await chunk in session.dataStream {
+                    guard !Task.isCancelled, let self,
+                          self.plainSSHObservationID == generation else { break }
+                    self.observePlainSSHOutput(chunk, generation: generation)
+                    coordinator.feed(data: chunk)
+                    self.noteInbound()
+                }
+            }
+        }
+
         /// The file-transfer channel, packaged for the preview.
         var remoteFileAccess: RemoteFileAccess {
             RemoteFileAccess(scope: connection.id.uuidString) { [weak self] in
@@ -767,6 +816,9 @@ final class SessionHub {
             coordinator.onHostDirectoryChange = { [weak self] directory in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    // Plain SSH reads OSC 7 before rendering so holding/replaying
+                    // scrollback cannot roll the live working directory back.
+                    guard self.moshTransport != nil else { return }
                     self.reportedDirectory = directory.flatMap(RemotePathLink.path(from:))
                     self.coordinator.pathLinks?.invalidateWorkingDirectory()
                 }
@@ -954,6 +1006,7 @@ final class SessionHub {
         /// become durable input on a transport that queues it (mosh
         /// type-ahead).
         func sendPaste(_ text: String) {
+            coordinator.cancelPendingWheel()
             guard viewModel.connState == .live else { return }
             if let controller = tmuxController,
                let paneId = controller.snapshot.activePaneId
@@ -970,6 +1023,7 @@ final class SessionHub {
 
         /// Submit a draft without treating a silent input drop as success.
         func submitLine(_ text: String) async throws {
+            coordinator.cancelPendingWheel()
             guard viewModel.connState == .live else { throw SSHError.sessionClosed }
             if let herdr = herdrControl, connection.multiplexer == .herdr {
                 guard let pane = herdr.snapshot.activePaneId else { throw SSHError.ptyNotReady }
@@ -999,8 +1053,9 @@ final class SessionHub {
         /// Single entry point for user input (keyboard, shortcut bar, paste).
         /// Routes to the correct transport so callers don't have to know
         /// whether this session is tmux / mosh / plain SSH.
-        func sendInput(_ data: Data) {
+        func sendInput(_ data: Data, fromTerminal: Bool = false) {
             guard !data.isEmpty else { return }
+            if !fromTerminal { coordinator.cancelPendingWheel() }
             // No input unless live. While the connecting poster is up the pane
             // is invisible, so every touch that lands here is accidental — and
             // some transports make accidents durable: mosh QUEUES keystrokes
@@ -1493,6 +1548,7 @@ final class SessionHub {
             // resetInputParser's doc). Covers mosh, plain SSH and the SSH
             // degrade path; tmux panes mint fresh terminals per attach.
             coordinator.resetInputParser()
+            resetPlainSSHObservation()
             lastTheme = theme
             lastFontSize = fontSize
             lastFontName = fontName
@@ -1503,7 +1559,7 @@ final class SessionHub {
             // documented single entry point for user input, and the not-live
             // gate lives there. (For a plain shell the tmux/mosh branches
             // inside are all nil and the bytes land on viewModel.send anyway.)
-            coordinator.onInput = { [weak self] data in self?.sendInput(data) }
+            coordinator.onInput = { [weak self] data in self?.sendInput(data, fromTerminal: true) }
             coordinator.onSizeChange = { [viewModel] cols, rows in
                 viewModel.resize(rows: rows, cols: cols)
             }
@@ -1645,16 +1701,7 @@ final class SessionHub {
                 // for its sidecar, and Phase 1's bridge collapses them all.
                 startHerdrPushUpgrade()
             } else {
-                let coordinator = self.coordinator
-                pumpTask = Task { [weak self] in
-                    for await chunk in session.dataStream {
-                        if Task.isCancelled { break }
-                        coordinator.feed(data: chunk)
-                        // Proof of life for the keepalive — see noteInbound().
-                        await MainActor.run { self?.noteInbound() }
-                    }
-                    _ = self
-                }
+                startPlainSSHOutputPump(over: session)
             }
         }
 
@@ -1816,7 +1863,7 @@ final class SessionHub {
             let coordinator = self.coordinator
 
             // Keystrokes, size and scroll all become protocol messages now.
-            coordinator.onInput = { [weak self] data in self?.sendInput(data) }
+            coordinator.onInput = { [weak self] data in self?.sendInput(data, fromTerminal: true) }
             // Request geometry only for actual device layout changes. Remote
             // repaint dimensions must never trigger a resize feedback loop.
             coordinator.onSizeChange = { _, _ in }
@@ -2615,7 +2662,7 @@ final class SessionHub {
                 // Route keyboard input through sendInput (not straight to the
                 // transport) so it leaves copy-mode first — otherwise, after a
                 // scroll, typed keys are eaten by tmux copy-mode and input dies.
-                coordinator.onInput = { [weak self] data in self?.sendInput(data) }
+                coordinator.onInput = { [weak self] data in self?.sendInput(data, fromTerminal: true) }
                 coordinator.onSizeChange = { [weak self] cols, rows in
                     Task { await transport.resize(cols: cols, rows: rows) }
                     // mosh+tmux: also pin the tmux window via the -CC sidecar,
@@ -2745,7 +2792,7 @@ final class SessionHub {
         private func fallbackToSSH(over session: SSHSession,
                                    capabilities caps: HostCapabilities) async {
             // Same routing note as attempt(): sendInput is the choke point.
-            coordinator.onInput = { [weak self] data in self?.sendInput(data) }
+            coordinator.onInput = { [weak self] data in self?.sendInput(data, fromTerminal: true) }
             coordinator.onSizeChange = { [viewModel] cols, rows in
                 viewModel.resize(rows: rows, cols: cols)
             }
@@ -2802,22 +2849,14 @@ final class SessionHub {
                 controlPlaneWired(controller)
                 beginAttachTimeout(controller: controller)
             } else {
-                let coordinator = self.coordinator
-                pumpTask = Task { [weak self] in
-                    for await chunk in session.dataStream {
-                        if Task.isCancelled { break }
-                        coordinator.feed(data: chunk)
-                        // Proof of life for the keepalive — see noteInbound().
-                        await MainActor.run { self?.noteInbound() }
-                    }
-                    _ = self
-                }
                 if multiplexer == .herdr {
                     // Same native frame rendering as the direct-SSH path —
                     // this fallback IS an SSH session, it just arrived here
                     // because mosh-server was missing.
                     startHerdrFrames(over: session)
                     startHerdrControlPlane(over: session)
+                } else {
+                    startPlainSSHOutputPump(over: session)
                 }
             }
             viewModel.markConnected()
@@ -3098,6 +3137,7 @@ final class SessionHub {
         /// with it (``inheritedPinLedger``); the replacement re-pins the same
         /// window on attach and settles the rest on the real disconnect.
         func stop(forReconnect: Bool = false) async {
+            resetPlainSSHObservation()
             herdrFrameRecoveryTask?.cancel()
             herdrFrameRecoveryTask = nil
             tunnelRetryTask?.cancel()

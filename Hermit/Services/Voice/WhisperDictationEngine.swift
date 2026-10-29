@@ -12,6 +12,17 @@ protocol WhisperTranscribing: Sendable {
     func warmUp(variant: String) async throws
     /// Transcribe 16 kHz mono samples. `language` nil = let Whisper detect.
     func transcribe(samples: [Float], language: String?, variant: String) async throws -> String
+    func transcribe(samples: [Float], language: String?, variant: String,
+                    contextualStrings: [String]) async throws -> String
+}
+
+extension WhisperTranscribing {
+    /// Existing test adapters and transcribers may opt out of contextual
+    /// vocabulary. The real store implements the overload explicitly.
+    func transcribe(samples: [Float], language: String?, variant: String,
+                    contextualStrings: [String]) async throws -> String {
+        try await transcribe(samples: samples, language: language, variant: variant)
+    }
 }
 
 extension WhisperModelStore: WhisperTranscribing {}
@@ -44,13 +55,14 @@ final class WhisperDictationEngine: DictationEngine {
     /// large models, so twice the audio duration is generous; the floor keeps
     /// short clips from being cut off by model load or a cold Neural Engine.
     var finalizeTimeout: Duration {
-        .seconds(max(20, Int(recordedSeconds * 2)))
+        .seconds(max(20, Int((recordedSeconds * 2).rounded(.up))))
     }
 
     private let store: any WhisperTranscribing
     private let variant: String
     /// Whisper language code, or nil to let the model detect it.
     private let language: String?
+    private let contextualStrings: [String]
     private let updateContinuation: AsyncThrowingStream<DictationUpdate, Error>.Continuation
     private let converter = DictationBufferConverter()
 
@@ -73,25 +85,31 @@ final class WhisperDictationEngine: DictationEngine {
     /// below this Whisper reliably invents a stock phrase from silence.
     private static let previewFloorSamples = 16_000 * 2
 
-    /// Guards `samples` — `append` runs on the audio tap's real-time thread
-    /// while preview passes read from a Task.
+    /// Guards the converter, samples and lifecycle against the microphone
+    /// callback, finalization and cancellation running on different threads.
     private let lock = NSLock()
     private var samples: [Float] = []
+    /// Includes input still held by the resampler before EOS. A deadline
+    /// based only on emitted samples would shorten the finalization budget.
+    private var capturedSeconds: Double = 0
 
     private var previewTask: Task<Void, Never>?
-    private var cancelled = false
+    private enum State { case idle, recording, finishing, finished, cancelled, failed }
+    private var state: State = .idle
 
     private var recordedSeconds: Double {
         lock.lock()
         defer { lock.unlock() }
-        return Double(samples.count) / 16_000
+        return capturedSeconds
     }
 
-    init(store: any WhisperTranscribing, variant: String, language: String?, label: String) {
+    init(store: any WhisperTranscribing, variant: String, language: String?, label: String,
+         contextualStrings: [String] = []) {
         self.store = store
         self.variant = variant
         self.language = language
         self.label = label
+        self.contextualStrings = VoiceVocabulary.normalized(contextualStrings)
         (updates, updateContinuation) = AsyncThrowingStream.makeStream()
     }
 
@@ -122,52 +140,51 @@ final class WhisperDictationEngine: DictationEngine {
                 String(localized: "16 kHz mono audio is unavailable on this device."))
         }
         try lock.withLock {
-            guard !cancelled else { throw CancellationError() }
+            guard state == .idle else { throw CancellationError() }
+            state = .recording
             samples.removeAll(keepingCapacity: true)
+            capturedSeconds = 0
             previewTask = Task { [weak self] in await self?.runPreviewLoop() }
         }
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
-        guard lock.withLock({ !cancelled }) else { return }
-        // `start()` already refused the session if this were nil.
-        guard let format = Self.targetFormat else { return }
-        let converted: AVAudioPCMBuffer
-        do {
-            converted = try converter.convert(buffer, to: format)
-        } catch {
-            // One malformed buffer is a dropped frame, not a dead session.
-            Log.voice.error("whisper buffer conversion failed: \(error.localizedDescription)")
-            return
+        let preview: Task<Void, Never>? = lock.withLock {
+            guard state == .recording, let format = Self.targetFormat else { return nil }
+            do {
+                try appendSamplesLocked(converter.append(buffer, to: format))
+                capturedSeconds += Double(buffer.frameLength) / buffer.format.sampleRate
+                return nil
+            } catch {
+                return failAudioLocked(error)
+            }
         }
-        guard let channel = converted.floatChannelData?[0] else { return }
-        let frames = Int(converted.frameLength)
-        guard frames > 0 else { return }
-        lock.lock()
-        if !cancelled, samples.count < Self.maximumSamples {
-            samples.append(contentsOf: UnsafeBufferPointer(start: channel, count: frames))
-        }
-        lock.unlock()
+        preview?.cancel()
     }
 
     func finishAudio() async {
-        let preview = lock.withLock {
+        let work: (Task<Void, Never>?, [Float]?)? = lock.withLock {
+            guard state == .recording else { return nil }
+            state = .finishing
             let task = previewTask
             previewTask = nil
-            return task
+            do {
+                // No append can race the EOS drain or change this final
+                // snapshot once the microphone has been stopped.
+                try appendSamplesLocked(converter.finish())
+                return (task, samples)
+            } catch {
+                _ = failAudioLocked(error)
+                return (task, nil)
+            }
         }
+        guard let (preview, final) = work else { return }
         preview?.cancel()
         // Cancellation is cooperative. The old decode must really return
         // before this engine starts its final pass against the shared model.
         await preview?.value
-        guard !Task.isCancelled else {
-            updateContinuation.finish()
-            return
-        }
-        guard let final = lock.withLock({ cancelled ? nil : samples }) else {
-            updateContinuation.finish()
-            return
-        }
+        guard !Task.isCancelled else { cancel(); return }
+        guard let final, lock.withLock({ state == .finishing }) else { return }
         // Too short to be speech — a mis-tap, or the mic opened and closed.
         // Return nothing rather than whatever Whisper invents from silence.
         guard final.count >= WhisperModelStore.minimumSamples else {
@@ -176,16 +193,17 @@ final class WhisperDictationEngine: DictationEngine {
         }
         do {
             let text = try await store.transcribe(
-                samples: final, language: language, variant: variant)
+                samples: final, language: language, variant: variant, contextualStrings: contextualStrings)
             guard !Task.isCancelled else {
-                updateContinuation.finish()
+                cancel()
                 return
             }
             publishFinal(text)
         } catch {
-            if lock.withLock({ cancelled }) || error is CancellationError {
+            if lock.withLock({ state == .cancelled }) || error is CancellationError {
                 updateContinuation.finish()
             } else {
+                lock.withLock { if state == .finishing { state = .failed } }
                 updateContinuation.finish(throwing: DictationFailure.engine(error.localizedDescription))
             }
         }
@@ -193,8 +211,10 @@ final class WhisperDictationEngine: DictationEngine {
 
     func cancel() {
         let preview = lock.withLock {
-            cancelled = true
+            state = .cancelled
             samples.removeAll()
+            capturedSeconds = 0
+            converter.discard()
             let task = previewTask
             previewTask = nil
             return task
@@ -205,10 +225,36 @@ final class WhisperDictationEngine: DictationEngine {
 
     private func publishFinal(_ text: String) {
         lock.withLock {
-            guard !cancelled else { return }
+            guard state == .finishing else { return }
+            state = .finished
             updateContinuation.yield(DictationUpdate(finalizedText: text, volatileText: ""))
+            updateContinuation.finish()
         }
-        updateContinuation.finish()
+    }
+
+    private func appendSamplesLocked(_ buffers: [AVAudioPCMBuffer]) throws {
+        for buffer in buffers where buffer.frameLength > 0 {
+            guard let channel = buffer.floatChannelData?[0] else {
+                throw DictationFailure.engine(String(localized: "Audio format conversion failed."))
+            }
+            let frames = Int(buffer.frameLength)
+            guard frames <= Self.maximumSamples - samples.count else {
+                throw DictationFailure.engine(String(localized: "Recording is too long. Stop and start a new recording."))
+            }
+            samples.append(contentsOf: UnsafeBufferPointer(start: channel, count: frames))
+        }
+    }
+
+    /// A failed conversion cannot silently turn into a successful prefix.
+    private func failAudioLocked(_ error: Error) -> Task<Void, Never>? {
+        state = .failed
+        samples.removeAll()
+        capturedSeconds = 0
+        converter.discard()
+        updateContinuation.finish(throwing: error)
+        Log.voice.error("whisper audio conversion failed")
+        defer { previewTask = nil }
+        return previewTask
     }
 
     // MARK: Live preview
@@ -227,16 +273,19 @@ final class WhisperDictationEngine: DictationEngine {
         while !Task.isCancelled {
             try? await Task.sleep(for: minimumGap)
             if Task.isCancelled { return }
-            let snapshot = lock.withLock { samples }
+            guard let snapshot = lock.withLock({ state == .recording ? samples : nil }) else { return }
             guard snapshot.count >= Self.previewFloorSamples else { continue }
             let started = ContinuousClock.now
             do {
                 let text = try await store.transcribe(
-                    samples: snapshot, language: language, variant: variant)
+                    samples: snapshot, language: language, variant: variant, contextualStrings: contextualStrings)
                 if Task.isCancelled { return }
                 if !text.isEmpty {
-                    updateContinuation.yield(
-                        DictationUpdate(finalizedText: "", volatileText: text))
+                    lock.withLock {
+                        guard state == .recording else { return }
+                        updateContinuation.yield(
+                            DictationUpdate(finalizedText: "", volatileText: text))
+                    }
                 }
             } catch {
                 // A failed preview says nothing about the final pass — the

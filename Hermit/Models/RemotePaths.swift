@@ -630,22 +630,50 @@ enum RemoteFileEdits {
         return sh((isDirectory ? "rm -rf" : "rm -f") + " -- \"$1\" && echo \(okMarker)", [path])
     }
 
-    /// An upload over exec: base64 appended to a side file, decoded at the
-    /// end. Refuses to start over an existing name.
+    /// An upload over exec: a mode-0700 directory protects both staging files
+    /// from substitution by another user of a shared destination directory.
+    /// Refuses to start over an existing name.
     struct UploadPlan {
         let begin: String
         let append: (String) -> String
         let finish: String
+        /// Call only after begin confirms ownership. Removes only this
+        /// attempt's known scratch files and its now-empty directory, never
+        /// the target (its ownership is ambiguous after a lost finish reply).
+        let cleanup: String
     }
 
     static func upload(to path: String) -> UploadPlan {
-        UploadPlan(
+        let scratch = uploadScratchDirectory(for: path)
+        let encoded = child("payload.b64part", of: scratch)
+        let decoded = child("payload.decoded", of: scratch)
+        return UploadPlan(
             begin: sh("if [ -e \"$1\" ] || [ -L \"$1\" ]; then echo \(takenMarker); exit 1; fi; "
-                      + ": > \"$1.b64part\" && echo \(okMarker)", [path]),
+                      + "umask 077; mkdir -m 700 -- \"$2\" || exit 1; "
+                      + "if : > \"$3\"; then echo \(okMarker); else rmdir -- \"$2\"; exit 1; fi",
+                      [path, scratch, encoded]),
             // The base64 alphabet is inert inside single quotes.
-            append: { chunk in sh("printf %s \"$2\" >> \"$1.b64part\"", [path, chunk]) },
-            finish: sh("{ base64 -d < \"$1.b64part\" > \"$1\" 2>/dev/null || base64 -D < \"$1.b64part\" > \"$1\"; } "
-                       + "&& rm -f \"$1.b64part\" && echo \(okMarker)", [path]))
+            append: { chunk in sh("printf %s \"$2\" >> \"$1\"", [encoded, chunk]) },
+            finish: sh("command -v link >/dev/null 2>&1 || exit 1; "
+                       + "umask 077; { base64 -d < \"$2\" > \"$3\" 2>/dev/null "
+                       + "|| base64 -D < \"$2\" > \"$3\"; } || exit 1; "
+                       + "if [ -e \"$1\" ] || [ -L \"$1\" ]; then echo \(takenMarker); exit 1; fi; "
+                       + "case \"$1\" in /*) target=$1;; *) target=./$1;; esac; "
+                       + "case \"$3\" in /*) source=$3;; *) source=./$3;; esac; "
+                       + "link \"$source\" \"$target\" && rm -f -- \"$2\" \"$3\" "
+                       + "&& rmdir -- \"$4\" && echo \(okMarker)",
+                       [path, encoded, decoded, scratch]),
+            cleanup: sh("rm -f -- \"$1\" \"$2\" && rmdir -- \"$3\"", [encoded, decoded, scratch]))
+    }
+
+    static func uploadScratchDirectory(for path: String) -> String {
+        let directory = (path as NSString).deletingLastPathComponent
+        let scratchName = ".hermit-upload-" + UUID().uuidString
+        return directory.isEmpty ? scratchName : child(scratchName, of: directory)
+    }
+
+    static func sftpUploadCleanup(directory: String) -> String {
+        sh("rm -f -- \"$1\" && rmdir -- \"$2\"", [child("payload", of: directory), directory])
     }
 
     private static func sh(_ script: String, _ args: [String]) -> String {

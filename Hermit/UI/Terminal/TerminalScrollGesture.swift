@@ -163,6 +163,7 @@ final class TerminalScrollGesture: NSObject, UIGestureRecognizerDelegate {
             }
             axisLock = nil
         default:
+            coordinator?.cancelPendingWheel()
             if axisLock == .vertical { coordinator?.scrollDidEnd() }
             axisLock = nil
         }

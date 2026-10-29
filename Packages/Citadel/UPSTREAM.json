@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/orlandos-nl/Citadel.git",
+  "version": "0.12.1",
+  "revision": "ae8562f895de06ccb86fdb1cbb65fd99c8976e12",
+  "scope": "Library sources and upstream license; library-only manifest",
+  "patches": [
+    "Add opt-in cancellation scopes for individual SSH SFTP and exec child channels; parent terminal and unrelated channels remain open."
+  ]
+}

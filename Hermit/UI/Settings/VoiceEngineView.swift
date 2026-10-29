@@ -1,12 +1,7 @@
 import SwiftUI
 
-/// Picks which speech engine dictation runs on.
-///
-/// Two entries rather than an "Automatic" third: the choice has a real cost on
-/// one side (a several-hundred-megabyte download) and a real capability on the
-/// other (one sentence, two languages), and silently deciding that for someone
-/// is exactly what leaves a multilingual user staring at a transcript of
-/// nonsense with no idea what to change.
+/// The user chooses whether recognition runs locally or sends the completed
+/// recording to their configured cloud provider.
 struct VoiceEngineView: View {
     @Environment(AppSettings.self) private var settings
 
@@ -18,10 +13,22 @@ struct VoiceEngineView: View {
         Form {
             FormGroup(
                 title: "RECOGNITION",
-                footer: "Both engines run entirely on this device — your voice is never uploaded. Whisper additionally needs its model downloaded once over the network before it can be used."
+                footer: "Apple and Whisper recognize speech on this device. Doubao uploads your recording to Volcengine after you stop and transcribe. It requires your own API key and may incur service charges."
             ) {
                 ForEach(VoiceEngineKind.allCases) { kind in
                     engineRow(kind: kind, settings: settings)
+                }
+            }
+
+            if settings.voiceEngine == .doubao {
+                FormGroup(title: "CLOUD RECOGNITION") {
+                    NavigationLink {
+                        DoubaoVoiceSettingsView()
+                    } label: {
+                        Label("Configure Doubao", systemImage: "key")
+                            .foregroundStyle(Ink.primary)
+                    }
+                    .accessibilityIdentifier("voice-doubao-settings-link")
                 }
             }
 
@@ -44,6 +51,26 @@ struct VoiceEngineView: View {
                         }
                     }
                 }
+            }
+
+            FormGroup(title: "LOCAL RECOGNITION") {
+                NavigationLink {
+                    VoiceVocabularyView()
+                } label: {
+                    Label("Technical vocabulary", systemImage: "text.book.closed")
+                        .foregroundStyle(Ink.primary)
+                }
+                .accessibilityIdentifier("voice-vocabulary-link")
+            }
+
+            FormGroup(title: "TRY IT") {
+                NavigationLink {
+                    VoiceInputTestView()
+                } label: {
+                    Label("Recording test", systemImage: "mic")
+                        .foregroundStyle(Ink.primary)
+                }
+                .accessibilityIdentifier("voice-test-link")
             }
         }
         .moshpitForm()
@@ -87,6 +114,7 @@ struct VoiceEngineView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("voice-engine-\(kind.rawValue)")
         .accessibilityAddTraits(settings.voiceEngine == kind ? .isSelected : [])
     }
 }

@@ -100,6 +100,11 @@ struct DictationRequest: Equatable, Sendable {
     var whisperLanguage: String = ""
     /// Whisper variant; "" means use the best installed one.
     var whisperModelId: String = ""
+    /// Resource selection only. Credentials stay in the credential vault and
+    /// are loaded by the selected cloud engine when preparation begins.
+    var doubaoResourceID: String = DoubaoVoiceClient.defaultResourceID
+    /// A bounded, local-only vocabulary snapshot. Cloud requests do not use it.
+    var contextualStrings: [String] = []
 }
 
 extension DictationFailure: LocalizedError {
@@ -108,10 +113,9 @@ extension DictationFailure: LocalizedError {
     var errorDescription: String? { message }
 }
 
-/// A speech-to-text engine the controller can drive. Two implementations:
-/// `ModernDictationEngine` (iOS 26+, SpeechAnalyzer's on-device models) and
-/// `LegacyDictationEngine` (SFSpeechRecognizer, iOS 18–25). Tests inject a
-/// scripted fake through `VoiceDictationController`'s factory.
+/// A speech-to-text engine the controller can drive: local Apple/Whisper or
+/// explicitly selected cloud transcription. Tests inject a scripted fake
+/// through `VoiceDictationController`'s factory.
 protocol DictationEngine: AnyObject {
     /// Complete-state updates, finishing when the engine has delivered its
     /// final result (after `finishAudio()`) or throwing on recognition error.
@@ -272,6 +276,7 @@ final class VoiceDictationController {
     private(set) var isTakingLonger = false
     private(set) var currentRequest: DictationRequest?
     private(set) var originalTranscript = ""
+    private(set) var metrics: DictationMetrics?
 
     /// Everything the user has said so far, as it would be inserted.
     var transcript: String {
@@ -377,21 +382,29 @@ final class VoiceDictationController {
         level = 0
         engineLabel = ""
 
+        metrics = DictationMetrics(isRetry: false, at: metricsNow())
+
         let permitted = await audioSource.requestPermission()
         guard acceptsStart(currentGeneration) else { return }
         guard permitted else {
             phase = .failed(.microphoneDenied)
+            finishMetrics(.failed)
             return
         }
 
-        guard let engine = await prepareEngine(request, generation: currentGeneration) else { return }
+        guard let engine = await prepareEngine(request, generation: currentGeneration) else {
+            if generation == currentGeneration { finishMetrics(.failed) }
+            return
+        }
         self.engine = engine
         engineLabel = engine.label
+        metrics?.prepared(engine: engine.label, at: metricsNow())
         Log.voice.info("dictation started engine=\(engine.label, privacy: .public)")
 
         consume(engine, generation: currentGeneration)
 
         guard let recording else { return }
+        metrics?.beganRecognition(at: metricsNow())
         do {
             try audioSource.start(
                 onBuffer: { [weak engine] buffer in
@@ -415,6 +428,7 @@ final class VoiceDictationController {
             consumeTask?.cancel()
             self.engine = nil
             phase = .failed(.audioCapture(error.localizedDescription))
+            finishMetrics(.failed)
             return
         }
         phase = .listening
@@ -500,6 +514,10 @@ final class VoiceDictationController {
             do {
                 for try await update in engine.updates {
                     guard let self, generation == currentGeneration, !Task.isCancelled else { return }
+                    if !DictationTranscript.join(update.finalizedText, update.volatileText)
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        metrics?.receivedText(at: metricsNow())
+                    }
                     if isReplaying {
                         replayUpdate = update
                     } else {
@@ -515,13 +533,16 @@ final class VoiceDictationController {
                     phase = .ready
                     rememberOriginalTranscript()
                     updateRetryAvailability()
+                    finishMetrics(.completed)
                     Log.voice.info("dictation ended: recognizer-final")
                 }
             } catch {
                 guard let self, generation == currentGeneration, !Task.isCancelled else { return }
-                if isReplaying { replayFailure = .finalizationFailed }
+                let failure: DictationFailure = currentRequest?.engine == .doubao
+                    ? (error as? DictationFailure) ?? .finalizationFailed : .finalizationFailed
+                if isReplaying { replayFailure = failure }
                 if phase == .finishing, let token = finalizationToken {
-                    completeFinalization(.failed(.finalizationFailed), token: token)
+                    completeFinalization(.failed(failure), token: token)
                     return
                 }
                 guard phase == .listening else { return }
@@ -532,6 +553,7 @@ final class VoiceDictationController {
                 engine.cancel()
                 rememberOriginalTranscript()
                 updateRetryAvailability()
+                finishMetrics(.failed)
                 Log.voice.info("dictation ended: recognition-error")
             }
         }
@@ -545,15 +567,19 @@ final class VoiceDictationController {
         let outcome = await stopListening()
         guard generation == currentGeneration else { return }
         switch outcome {
-        case .complete: phase = .ready
-        case .failed(let failure): phase = .failed(failure)
+        case .complete:
+            phase = .ready
+            finishMetrics(.completed)
+        case .failed(let failure):
+            phase = .failed(failure)
+            finishMetrics(.failed)
         case .cancelled: return
         }
         rememberOriginalTranscript()
         updateRetryAvailability()
     }
 
-    /// Try another local recognizer/language against the SAME recording. No
+    /// Try the selected recognizer/language against the SAME recording. No
     /// microphone permission or capture call belongs in this path. Keep the
     /// prior text visible, committing replacement text only on nonempty success.
     func retry(_ request: DictationRequest) async {
@@ -561,6 +587,8 @@ final class VoiceDictationController {
         rememberOriginalTranscript()
         let previousRequest = currentRequest
         let previousEngineLabel = engineLabel
+        metrics = DictationMetrics(isRetry: true, at: metricsNow())
+        metrics?.capturedAudio(duration: recording.status.duration)
         generation &+= 1
         let currentGeneration = generation
         engine?.cancel()
@@ -578,12 +606,16 @@ final class VoiceDictationController {
             guard generation == currentGeneration else { return }
             currentRequest = previousRequest
             engineLabel = previousEngineLabel
+            finishMetrics(.failed)
             isReplaying = false
             updateRetryAvailability()
             return
         }
         self.engine = engine
         engineLabel = engine.label
+        metrics?.prepared(engine: engine.label, at: metricsNow())
+        metrics?.beganRecognition(at: metricsNow())
+        metrics?.beganFinalization(at: metricsNow())
         phase = .finishing
         beginSlowWait(generation: currentGeneration)
         consume(engine, generation: currentGeneration)
@@ -622,15 +654,18 @@ final class VoiceDictationController {
                 currentRequest = previousRequest
                 engineLabel = previousEngineLabel
                 phase = .failed(.engine(String(localized: "No speech was recognized.")))
+                finishMetrics(.failed)
             } else {
                 finalizedText = replacement
                 volatileText = ""
                 phase = .ready
+                finishMetrics(.completed)
             }
         case .failed(let failure):
             currentRequest = previousRequest
             engineLabel = previousEngineLabel
             phase = .failed(failure)
+            finishMetrics(.failed)
         case .cancelled: break
         }
         engine.cancel()
@@ -663,10 +698,12 @@ final class VoiceDictationController {
         switch result {
         case .complete:
             let text = transcript
+            finishMetrics(.completed)
             reset()
             return text.isEmpty ? nil : text
         case .failed(let failure):
             phase = .failed(failure)
+            finishMetrics(.failed)
             rememberOriginalTranscript()
             updateRetryAvailability()
             return nil
@@ -691,6 +728,7 @@ final class VoiceDictationController {
         if phase != .idle { Log.voice.info("dictation ended: cancelled") }
         generation &+= 1
         stopAudio()
+        finishMetrics(.cancelled)
         preparingEngine?.cancel()
         preparingEngine = nil
         engine?.cancel()
@@ -716,12 +754,30 @@ final class VoiceDictationController {
     private func handleInterruption() async {
         guard phase == .listening else { return }
         Log.voice.info("dictation ending: interruption")
+        if currentRequest?.engine == .doubao {
+            // Losing the microphone is not the user's Stop/Transcribe action.
+            // Keep the controller's recording for an explicit retry, but do
+            // not call the cloud engine's upload-triggering finishAudio().
+            stopAudio()
+            consumeTask?.cancel()
+            engine?.cancel()
+            engine = nil
+            phase = .interrupted
+            finishMetrics(.interrupted)
+            rememberOriginalTranscript()
+            updateRetryAvailability()
+            return
+        }
         let currentGeneration = generation
         let result = await stopListening()
         guard generation == currentGeneration else { return }
         switch result {
-        case .complete: phase = .interrupted
-        case .failed(let failure): phase = .failed(failure)
+        case .complete:
+            phase = .interrupted
+            finishMetrics(.interrupted)
+        case .failed(let failure):
+            phase = .failed(failure)
+            finishMetrics(.failed)
         case .cancelled: break
         }
         rememberOriginalTranscript()
@@ -738,6 +794,7 @@ final class VoiceDictationController {
         default: return .cancelled
         }
         phase = .finishing
+        metrics?.beganFinalization(at: metricsNow())
         Log.voice.info("dictation ending: finalize-requested")
         stopAudio()
         return await finalizeEngine(budget: engine?.finalizeTimeout ?? .seconds(5))
@@ -803,8 +860,29 @@ final class VoiceDictationController {
 
     private func stopAudio() {
         recording?.seal()
+        if let status = recording?.status, status.unavailable == nil {
+            metrics?.capturedAudio(duration: status.duration)
+        }
         audioSource.stop()
         level = 0
+    }
+
+    private static let metricsEpoch = ContinuousClock.now
+
+    private func metricsNow() -> TimeInterval {
+        let parts = Self.metricsEpoch.duration(to: .now).components
+        return Double(parts.seconds) + Double(parts.attoseconds) / 1e18
+    }
+
+    private func finishMetrics(_ outcome: DictationMetrics.Outcome) {
+        guard metrics?.outcome == nil else { return }
+        metrics?.ended(outcome, at: metricsNow())
+        guard let metrics else { return }
+        let preparation = Int((metrics.preparationSeconds ?? -1) * 1_000)
+        let firstText = Int((metrics.firstTextSeconds ?? -1) * 1_000)
+        let finalization = Int((metrics.finalizationSeconds ?? -1) * 1_000)
+        let audio = Int((metrics.audioSeconds ?? -1) * 1_000)
+        Log.voice.info("dictation metrics: attempt=\(metrics.id.uuidString, privacy: .public) retry=\(metrics.isRetry) outcome=\(outcome.rawValue, privacy: .public) prepare_ms=\(preparation) first_text_ms=\(firstText) finish_ms=\(finalization) audio_ms=\(audio)")
     }
 
     private var isStableForReview: Bool {

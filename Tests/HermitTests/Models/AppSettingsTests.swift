@@ -57,6 +57,26 @@ struct AppSettingsTests {
         #expect(AppSettings(defaults: defaults).fontSize == 10)
     }
 
+    @Test("Cloud voice requires explicit engine selection and stays out of synced preferences")
+    @MainActor func cloudVoiceSelection() throws {
+        let (defaults, name) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.voiceEngine == .apple)
+        #expect(settings.dictationRequest.doubaoResourceID == DoubaoVoiceClient.defaultResourceID)
+        let snapshot = CloudSyncPreferences(settings)
+        settings.voiceEngine = .doubao
+        settings.doubaoResourceID = "  test.resource  "
+        #expect(settings.dictationRequest.engine == .doubao)
+        #expect(settings.dictationRequest.doubaoResourceID == "test.resource")
+        #expect(AppSettings(defaults: defaults).voiceEngine == .doubao)
+        snapshot.apply(to: settings)
+        #expect(settings.voiceEngine == .doubao)
+        let encoded = try JSONEncoder().encode(CloudSyncPreferences(settings))
+        let value = String(decoding: encoded, as: UTF8.self)
+        #expect(!value.contains("doubao") && !value.contains("test.resource"))
+    }
+
     @Test("set then get returns the written value on the same instance")
     func setAndGet() {
         let (defaults, name) = Self.makeDefaults()
@@ -67,6 +87,56 @@ struct AppSettingsTests {
         settings.themeId = "solarized-dark"
         #expect(settings.fontSize == 18)
         #expect(settings.themeId == "solarized-dark")
+    }
+
+    @Test("Voice vocabulary starts empty, persists locally and snapshots into local requests")
+    @MainActor func voiceVocabularyPersistenceAndSnapshot() throws {
+        let (defaults, name) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.voiceVocabulary.isEmpty)
+        #expect(settings.dictationRequest.contextualStrings.isEmpty)
+        settings.voiceVocabulary = " Hermit \nDocker\nhermit\n"
+        #expect(settings.voiceVocabulary == "Hermit\nDocker")
+        let firstRequest = settings.dictationRequest
+        #expect(firstRequest.contextualStrings == ["Hermit", "Docker"])
+        settings.voiceVocabulary = "Cloudflare"
+        #expect(firstRequest.contextualStrings == ["Hermit", "Docker"])
+        #expect(AppSettings(defaults: defaults).voiceContextualStrings == ["Cloudflare"])
+
+        settings.voiceEngine = .whisper
+        #expect(settings.dictationRequest.contextualStrings == ["Cloudflare"])
+        settings.voiceEngine = .doubao
+        #expect(settings.dictationRequest.contextualStrings.isEmpty)
+        #expect(settings.voiceVocabulary == "Cloudflare")
+        let synced = String(decoding: try JSONEncoder().encode(CloudSyncPreferences(settings)), as: UTF8.self)
+        #expect(!synced.contains("Cloudflare") && !synced.contains("voiceVocabulary"))
+    }
+
+    @Test("Invalid vocabulary edits preserve the last valid value and clearing is explicit")
+    func voiceVocabularyInvalidEdit() {
+        let (defaults, name) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let settings = AppSettings(defaults: defaults)
+        settings.voiceVocabulary = "Hermit"
+        settings.voiceVocabulary = "Hermit\n" + String(repeating: "x", count: 65)
+        #expect(settings.voiceVocabulary == "Hermit")
+        settings.voiceVocabulary = String(repeating: "x", count: 4_097)
+        #expect(settings.voiceVocabulary == "Hermit")
+        settings.voiceVocabulary = "\n  \n"
+        #expect(settings.voiceVocabulary.isEmpty)
+        #expect(AppSettings(defaults: defaults).dictationRequest.contextualStrings.isEmpty)
+    }
+
+    @Test("Corrupt persisted vocabulary remains editable but does not reach a recognizer")
+    func voiceVocabularyCorruptStoredValue() {
+        let (defaults, name) = Self.makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let badValue = String(repeating: "x", count: 65)
+        defaults.set(badValue, forKey: "hermit.settings.voiceVocabulary")
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.voiceVocabulary == badValue)
+        #expect(settings.voiceContextualStrings.isEmpty)
     }
 
     @Test("values persist across separate AppSettings instances backed by the same defaults")

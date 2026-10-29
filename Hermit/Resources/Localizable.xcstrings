@@ -3527,6 +3527,70 @@
         }
       }
     },
+    "API KEY": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API KEY"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API KEY"
+          }
+        }
+      }
+    },
+    "API key deleted": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API Key 已删除"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API Key 已刪除"
+          }
+        }
+      }
+    },
+    "API key missing": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未配置 API Key"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未設定 API Key"
+          }
+        }
+      }
+    },
+    "API key saved": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存 API Key"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已儲存 API Key"
+          }
+        }
+      }
+    },
     "APP filing %@": {
       "localizations": {
         "de": {
@@ -4417,6 +4481,28 @@
         }
       }
     },
+    "Add project names, tools and other short terms for supported Apple recognition and Whisper. Hints may help with technical words, but do not guarantee a transcription.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add project names, tools and other short terms for supported Apple recognition and Whisper. Hints may help with technical words, but do not guarantee a transcription."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加项目名、工具名等短词，供支持此功能的 Apple 识别和 Whisper 使用。词表可能改善技术词的识别，但不能保证结果准确。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入專案名稱、工具名稱等短詞，供支援此功能的 Apple 辨識與 Whisper 使用。詞彙可能改善技術詞的辨識，但不能保證結果準確。"
+          }
+        }
+      }
+    },
     "Add theme": {
       "localizations": {
         "de": {
@@ -4521,6 +4607,22 @@
         }
       }
     },
+    "Add your Doubao API key in Settings → Voice Input → Recognition.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在「设置 → 语音输入 → 识别 → 配置豆包」中填写 API Key。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請在「設定 → 語音輸入 → 辨識 → 設定豆包」中填寫 API Key。"
+          }
+        }
+      }
+    },
     "Adds a mic key to the terminal bar": {
       "localizations": {
         "de": {
@@ -4569,6 +4671,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "在快速鍵列上加一個麥克風鍵"
+          }
+        }
+      }
+    },
+    "After stopping": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "After stopping"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止后等待"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止後等待"
           }
         }
       }
@@ -5510,6 +5634,22 @@
         }
       }
     },
+    "Apple and Whisper recognize speech on this device. Doubao uploads your recording to Volcengine after you stop and transcribe. It requires your own API key and may incur service charges.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 和 Whisper 在本机识别语音。选择豆包后，点击停止并识别会将录音上传至火山引擎。你需要配置自己的 API Key，识别服务可能产生费用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 和 Whisper 在本機辨識語音。選擇豆包後，點擊停止並辨識會將錄音上傳至火山引擎。你需要設定自己的 API Key，辨識服務可能產生費用。"
+          }
+        }
+      }
+    },
     "Apple · %@": {
       "localizations": {
         "de": {
@@ -6036,6 +6176,28 @@
         }
       }
     },
+    "Audio duration": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio duration"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录音时长"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "錄音長度"
+          }
+        }
+      }
+    },
     "Audio format conversion failed.": {
       "localizations": {
         "de": {
@@ -6344,6 +6506,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "自動"
+          }
+        }
+      }
+    },
+    "Automatic follows your system and keyboard languages. This choice applies to this recording only.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic follows your system and keyboard languages. This choice applies to this recording only."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动跟随系统和键盘语言。本次选择仅用于当前录音。"
           }
         }
       }
@@ -7076,58 +7255,6 @@
         }
       }
     },
-    "Both engines run entirely on this device — your voice is never uploaded. Whisper additionally needs its model downloaded once over the network before it can be used.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Beide Engines laufen vollständig auf diesem Gerät, deine Stimme wird nie hochgeladen. Whisper muss sein Modell vor der ersten Nutzung einmal über das Netzwerk laden."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Los dos motores funcionan solo en este dispositivo: tu voz nunca se sube a ningún sitio. Whisper necesita además descargar su modelo una vez por la red antes de poder usarse."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Les deux moteurs fonctionnent entièrement sur cet appareil : votre voix n’est jamais envoyée. Whisper doit en plus télécharger son modèle une fois via le réseau avant de pouvoir servir."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "どちらのエンジンも完全にこの端末で動作し、音声がアップロードされることはありません。Whisper は利用前に一度だけモデルをネットワーク経由でダウンロードする必要があります。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "두 엔진 모두 이 기기에서만 동작하며 음성은 업로드되지 않습니다. Whisper는 사용 전에 모델을 한 번 네트워크로 받아야 합니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Os dois mecanismos rodam só neste aparelho: sua voz nunca é enviada. O Whisper ainda precisa baixar o modelo uma vez pela rede antes de poder ser usado."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "两种引擎都只在本机运行，语音不会上传。Whisper 要先联网下载一次模型。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "兩種引擎都只在這部裝置上執行，語音不會上傳。Whisper 要先連網下載一次模型。"
-          }
-        }
-      }
-    },
     "Branch": {
       "localizations": {
         "de": {
@@ -7440,6 +7567,81 @@
         }
       }
     },
+    "CANCELLING…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WIRD ABGEBROCHEN…"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CANCELLING…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CANCELANDO…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ANNULATION…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キャンセル中…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "취소 중…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CANCELANDO…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在取消…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在取消…"
+          }
+        }
+      }
+    },
+    "CLOUD RECOGNITION": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "云端识别"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "雲端辨識"
+          }
+        }
+      }
+    },
     "COLOR": {
       "localizations": {
         "de": {
@@ -7488,6 +7690,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "顏色"
+          }
+        }
+      }
+    },
+    "COMPARE THIS RECORDING": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "COMPARE THIS RECORDING"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对比本次录音"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "比較本次錄音"
+          }
+        }
+      }
+    },
+    "COMPARISON RESULTS": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "COMPARISON RESULTS"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对比结果"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "比較結果"
           }
         }
       }
@@ -7908,6 +8154,22 @@
         }
       }
     },
+    "Cancel before stopping to discard a recording without uploading it. Recognized text stays here until you choose to use it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止前取消会丢弃录音，不会上传。识别文字需经你确认后使用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止前取消會捨棄錄音，不會上傳。辨識文字需經你確認後使用。"
+          }
+        }
+      }
+    },
     "Cancel login": {
       "localizations": {
         "en": {
@@ -8072,6 +8334,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在檢查可用的語言…"
+          }
+        }
+      }
+    },
+    "Checking…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在检查…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在檢查…"
           }
         }
       }
@@ -8464,6 +8742,28 @@
         }
       }
     },
+    "Clear vocabulary": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear vocabulary"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空词表"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空詞彙"
+          }
+        }
+      }
+    },
     "Close": {
       "localizations": {
         "de": {
@@ -8512,6 +8812,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "關閉"
+          }
+        }
+      }
+    },
+    "Cloud voice recordings are limited to two minutes. This recording was not uploaded; record a shorter message.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "云识别每段录音限两分钟。这段录音未上传，请缩短后重新录制。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "雲端辨識每段錄音限兩分鐘。這段錄音未上傳，請縮短後重新錄製。"
           }
         }
       }
@@ -8881,6 +9197,28 @@
         }
       }
     },
+    "Compare local recognition": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compare local recognition"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对比本地识别"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "比較本機辨識"
+          }
+        }
+      }
+    },
     "Compress Output": {
       "localizations": {
         "de": {
@@ -8929,6 +9267,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "壓縮輸出"
+          }
+        }
+      }
+    },
+    "Configuration saved": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置已保存"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定已儲存"
+          }
+        }
+      }
+    },
+    "Configure Doubao": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置豆包"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定豆包"
           }
         }
       }
@@ -10311,6 +10681,22 @@
         }
       }
     },
+    "Copy result": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制结果"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製結果"
+          }
+        }
+      }
+    },
     "Could not delete": {
       "localizations": {
         "en": {
@@ -10423,6 +10809,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "30 秒內未能取得 Tailscale 登入連結。請檢查網路後重新登入。"
+          }
+        }
+      }
+    },
+    "Could not reach Doubao. Check your network and try recognizing the recording again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接豆包，请检查网络后重新识别这段录音。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連接豆包，請檢查網路後重新辨識這段錄音。"
           }
         }
       }
@@ -10631,6 +11033,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法刪除"
+          }
+        }
+      }
+    },
+    "Couldn't delete the API key. Try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法删除 API Key，请重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法刪除 API Key，請重試。"
           }
         }
       }
@@ -11099,6 +11517,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法重新命名"
+          }
+        }
+      }
+    },
+    "Couldn't save the API key. Try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法保存 API Key，请重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法儲存 API Key，請重試。"
           }
         }
       }
@@ -12300,6 +12734,22 @@
         }
       }
     },
+    "Delete API key": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除 API Key"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除 API Key"
+          }
+        }
+      }
+    },
     "Delete Connection": {
       "localizations": {
         "de": {
@@ -12722,58 +13172,6 @@
         }
       }
     },
-    "Dictate commands and prompts from the mic key on the terminal bar. Speech is transcribed entirely on-device — your voice never leaves this device, and nothing is typed until you tap Insert.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Diktiere Befehle und Prompts über die Mikrofontaste in der Terminalleiste. Die Sprache wird vollständig auf dem Gerät in Text umgewandelt. Deine Stimme verlässt dieses Gerät nie, und getippt wird erst, wenn du auf „Einfügen“ tippst."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dicta comandos y prompts con la tecla de micrófono de la barra del terminal. La voz se transcribe por completo en el dispositivo: nunca sale de él, y no se escribe nada hasta que tocas Insertar."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dictez commandes et prompts depuis la touche micro de la barre du terminal. La parole est transcrite entièrement sur l’appareil : votre voix ne le quitte jamais, et rien n’est saisi avant que vous touchiez Insérer."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ショートカットバーのマイクキーからコマンドやプロンプトを音声入力できます。書き起こしは完全に端末内で行われ、音声がこの端末を離れることはなく、「挿入」をタップするまで何も入力されません。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "터미널 막대의 마이크 키로 명령과 프롬프트를 말로 입력하세요. 음성은 전부 기기 안에서 텍스트로 바뀌며 이 기기를 벗어나지 않습니다. 삽입을 탭하기 전까지는 아무것도 입력되지 않습니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dite comandos e prompts pela tecla de microfone na barra do terminal. A fala é transcrita inteiramente no aparelho: sua voz nunca sai dele, e nada é digitado até você tocar em Inserir."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "按快捷键栏上的麦克风键，把命令和提示词说出来。转写全部在本机完成，语音不会离开这台手机。不点「插入」，什么都不会输进终端。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "按快速鍵列上的麥克風鍵，把指令和提示詞說出來。轉寫全部在裝置上完成，語音不會離開這部裝置。不點「插入」，什麼都不會輸入到終端機。"
-          }
-        }
-      }
-    },
     "Dictate commands instead of typing. Planned for a future update.": {
       "localizations": {
         "de": {
@@ -12822,6 +13220,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "用說的代替打字。之後的版本會提供。"
+          }
+        }
+      }
+    },
+    "Dictate from the terminal's mic key, review the text, then add it to your draft. Apple and Whisper recognize speech locally. Choosing Doubao sends your recording to Volcengine for recognition.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击终端的麦克风录音，核对文字后加入草稿。Apple 和 Whisper 在本机识别；选择豆包会将录音发送至火山引擎识别。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點擊終端的麥克風錄音，核對文字後加入草稿。Apple 和 Whisper 在本機辨識；選擇豆包會將錄音傳送至火山引擎辨識。"
           }
         }
       }
@@ -13512,6 +13926,182 @@
           "stringUnit": {
             "state": "translated",
             "value": "完成"
+          }
+        }
+      }
+    },
+    "Doubao (cloud)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包（云端）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包（雲端）"
+          }
+        }
+      }
+    },
+    "Doubao did not respond in time. You can try recognizing the recording again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包响应超时，你可以重新识别这段录音。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包回應逾時，你可以重新辨識這段錄音。"
+          }
+        }
+      }
+    },
+    "Doubao has reached its request limit. Wait a moment before trying again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包请求已达到限额，请稍后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包請求已達到限額，請稍後重試。"
+          }
+        }
+      }
+    },
+    "Doubao is temporarily unavailable. Try recognizing the recording again later.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包服务暂不可用，可稍后重新识别这段录音。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包服務暫不可用，可稍後重新辨識這段錄音。"
+          }
+        }
+      }
+    },
+    "Doubao redirected the request. The recording was not forwarded to another address.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包返回了重定向，录音未转发到其他地址。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包傳回重新導向，錄音未轉送至其他位址。"
+          }
+        }
+      }
+    },
+    "Doubao rejected the API key or resource access. Check your key and enable the speech recognition resource in the Volcengine console.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包未通过密钥或资源权限校验。请检查 API Key，并在火山引擎控制台开通对应语音资源。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包未通過金鑰或資源權限驗證。請檢查 API Key，並在火山引擎控制台開通對應語音資源。"
+          }
+        }
+      }
+    },
+    "Doubao rejected the request. Check the speech recognition resource in your settings.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包拒绝了请求，请检查设置中的语音识别资源。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包拒絕了請求，請檢查設定中的語音辨識資源。"
+          }
+        }
+      }
+    },
+    "Doubao returned an incomplete response. Try recognizing the recording again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包返回的结果不完整，请重新识别这段录音。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包傳回的結果不完整，請重新辨識這段錄音。"
+          }
+        }
+      }
+    },
+    "Doubao sends your recording to Volcengine after you stop and transcribe. Use your own API key with speech recognition enabled. Volcengine may charge for recognition.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击停止并识别后，豆包会将录音发送至火山引擎。请使用已开通语音识别的个人 API Key，火山引擎可能收取识别费用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點擊停止並辨識後，豆包會將錄音傳送至火山引擎。請使用已開通語音辨識的個人 API Key，火山引擎可能收取辨識費用。"
+          }
+        }
+      }
+    },
+    "Doubao setup guide": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包配置说明"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包設定說明"
+          }
+        }
+      }
+    },
+    "Doubao · Cloud": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包 · 云端"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包 · 雲端"
           }
         }
       }
@@ -14822,6 +15412,44 @@
         }
       }
     },
+    "Engine preparation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Engine preparation"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "引擎准备"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "引擎準備"
+          }
+        }
+      }
+    },
+    "Enter API key": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入 API Key"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "輸入 API Key"
+          }
+        }
+      }
+    },
     "Enter a Tailcat SSH port from 1 to 65535.": {
       "localizations": {
         "en": {
@@ -14928,6 +15556,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "手動輸入私密金鑰"
+          }
+        }
+      }
+    },
+    "Enter a resource ID using letters, numbers, dots, underscores or hyphens.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "资源 ID 只能包含字母、数字、点、下划线或连字符。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "資源 ID 只能包含字母、數字、點、底線或連字號。"
           }
         }
       }
@@ -15610,6 +16254,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "第一次連線到 %1$@:%2$lld。\n\n金鑰指紋：\n%3$@\n\n請到伺服器上核對是否一致（例如 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`）。"
+          }
+        }
+      }
+    },
+    "First text": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首字耗时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首字耗時"
           }
         }
       }
@@ -16454,6 +17120,370 @@
           "stringUnit": {
             "state": "translated",
             "value": "硬體保管 · 私密金鑰無法匯出"
+          }
+        }
+      }
+    },
+    "Hermit": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit"
+          }
+        }
+      }
+    },
+    "Hermit installs its hook scripts in ~/.moshpit and registers them in Claude Code's settings, so agents can reach you when they need you. Everything can be removed from Host Setup.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit installiert seine Hook-Skripte in ~/.moshpit und trägt sie in den Einstellungen von Claude Code ein, damit Agents dich erreichen, wenn sie dich brauchen. Alles lässt sich unter „Host-Einrichtung“ wieder entfernen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit instala sus scripts de hooks en ~/.moshpit y los registra en los ajustes de Claude Code, para que los agentes puedan avisarte cuando te necesiten. Todo se puede quitar desde Configuración del host."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit installe ses scripts de hooks dans ~/.moshpit et les enregistre dans les réglages de Claude Code, pour que les agents puissent vous joindre quand ils ont besoin de vous. Tout peut être retiré depuis Configuration de l’hôte."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit は ~/.moshpit にフックスクリプトをインストールし、Claude Code の設定に登録します。エージェントがあなたを必要とするとき届くようにするためです。すべてホスト設定から削除できます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit이 훅 스크립트를 ~/.moshpit에 설치하고 Claude Code 설정에 등록해, 에이전트가 필요할 때 연락할 수 있게 합니다. 모두 호스트 설정에서 제거할 수 있습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Hermit instala os scripts de hooks em ~/.moshpit e os registra nos ajustes do Claude Code, para que os agentes consigam chamar você quando precisarem. Tudo pode ser removido em Configuração do host."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit 会把 hooks 脚本装到 ~/.moshpit，并写进 Claude Code 的设置，智能体需要你时就能通知到你。这些都可以在「主机设置」里移除。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit 會把 hooks 腳本裝到 ~/.moshpit，並寫進 Claude Code 的設定，agent 需要你時就能通知到你。這些都可以在「主機設定」移除。"
+          }
+        }
+      }
+    },
+    "Hermit needs %@ for %@ navigation.\nInstall it, then reconnect.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit braucht %1$@, um nach %2$@ zu navigieren.\nInstalliere es und verbinde dich neu."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Para navegar por %2$@, Hermit necesita %1$@.\nInstálalo y vuelve a conectar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour naviguer par %2$@, Hermit a besoin de %1$@.\nInstallez-le, puis reconnectez-vous."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ のナビゲーションには %@ が必要です。\nインストール後に再接続してください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%2$@ 사이를 이동하려면 %1$@이(가) 필요합니다.\n설치한 뒤 다시 연결하세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Para navegar por %2$@, o Hermit precisa de %1$@.\nInstale e reconecte."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %2$@ 之间切换需要 %1$@。\n装好之后重新连接。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %2$@ 之間切換需要 %1$@。\n裝好之後重新連線。"
+          }
+        }
+      }
+    },
+    "Hermit never installs anything silently. Run the command below in your shell — sudo and its output stay fully visible.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit installiert nie etwas im Stillen. Führe den Befehl unten in deiner Shell aus. sudo und seine Ausgabe bleiben vollständig sichtbar."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit nunca instala nada en silencio. Ejecuta el comando de abajo en tu shell: sudo y su salida quedan completamente a la vista."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit n’installe jamais rien en silence. Lancez la commande ci-dessous dans votre shell : sudo et sa sortie restent entièrement visibles."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit が黙ってインストールすることはありません。以下のコマンドをシェルで実行してください — sudo とその出力はすべて表示されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit은 아무것도 몰래 설치하지 않습니다. 아래 명령을 셸에서 직접 실행하세요. sudo와 그 출력이 모두 보입니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Hermit nunca instala nada em silêncio. Rode o comando abaixo no seu shell: o sudo e a saída dele ficam totalmente visíveis."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit 不会悄悄装任何东西。把下面的命令贴到你的 shell 里运行，sudo 和输出全程都看得见。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit 不會悄悄安裝任何東西。把下面的指令貼到你的 shell 執行，sudo 和輸出全程都看得到。"
+          }
+        }
+      }
+    },
+    "Hermit watches the active session for agent activity and posts a local alert when your agent needs attention — natively on herdr, via the bell and hooks on tmux.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit beobachtet die aktive Sitzung auf Agent-Aktivität und sendet eine lokale Mitteilung, wenn dein Agent dich braucht: nativ bei herdr, über Glocke und Hooks bei tmux."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit vigila la actividad del agente en la sesión activa y muestra una alerta local cuando te necesita: de forma nativa en herdr, y mediante la campana y los hooks en tmux."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit surveille l’activité de l’agent dans la session active et affiche une alerte locale quand il a besoin de vous : nativement avec herdr, via la cloche et les hooks avec tmux."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit はアクティブなセッションのエージェントの動きを監視し、対応が必要になるとローカル通知を送ります——herdr ではネイティブに、tmux ではベルとフックを介して行います。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit이 현재 세션의 에이전트 활동을 지켜보다가, 사용자가 필요할 때 로컬 알림을 보냅니다. herdr에서는 기본 지원, tmux에서는 벨과 훅을 사용합니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Hermit acompanha a atividade do agente na sessão ativa e mostra um alerta local quando ele precisa de você: nativamente no herdr, pelo sino e pelos hooks no tmux."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit 会盯着当前会话里的智能体，需要你处理时发本地通知。herdr 原生支持，tmux 靠响铃和 hooks。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit 會留意目前工作階段裡的 agent，需要你處理時發出本機通知。herdr 原生支援，tmux 靠響鈴和 hooks。"
+          }
+        }
+      }
+    },
+    "Hermit watches the active tmux session for the terminal bell and posts a local alert when your agent needs attention.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit achtet in der aktiven tmux-Sitzung auf die Terminalglocke und sendet eine lokale Mitteilung, wenn dein Agent dich braucht."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit vigila la campana del terminal en la sesión tmux activa y muestra una alerta local cuando tu agente necesita atención."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit surveille la cloche du terminal dans la session tmux active et affiche une alerte locale quand votre agent a besoin de vous."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit はアクティブな tmux セッションのターミナルベルを監視し、エージェントが注意を必要とするとローカル通知を出します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit이 현재 tmux 세션의 터미널 벨을 감지해, 에이전트가 사용자를 필요로 할 때 로컬 알림을 보냅니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Hermit fica de olho no sino do terminal na sessão tmux ativa e mostra um alerta local quando seu agente precisa de você."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit 会盯着当前 tmux 会话的终端响铃，智能体需要你处理时发本地通知。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hermit 會留意目前 tmux 工作階段的終端機響鈴，agent 需要你處理時發出本機通知。"
+          }
+        }
+      }
+    },
+    "HermitMark.swift": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HermitMark.swift"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HermitMark.swift"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HermitMark.swift"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HermitMark.swift"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HermitMark.swift"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HermitMark.swift"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HermitMark.swift"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HermitMark.swift"
           }
         }
       }
@@ -18435,6 +19465,28 @@
         }
       }
     },
+    "Keep each term within 64 characters.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep each term within 64 characters."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每个词条不能超过 64 个字符。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每個詞條不能超過 64 個字元。"
+          }
+        }
+      }
+    },
     "Keep forever": {
       "localizations": {
         "de": {
@@ -18593,6 +19645,44 @@
           "stringUnit": {
             "state": "translated",
             "value": "保留已辨識文字"
+          }
+        }
+      }
+    },
+    "Keep result": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留结果"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留結果"
+          }
+        }
+      }
+    },
+    "Keep the vocabulary within 4,096 characters.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep the vocabulary within 4,096 characters."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "词表总长度不能超过 4,096 个字符。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "詞彙總長度不能超過 4,096 個字元。"
           }
         }
       }
@@ -19228,6 +20318,28 @@
         }
       }
     },
+    "LAST RECOGNITION TIMING": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LAST RECOGNITION TIMING"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近一次识别耗时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近一次辨識耗時"
+          }
+        }
+      }
+    },
     "LISTENING": {
       "localizations": {
         "de": {
@@ -19385,6 +20497,28 @@
         }
       }
     },
+    "LOCAL RECOGNITION": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LOCAL RECOGNITION"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地识别"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本機辨識"
+          }
+        }
+      }
+    },
     "Language": {
       "localizations": {
         "de": {
@@ -19433,6 +20567,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "語言"
+          }
+        }
+      }
+    },
+    "Language applies to this recording only.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Language applies to this recording only."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "语言选择仅用于当前录音。"
           }
         }
       }
@@ -20169,6 +21320,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "下面怎麼填，這裡就怎麼顯示。儲存後會出現在快速鍵列的「自訂」群組。"
+          }
+        }
+      }
+    },
+    "Live recording": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live recording"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实时录音"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即時錄音"
+          }
+        }
+      }
+    },
+    "Live results measure waiting after Stop; replay results measure processing saved audio.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live results measure waiting after Stop; replay results measure processing saved audio."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实时录音统计停止后的等待，录音重放统计已有音频的处理时间。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即時錄音統計停止後的等待，錄音重播統計現有音訊的處理時間。"
           }
         }
       }
@@ -21381,6 +22576,23 @@
         }
       }
     },
+    "More languages": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More languages"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更多语言"
+          }
+        }
+      }
+    },
     "Mosh by default": {
       "localizations": {
         "de": {
@@ -21689,370 +22901,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "MoshTransport.swift"
-          }
-        }
-      }
-    },
-    "Hermit": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit"
-          }
-        }
-      }
-    },
-    "Hermit installs its hook scripts in ~/.moshpit and registers them in Claude Code's settings, so agents can reach you when they need you. Everything can be removed from Host Setup.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit installiert seine Hook-Skripte in ~/.moshpit und trägt sie in den Einstellungen von Claude Code ein, damit Agents dich erreichen, wenn sie dich brauchen. Alles lässt sich unter „Host-Einrichtung“ wieder entfernen."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit instala sus scripts de hooks en ~/.moshpit y los registra en los ajustes de Claude Code, para que los agentes puedan avisarte cuando te necesiten. Todo se puede quitar desde Configuración del host."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit installe ses scripts de hooks dans ~/.moshpit et les enregistre dans les réglages de Claude Code, pour que les agents puissent vous joindre quand ils ont besoin de vous. Tout peut être retiré depuis Configuration de l’hôte."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit は ~/.moshpit にフックスクリプトをインストールし、Claude Code の設定に登録します。エージェントがあなたを必要とするとき届くようにするためです。すべてホスト設定から削除できます。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit이 훅 스크립트를 ~/.moshpit에 설치하고 Claude Code 설정에 등록해, 에이전트가 필요할 때 연락할 수 있게 합니다. 모두 호스트 설정에서 제거할 수 있습니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O Hermit instala os scripts de hooks em ~/.moshpit e os registra nos ajustes do Claude Code, para que os agentes consigam chamar você quando precisarem. Tudo pode ser removido em Configuração do host."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit 会把 hooks 脚本装到 ~/.moshpit，并写进 Claude Code 的设置，智能体需要你时就能通知到你。这些都可以在「主机设置」里移除。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit 會把 hooks 腳本裝到 ~/.moshpit，並寫進 Claude Code 的設定，agent 需要你時就能通知到你。這些都可以在「主機設定」移除。"
-          }
-        }
-      }
-    },
-    "Hermit needs %@ for %@ navigation.\nInstall it, then reconnect.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit braucht %1$@, um nach %2$@ zu navigieren.\nInstalliere es und verbinde dich neu."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Para navegar por %2$@, Hermit necesita %1$@.\nInstálalo y vuelve a conectar."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pour naviguer par %2$@, Hermit a besoin de %1$@.\nInstallez-le, puis reconnectez-vous."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ のナビゲーションには %@ が必要です。\nインストール後に再接続してください。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%2$@ 사이를 이동하려면 %1$@이(가) 필요합니다.\n설치한 뒤 다시 연결하세요."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Para navegar por %2$@, o Hermit precisa de %1$@.\nInstale e reconecte."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在 %2$@ 之间切换需要 %1$@。\n装好之后重新连接。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在 %2$@ 之間切換需要 %1$@。\n裝好之後重新連線。"
-          }
-        }
-      }
-    },
-    "Hermit never installs anything silently. Run the command below in your shell — sudo and its output stay fully visible.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit installiert nie etwas im Stillen. Führe den Befehl unten in deiner Shell aus. sudo und seine Ausgabe bleiben vollständig sichtbar."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit nunca instala nada en silencio. Ejecuta el comando de abajo en tu shell: sudo y su salida quedan completamente a la vista."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit n’installe jamais rien en silence. Lancez la commande ci-dessous dans votre shell : sudo et sa sortie restent entièrement visibles."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit が黙ってインストールすることはありません。以下のコマンドをシェルで実行してください — sudo とその出力はすべて表示されます。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit은 아무것도 몰래 설치하지 않습니다. 아래 명령을 셸에서 직접 실행하세요. sudo와 그 출력이 모두 보입니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O Hermit nunca instala nada em silêncio. Rode o comando abaixo no seu shell: o sudo e a saída dele ficam totalmente visíveis."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit 不会悄悄装任何东西。把下面的命令贴到你的 shell 里运行，sudo 和输出全程都看得见。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit 不會悄悄安裝任何東西。把下面的指令貼到你的 shell 執行，sudo 和輸出全程都看得到。"
-          }
-        }
-      }
-    },
-    "Hermit watches the active session for agent activity and posts a local alert when your agent needs attention — natively on herdr, via the bell and hooks on tmux.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit beobachtet die aktive Sitzung auf Agent-Aktivität und sendet eine lokale Mitteilung, wenn dein Agent dich braucht: nativ bei herdr, über Glocke und Hooks bei tmux."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit vigila la actividad del agente en la sesión activa y muestra una alerta local cuando te necesita: de forma nativa en herdr, y mediante la campana y los hooks en tmux."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit surveille l’activité de l’agent dans la session active et affiche une alerte locale quand il a besoin de vous : nativement avec herdr, via la cloche et les hooks avec tmux."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit はアクティブなセッションのエージェントの動きを監視し、対応が必要になるとローカル通知を送ります——herdr ではネイティブに、tmux ではベルとフックを介して行います。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit이 현재 세션의 에이전트 활동을 지켜보다가, 사용자가 필요할 때 로컬 알림을 보냅니다. herdr에서는 기본 지원, tmux에서는 벨과 훅을 사용합니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O Hermit acompanha a atividade do agente na sessão ativa e mostra um alerta local quando ele precisa de você: nativamente no herdr, pelo sino e pelos hooks no tmux."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit 会盯着当前会话里的智能体，需要你处理时发本地通知。herdr 原生支持，tmux 靠响铃和 hooks。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit 會留意目前工作階段裡的 agent，需要你處理時發出本機通知。herdr 原生支援，tmux 靠響鈴和 hooks。"
-          }
-        }
-      }
-    },
-    "Hermit watches the active tmux session for the terminal bell and posts a local alert when your agent needs attention.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit achtet in der aktiven tmux-Sitzung auf die Terminalglocke und sendet eine lokale Mitteilung, wenn dein Agent dich braucht."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit vigila la campana del terminal en la sesión tmux activa y muestra una alerta local cuando tu agente necesita atención."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit surveille la cloche du terminal dans la session tmux active et affiche une alerte locale quand votre agent a besoin de vous."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit はアクティブな tmux セッションのターミナルベルを監視し、エージェントが注意を必要とするとローカル通知を出します。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit이 현재 tmux 세션의 터미널 벨을 감지해, 에이전트가 사용자를 필요로 할 때 로컬 알림을 보냅니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "O Hermit fica de olho no sino do terminal na sessão tmux ativa e mostra um alerta local quando seu agente precisa de você."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit 会盯着当前 tmux 会话的终端响铃，智能体需要你处理时发本地通知。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hermit 會留意目前 tmux 工作階段的終端機響鈴，agent 需要你處理時發出本機通知。"
-          }
-        }
-      }
-    },
-    "HermitMark.swift": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "HermitMark.swift"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "HermitMark.swift"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "HermitMark.swift"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "HermitMark.swift"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "HermitMark.swift"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "HermitMark.swift"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "HermitMark.swift"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "HermitMark.swift"
           }
         }
       }
@@ -24254,6 +25102,23 @@
         }
       }
     },
+    "No recording is available to retry.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No recording is available to retry."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有可用于重新识别的录音。"
+          }
+        }
+      }
+    },
     "No spaces in a branch name": {
       "localizations": {
         "de": {
@@ -25794,6 +26659,28 @@
         }
       }
     },
+    "One term per line. Up to 100 terms, 64 characters per term and 4,096 characters total. Empty lines and duplicates are removed when saving.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One term per line. Up to 100 terms, 64 characters per term and 4,096 characters total. Empty lines and duplicates are removed when saving."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每行一个词条，最多 100 个，每个不超过 64 个字符，总计不超过 4,096 个字符。保存时会移除空行和重复项。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每行一個詞條，最多 100 個，每個不超過 64 個字元，合計不超過 4,096 個字元。儲存時會移除空行與重複項。"
+          }
+        }
+      }
+    },
     "Online": {
       "localizations": {
         "en": {
@@ -26635,6 +27522,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "選填。agent 啟動後會傳給它，留空就自己手動輸入。"
+          }
+        }
+      }
+    },
+    "Original text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最初识别结果"
           }
         }
       }
@@ -29634,6 +30538,38 @@
         }
       }
     },
+    "RECORDING TEST": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录音测试"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "錄音測試"
+          }
+        }
+      }
+    },
+    "RESOURCE ID": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "资源 ID"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "資源 ID"
+          }
+        }
+      }
+    },
     "RETRY": {
       "localizations": {
         "de": {
@@ -30368,6 +31304,56 @@
         }
       }
     },
+    "Recognition runs on this device. You can review and copy the result here without connecting to a host.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "语音在本机识别。无需连接主机，即可在此核对并复制结果。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "語音在本機辨識。無需連接主機，即可在此核對並複製結果。"
+          }
+        }
+      }
+    },
+    "Recognize again": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recognize again"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新识别"
+          }
+        }
+      }
+    },
+    "Recognizing recording again…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recognizing recording again…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在重新识别录音…"
+          }
+        }
+      }
+    },
     "Reconnect": {
       "localizations": {
         "de": {
@@ -30624,6 +31610,66 @@
           "stringUnit": {
             "state": "translated",
             "value": "用 %@ 重新連上這個工作階段。"
+          }
+        }
+      }
+    },
+    "Recording is too long. Stop and start a new recording.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording is too long. Stop and start a new recording."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录音时间过长，请停止并开始一段新录音。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "錄音時間過長，請停止並開始一段新錄音。"
+          }
+        }
+      }
+    },
+    "Recording replay": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording replay"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录音重放"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "錄音重播"
+          }
+        }
+      }
+    },
+    "Recording test": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录音测试"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "錄音測試"
           }
         }
       }
@@ -31576,6 +32622,44 @@
         }
       }
     },
+    "Replace API key": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "替换 API Key"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "替換 API Key"
+          }
+        }
+      }
+    },
+    "Replay processing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replay processing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录音重识别"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "錄音重新辨識"
+          }
+        }
+      }
+    },
     "Reply": {
       "localizations": {
         "de": {
@@ -31780,6 +32864,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "需要 Face ID"
+          }
+        }
+      }
+    },
+    "Resource ID": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "资源 ID"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "資源 ID"
           }
         }
       }
@@ -32044,6 +33144,28 @@
         }
       }
     },
+    "Results stay on this screen and are cleared when you start a new recording.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Results stay on this screen and are cleared when you start a new recording."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "结果仅保留在此页面，开始新录音时清空。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "結果僅保留於此頁面，開始新錄音時清空。"
+          }
+        }
+      }
+    },
     "Resume": {
       "localizations": {
         "de": {
@@ -32144,6 +33266,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "重試"
+          }
+        }
+      }
+    },
+    "Retry is available for recordings up to 2 minutes and 32 MB.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry is available for recordings up to 2 minutes and 32 MB."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录音超过 2 分钟或 32 MB 后无法重新识别，已有文字仍可使用。"
           }
         }
       }
@@ -32312,6 +33451,45 @@
           "stringUnit": {
             "state": "translated",
             "value": "Return 換行 · 紙飛機傳送"
+          }
+        }
+      }
+    },
+    "Reuses this recording on this device. Your default engine stays unchanged.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reuses this recording on this device. Your default engine stays unchanged."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用本次录音在本机重新识别，不改变默认引擎。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用本次錄音在本機重新辨識，不變更預設引擎。"
+          }
+        }
+      }
+    },
+    "Review recognized text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review recognized text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "审阅识别文字"
           }
         }
       }
@@ -33574,6 +34752,44 @@
           "stringUnit": {
             "state": "translated",
             "value": "儲存"
+          }
+        }
+      }
+    },
+    "Save configuration": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存配置"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存設定"
+          }
+        }
+      }
+    },
+    "Save vocabulary": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save vocabulary"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存词表"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存詞彙"
           }
         }
       }
@@ -36481,6 +37697,22 @@
         }
       }
     },
+    "Speak a short sentence, stop, then review the recognized text.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "说一小段话，停止录音后核对识别文字。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "說一小段話，停止錄音後核對辨識文字。"
+          }
+        }
+      }
+    },
     "Speak — the text lands here first. Insert types it; Send types it and presses Return.": {
       "localizations": {
         "de": {
@@ -36581,6 +37813,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "說完後將文字加入草稿，檢查內容，再點擊飛機按鈕傳送。"
+          }
+        }
+      }
+    },
+    "Speak, then stop to review the text.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speak, then stop to review the text."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "说完后停止录音，再审阅识别文字。"
           }
         }
       }
@@ -36795,6 +38044,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "開始"
+          }
+        }
+      }
+    },
+    "Start recording": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始录音"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開始錄音"
           }
         }
       }
@@ -37187,6 +38452,23 @@
         }
       }
     },
+    "Still recognizing. Your previous text is kept.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Still recognizing. Your previous text is kept."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仍在识别，已有文字会保留。"
+          }
+        }
+      }
+    },
     "Stop": {
       "localizations": {
         "de": {
@@ -37235,6 +38517,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "停止"
+          }
+        }
+      }
+    },
+    "Stop and review": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop and review"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止并审阅"
+          }
+        }
+      }
+    },
+    "Stop and transcribe": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止并识别"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止並辨識"
           }
         }
       }
@@ -37339,6 +38654,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "停止指令已交給主機。如果 agent 還在執行，指令就會生效。"
+          }
+        }
+      }
+    },
+    "Stopping or retrying sends this recording to Volcengine for recognition.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止识别或重试会将这段录音发送至火山引擎。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止辨識或重試會將這段錄音傳送至火山引擎。"
           }
         }
       }
@@ -38133,6 +39464,44 @@
         }
       }
     },
+    "TERMS": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TERMS"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "词条"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "詞條"
+          }
+        }
+      }
+    },
+    "TEST RESULT": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "测试结果"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "測試結果"
+          }
+        }
+      }
+    },
     "THE PIT NEVER CLOSES": {
       "localizations": {
         "de": {
@@ -38337,6 +39706,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "觸發鍵"
+          }
+        }
+      }
+    },
+    "TRY IT": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "试一试"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "試一試"
           }
         }
       }
@@ -40351,6 +41736,28 @@
         }
       }
     },
+    "Technical vocabulary": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Technical vocabulary"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "技术词表"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "技術詞彙"
+          }
+        }
+      }
+    },
     "Terminal": {
       "localizations": {
         "de": {
@@ -40568,6 +41975,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "終端機鍵盤"
+          }
+        }
+      }
+    },
+    "Terms": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terms"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "词条"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "詞條"
           }
         }
       }
@@ -41036,6 +42465,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 語音模型還沒下載。"
+          }
+        }
+      }
+    },
+    "The API key is stored in this device's secure credential storage. An existing key is never shown here.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API Key 保存在本机的安全凭据存储中，已保存的密钥不会在此显示。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API Key 儲存於本機的安全憑證儲存空間，已儲存的金鑰不會在此顯示。"
+          }
+        }
+      }
+    },
+    "The Doubao API key could not be accessed. Unlock this device and try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法访问豆包 API Key，请解锁设备后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法存取豆包 API Key，請解鎖裝置後重試。"
+          }
+        }
+      }
+    },
+    "The Doubao API key is invalid. Paste the key without spaces or line breaks.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包 API Key 格式无效，请检查是否含有空格或换行。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包 API Key 格式無效，請檢查是否含有空格或換行。"
+          }
+        }
+      }
+    },
+    "The Doubao resource ID is invalid. Check your voice recognition settings.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包资源 ID 无效，请检查语音识别设置。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "豆包資源 ID 無效，請檢查語音辨識設定。"
           }
         }
       }
@@ -42617,6 +44110,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "按下狀態和背景的淡色都由這一個顏色推導。"
+          }
+        }
+      }
+    },
+    "The recording could not be converted for Doubao. Record it again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法将录音转换为豆包所需格式，请重新录音。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法將錄音轉換為豆包所需格式，請重新錄音。"
           }
         }
       }
@@ -44474,6 +45983,28 @@
         }
       }
     },
+    "This vocabulary stays on this device. It is not synced with iCloud or sent to Doubao.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This vocabulary stays on this device. It is not synced with iCloud or sent to Doubao."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这些词条仅保存在本机，不通过 iCloud 同步，也不会发送给豆包。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這些詞條僅儲存在本機，不透過 iCloud 同步，也不會傳送給豆包。"
+          }
+        }
+      }
+    },
     "Those changes exist nowhere else. Removing the worktree throws them away.": {
       "localizations": {
         "de": {
@@ -44522,6 +46053,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "這些更動只存在這裡。刪掉工作樹，它們就沒了。"
+          }
+        }
+      }
+    },
+    "Timing helps compare speed. Check the words yourself to judge accuracy.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timing helps compare speed. Check the words yourself to judge accuracy."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "耗时用于对比速度，准确率请对照实际文字判断。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "耗時用於比較速度，準確率請對照實際文字判斷。"
           }
         }
       }
@@ -44678,6 +46231,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "顯示／隱藏側邊欄"
+          }
+        }
+      }
+    },
+    "Total time": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Total time"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总耗时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "總耗時"
           }
         }
       }
@@ -45312,6 +46887,40 @@
         }
       }
     },
+    "Undo edits": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undo edits"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "撤销编辑"
+          }
+        }
+      }
+    },
+    "Undo edits before recognizing again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undo edits before recognizing again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "撤销编辑后可重新识别。"
+          }
+        }
+      }
+    },
     "Unknown": {
       "localizations": {
         "de": {
@@ -45839,6 +47448,22 @@
         }
       }
     },
+    "Uploads the recording to Volcengine when you stop. Requires your own API key.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止识别时将录音上传至火山引擎，需要配置自己的 API Key。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止辨識時將錄音上傳至火山引擎，需要設定自己的 API Key。"
+          }
+        }
+      }
+    },
     "Use Mosh": {
       "localizations": {
         "de": {
@@ -46059,6 +47684,44 @@
         }
       }
     },
+    "Use no more than 100 terms.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use no more than 100 terms."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "词条数量不能超过 100 个。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "詞條數量不能超過 100 個。"
+          }
+        }
+      }
+    },
+    "Use the speech resource enabled for your API key. The default is volc.bigasr.auc_turbo.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "填写你的 API Key 已开通的语音资源。默认值为 volc.bigasr.auc_turbo。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "填寫你的 API Key 已開通的語音資源。預設值為 volc.bigasr.auc_turbo。"
+          }
+        }
+      }
+    },
     "Username": {
       "localizations": {
         "de": {
@@ -46107,6 +47770,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "使用者名稱"
+          }
+        }
+      }
+    },
+    "Uses Apple's on-device models. Language assets may download on first use.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uses Apple's on-device models. Language assets may download on first use."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 Apple 设备端模型，首次使用某种语言时可能需要下载资源。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 Apple 裝置端模型，首次使用某種語言時可能需要下載資源。"
           }
         }
       }
@@ -46373,6 +48058,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "可見裝置"
+          }
+        }
+      }
+    },
+    "Vocabulary saved": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vocabulary saved"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "词表已保存"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "詞彙已儲存"
           }
         }
       }
@@ -47072,6 +48779,22 @@
         }
       }
     },
+    "When you stop and transcribe, this recording is uploaded to Volcengine. Recognition uses your saved API key and may incur service charges.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击停止并识别会将这段录音上传至火山引擎，使用已保存的 API Key，可能产生识别费用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點擊停止並辨識會將這段錄音上傳至火山引擎，使用已儲存的 API Key，可能產生辨識費用。"
+          }
+        }
+      }
+    },
     "While a session is attached, the Dynamic Island shows whether the agent is working, idle, or waiting on you. Tapping it deep-links straight back to that pane.": {
       "localizations": {
         "de": {
@@ -47328,6 +49051,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "讓 Whisper 自己聽出是哪種語言"
+          }
+        }
+      }
+    },
+    "Whisper may use only the first part of a long list. Put important terms first.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper may use only the first part of a long list. Put important terms first."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "词表较长时，Whisper 可能只使用前面一部分。请将重要词条放在前面。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "詞彙較長時，Whisper 可能只使用前面一部分。請將重要詞條放在前面。"
           }
         }
       }
@@ -52763,244 +54508,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "＋ 分割出新窗格"
-          }
-        }
-      }
-    },
-    "Recognizing recording again…": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recognizing recording again…"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在重新识别录音…"
-          }
-        }
-      }
-    },
-    "Review recognized text": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review recognized text"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "审阅识别文字"
-          }
-        }
-      }
-    },
-    "Speak, then stop to review the text.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Speak, then stop to review the text."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "说完后停止录音，再审阅识别文字。"
-          }
-        }
-      }
-    },
-    "Still recognizing. Your previous text is kept.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Still recognizing. Your previous text is kept."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "仍在识别，已有文字会保留。"
-          }
-        }
-      }
-    },
-    "More languages": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "More languages"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "更多语言"
-          }
-        }
-      }
-    },
-    "Recognize again": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recognize again"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重新识别"
-          }
-        }
-      }
-    },
-    "Original text": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Original text"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "最初识别结果"
-          }
-        }
-      }
-    },
-    "Undo edits before recognizing again.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Undo edits before recognizing again."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "撤销编辑后可重新识别。"
-          }
-        }
-      }
-    },
-    "Undo edits": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Undo edits"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "撤销编辑"
-          }
-        }
-      }
-    },
-    "Automatic follows your system and keyboard languages. This choice applies to this recording only.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Automatic follows your system and keyboard languages. This choice applies to this recording only."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自动跟随系统和键盘语言。本次选择仅用于当前录音。"
-          }
-        }
-      }
-    },
-    "Language applies to this recording only.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Language applies to this recording only."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "语言选择仅用于当前录音。"
-          }
-        }
-      }
-    },
-    "Stop and review": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stop and review"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "停止并审阅"
-          }
-        }
-      }
-    },
-    "Retry is available for recordings up to 2 minutes and 32 MB.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Retry is available for recordings up to 2 minutes and 32 MB."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "录音超过 2 分钟或 32 MB 后无法重新识别，已有文字仍可使用。"
-          }
-        }
-      }
-    },
-    "No recording is available to retry.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No recording is available to retry."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "没有可用于重新识别的录音。"
           }
         }
       }

@@ -3,7 +3,7 @@ import Foundation
 import MoshpitKit
 import UIKit
 
-/// Immutable input to the activity. Only explicit agent stamps count as tasks;
+/// Immutable input to the activity. Only explicit agent/shell events count as tasks;
 /// output becoming quiet is not evidence that a task has completed.
 struct ConnectionActivityEntry: Equatable {
     var id: UUID
@@ -18,6 +18,7 @@ struct ConnectionActivityEntry: Equatable {
     var programName: String?
     var taskState: ConnectionActivityAttributes.TaskState?
     var observedAt: Date?
+    var commandExitCode: Int?
 }
 
 enum ConnectionActivitySnapshot {
@@ -50,7 +51,9 @@ enum ConnectionActivitySnapshot {
                      workspaceName: showHostNames ? boundedAlias(headline.workspaceName) : nil,
                      programName: headline.programName,
                      taskState: headline.state == .connected ? headline.taskState : nil,
-                     observedAt: headline.state == .connected ? headline.observedAt : nil)
+                     observedAt: headline.state == .connected ? headline.observedAt : nil,
+                     commandExitCode: headline.state == .connected && headline.taskState == .done
+                        ? headline.commandExitCode : nil)
     }
 
     private static func boundedAlias(_ name: String?) -> String? {
@@ -205,18 +208,25 @@ final class ConnectionLiveActivity {
                 if let herdr = session.herdrControl { controller = herdr }
                 else { controller = session.tmuxControl }
                 if shouldPoll && state == .connected { controller?.pollAgentHooks() }
-                let observedAt = controller?.agentHooksObservedAt
+                let shellCommand = controller == nil ? session.plainSSHCommand : nil
+                let observedAt = controller?.agentHooksObservedAt ?? shellCommand?.observedAt
                 let context = controller.flatMap {
                     guard observedAt != nil else { return nil as ConnectionActivityContext? }
                     return ConnectionActivityContext.make(snapshot: $0.snapshot, hooks: $0.agentHooks,
                                                           hooksLoaded: $0.agentHooksLoaded)
-                } ?? ConnectionActivityContext()
+                } ?? ConnectionActivityContext.make(command: shellCommand)
                 let hooks = controller.map { control in
                     control.agentHooksLoaded && observedAt != nil ? control.agentHooks.filter {
                         control.snapshot.panes[$0.key] != nil
                     } : [:]
                 } ?? [:]
-                let tasks = ConnectionActivitySnapshot.taskCounts(hooks)
+                var tasks = ConnectionActivitySnapshot.taskCounts(hooks)
+                if let shellCommand {
+                    tasks.working = shellCommand.phase == .running ? 1 : 0
+                    // Failed/unknown exits have a result label, but must not
+                    // contribute to a checkmarked successful-completion count.
+                    tasks.done = shellCommand.phase == .finished && shellCommand.exitCode == 0 ? 1 : 0
+                }
                 return ConnectionActivityEntry(id: session.connection.id,
                     name: session.connection.name, state: state,
                     working: state == .connected ? tasks.working : 0,
@@ -226,7 +236,7 @@ final class ConnectionLiveActivity {
                     transportName: ConnectionActivitySnapshot.transportName(for: session.connection),
                     workspaceName: context.workspaceName, programName: context.programName,
                     taskState: context.taskState.flatMap(ConnectionActivityAttributes.TaskState.init(rawValue:)),
-                    observedAt: observedAt)
+                    observedAt: observedAt, commandExitCode: shellCommand?.exitCode)
             }
         } else { entries = [] }
         let content = ConnectionActivitySnapshot.make(entries: entries,

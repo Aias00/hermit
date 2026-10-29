@@ -493,13 +493,22 @@ actor WhisperModelStore {
     /// halfway through, and exactly why the caller treats its output as a
     /// replaceable hypothesis rather than an append-only transcript.
     func transcribe(samples: [Float], language: String?, variant: String) async throws -> String {
+        try await transcribe(samples: samples, language: language, variant: variant,
+                             contextualStrings: [])
+    }
+
+    func transcribe(samples: [Float], language: String?, variant: String,
+                    contextualStrings: [String]) async throws -> String {
         guard samples.count >= Self.minimumSamples else { return "" }
+        let vocabulary = VoiceVocabulary.normalized(contextualStrings)
         return try await transcriptionGate.withPermit { [self] in
-            try await transcribeWithPermit(samples: samples, language: language, variant: variant)
+            try await transcribeWithPermit(samples: samples, language: language, variant: variant,
+                                           contextualStrings: vocabulary)
         }
     }
 
-    private func transcribeWithPermit(samples: [Float], language: String?, variant: String) async throws -> String {
+    private func transcribeWithPermit(samples: [Float], language: String?, variant: String,
+                                      contextualStrings: [String]) async throws -> String {
         try Task.checkCancellation()
         let kit = try await kit(for: variant)
         try Task.checkCancellation()
@@ -514,7 +523,7 @@ actor WhisperModelStore {
             skipSpecialTokens: true,
             withoutTimestamps: true,
             wordTimestamps: false,
-            promptTokens: promptTokens(for: language, kit: kit),
+            promptTokens: promptTokens(for: language, contextualStrings: contextualStrings, kit: kit),
             compressionRatioThreshold: 2.4,
             logProbThreshold: -1.0,
             noSpeechThreshold: 0.6,
@@ -532,29 +541,14 @@ actor WhisperModelStore {
     /// and in the engine so a stray tap never reaches this far.
     static let minimumSamples = 9_600 // 0.6 s at 16 kHz
 
-    /// A short primer in the target language, fed as Whisper's "previous
-    /// text" context.
-    ///
-    /// This is the one lever that fixes two real defects for free. Whisper
-    /// asked for `zh` emits **Traditional** characters about as often as
-    /// Simplified, and a Simplified primer flips that; the primer also
-    /// establishes that Latin words appearing mid-sentence are expected, which
-    /// keeps it from transliterating "git rebase" into Chinese characters.
-    private func promptTokens(for language: String?, kit: WhisperKit) -> [Int]? {
+    /// The existing language primer plus user terms, bounded to complete
+    /// phrases. Hints bias recognition; they do not guarantee exact output.
+    private func promptTokens(for language: String?, contextualStrings: [String],
+                              kit: WhisperKit) -> [Int]? {
         guard let tokenizer = kit.tokenizer else { return nil }
-        let primer: String
-        switch language {
-        case "zh":
-            primer = "以下是普通话的转写，其中夹杂英文技术词汇，例如 git commit、Docker、SSH。"
-        case "yue":
-            primer = "以下是粵語嘅轉寫，其中夾雜英文技術詞彙，例如 git commit、Docker、SSH。"
-        case "ja":
-            primer = "以下は日本語の書き起こしで、git commit や Docker などの英語の技術用語が混在します。"
-        default:
-            return nil
+        return VoiceVocabulary.whisperPromptTokens(language: language, contextualStrings: contextualStrings) {
+            tokenizer.encode(text: $0)
         }
-        let tokens = tokenizer.encode(text: primer)
-        return tokens.isEmpty ? nil : tokens
     }
 
     // MARK: Loading

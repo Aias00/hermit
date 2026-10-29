@@ -679,13 +679,19 @@ actor SSHSession {
         to destination: URL,
         progress: (@Sendable (Double) -> Void)? = nil) async throws {
         guard !closed else { throw SSHError.sessionClosed }
-        do {
-            try await sftpDownload(path, to: destination, progress: progress)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            try await execDownload(path, to: destination, progress: progress)
+        try await LocalTransferFile.write(to: destination) { staged in
+            do {
+                try await self.sftpDownload(path, to: staged, progress: progress)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // A cancelled NIO request can surface EOF/SSHError instead
+                // of CancellationError. It must not start another transfer.
+                try Task.checkCancellation()
+                try await self.execDownload(path, to: staged, progress: progress)
+            }
         }
+        progress?(1)
     }
 
     private func sftpDownload(
@@ -709,7 +715,7 @@ actor SSHSession {
                     try handle.write(contentsOf: bytes)
                 },
                 progress: { received in
-                    if size > 0 { progress?(min(1, Double(received) / Double(size))) }
+                    if size > 0 { progress?(min(0.99, Double(received) / Double(size))) }
                 })
             try? await file.close()
         } catch {
@@ -731,8 +737,8 @@ actor SSHSession {
         guard let data = Data(base64Encoded: output, options: .ignoreUnknownCharacters) else {
             throw SSHError.underlying(RemoteReadError.notFound)
         }
+        try Task.checkCancellation()
         try data.write(to: destination)
-        progress?(1)
     }
 
     enum RemoteReadError: Error {
@@ -801,53 +807,115 @@ actor SSHSession {
         }
     }
 
-    /// Streams `local` to `remotePath`, which must not exist yet (SFTP's
-    /// exclusive create; the exec form checks first). A failed SFTP upload
-    /// removes what it wrote before falling back.
+    /// Each upload owns its SFTP/exec children. Cancelling releases the caller
+    /// even if a peer never replies, without closing the interactive transport.
     func uploadRemoteFile(from local: URL, to remotePath: String,
                           progress: (@Sendable (Double) -> Void)? = nil) async throws {
+        let scope = SSHChildChannelScope()
+        defer { scope.cancel() }
+        try await CancellableTransfer.run(onCancel: { scope.cancel() }) {
+            try await self.performUpload(from: local, to: remotePath,
+                                         progress: progress, scope: scope)
+        }
+    }
+
+    private func performUpload(from local: URL, to remotePath: String,
+                               progress: (@Sendable (Double) -> Void)?,
+                               scope: SSHChildChannelScope) async throws {
+        try Task.checkCancellation()
+        try scope.checkCancellation()
         guard !closed else { throw SSHError.sessionClosed }
         let size = (try? FileManager.default.attributesOfItem(atPath: local.path)[.size] as? UInt64) ?? 0
+        let scratch = RemoteFileEdits.uploadScratchDirectory(for: remotePath)
+        var ownsSFTPScratch = false
         do {
-            let sftp = try await previewReader()
-            let file = try await sftp.openFile(filePath: remotePath, flags: [.write, .create, .forceCreate])
-            do {
-                let handle = try FileHandle(forReadingFrom: local)
-                defer { try? handle.close() }
-                var offset: UInt64 = 0
-                while let chunk = try handle.read(upToCount: 128 * 1024), !chunk.isEmpty {
-                    try Task.checkCancellation()
-                    try await file.write(ByteBuffer(bytes: chunk), at: offset)
-                    offset += UInt64(chunk.count)
-                    if size > 0 { progress?(min(1, Double(offset) / Double(size))) }
-                }
-                try await file.close()
-                return
-            } catch {
-                try? await file.close()
-                try? await sftp.remove(at: remotePath)
-                throw error
+            guard let sftpClient else { throw SSHError.sessionClosed }
+            // Never reuse the preview reader: cancelling an upload must not
+            // close a thumbnail, download, or the terminal's child channel.
+            let sftp = try await sftpClient.openSFTP(cancellationScope: scope)
+            try Task.checkCancellation()
+            var directoryAttributes = SFTPFileAttributes.none
+            directoryAttributes.permissions = 0o700
+            try await sftp.createDirectory(atPath: scratch, attributes: directoryAttributes)
+            ownsSFTPScratch = true
+            let payload = RemoteFileEdits.child("payload", of: scratch)
+            var fileAttributes = SFTPFileAttributes.none
+            fileAttributes.permissions = 0o600
+            let file = try await sftp.openFile(filePath: payload, flags: [.write, .create, .forceCreate],
+                                               attributes: fileAttributes)
+            let handle = try FileHandle(forReadingFrom: local)
+            defer { try? handle.close() }
+            var offset: UInt64 = 0
+            while let chunk = try handle.read(upToCount: 128 * 1024), !chunk.isEmpty {
+                try Task.checkCancellation()
+                try await file.write(ByteBuffer(bytes: chunk), at: offset)
+                try Task.checkCancellation()
+                offset += UInt64(chunk.count)
+                if size > 0 { progress?(min(0.99, Double(offset) / Double(size))) }
             }
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {}
+            try await file.close()
+            try Task.checkCancellation()
+            // Standard SFTP v3 rename refuses an existing target. Keeping all
+            // partial bytes in an owned directory also makes delayed cleanup
+            // harmless to a newer upload, including a lost rename reply.
+            try await sftp.rename(at: payload, to: remotePath)
+            _ = await withTimeoutValue(1) { try await sftp.rmdir(at: scratch); return true }
+            try Task.checkCancellation()
+            try scope.checkCancellation()
+            progress?(1)
+            return
+        } catch {
+            if ownsSFTPScratch {
+                await cleanupUploadScratch(RemoteFileEdits.sftpUploadCleanup(directory: scratch))
+            }
+            try Task.checkCancellation()
+            try scope.checkCancellation()
+        }
 
         guard size <= RemoteFileCommands.execDownloadLimit else {
             throw SSHError.underlying(RemoteReadError.tooLargeWithoutSFTP)
         }
         let data = try Data(contentsOf: local)
         let plan = RemoteFileEdits.upload(to: remotePath)
-        try Self.checkEditReply(try await executeCommand(plan.begin))
-        var offset = 0
-        while offset < data.count {
+        var ownsScratch = false
+        do {
             try Task.checkCancellation()
-            let end = min(offset + ExecUploadCommands.chunkBytes, data.count)
-            _ = try await executeCommand(plan.append(data[offset..<end].base64EncodedString()))
-            offset = end
-            progress?(0.95 * Double(offset) / Double(max(data.count, 1)))
+            try Self.checkEditReply(try await transport.run(plan.begin, cancellationScope: scope))
+            ownsScratch = true
+            var offset = 0
+            while offset < data.count {
+                try Task.checkCancellation()
+                let end = min(offset + ExecUploadCommands.chunkBytes, data.count)
+                _ = try await transport.run(plan.append(data[offset..<end].base64EncodedString()),
+                                            cancellationScope: scope)
+                try Task.checkCancellation()
+                offset = end
+                progress?(0.95 * Double(offset) / Double(max(data.count, 1)))
+            }
+            try Task.checkCancellation()
+            try Self.checkEditReply(try await transport.run(plan.finish, cancellationScope: scope))
+            try Task.checkCancellation()
+            try scope.checkCancellation()
+            progress?(1)
+        } catch {
+            // Only a confirmed begin grants ownership. Cleanup never touches
+            // the final target, whose ownership is ambiguous after a lost reply.
+            if ownsScratch { await cleanupUploadScratch(plan.cleanup) }
+            try Task.checkCancellation()
+            try scope.checkCancellation()
+            throw SSHError.map(error)
         }
-        try Self.checkEditReply(try await executeCommand(plan.finish))
-        progress?(1)
+    }
+
+    private func cleanupUploadScratch(_ command: String) async {
+        // Cleanup has its own lifetime, since the upload's scope is cancelled.
+        // Closing this scope at the deadline also stops late channel creation.
+        let cleanup = SSHChildChannelScope()
+        defer { cleanup.cancel() }
+        _ = await withTimeoutValue(1) {
+            _ = try await self.transport.run(command, cancellationScope: cleanup)
+            return true
+        }
     }
 
     private static func entry(path: String, _ attributes: SFTPFileAttributes) -> RemoteFileEntry {
@@ -926,6 +994,8 @@ actor SSHSession {
 protocol SSHClientTransport: AnyObject, Sendable {
     /// One-shot exec channel: stderr merged, buffered to completion.
     func run(_ command: String) async throws -> Data
+    /// Exec owned by an individual cancellable transfer, never the parent PTY.
+    func run(_ command: String, cancellationScope: SSHChildChannelScope) async throws -> Data
     /// One-shot exec with framed stdin, separate from the command arguments.
     func run(_ command: String, standardInput: Data) async throws -> Data
     /// Open the interactive PTY. Returns once the server accepted it,
@@ -945,6 +1015,15 @@ enum SSHExecInputError: Error {
 }
 
 extension SSHClientTransport {
+    // Scripted transports can ignore cancellation while producing their reply;
+    // the late result must still never advance to the next upload phase.
+    func run(_ command: String, cancellationScope: SSHChildChannelScope) async throws -> Data {
+        try cancellationScope.checkCancellation()
+        let result = try await run(command)
+        try cancellationScope.checkCancellation()
+        return result
+    }
+
     // Test transports that only support ordinary exec must fail closed. Falling
     // back to a quoted argument would put sensitive stdin back into argv.
     func run(_ command: String, standardInput: Data) async throws -> Data {
@@ -968,6 +1047,12 @@ final class CitadelClientTransport: SSHClientTransport {
 
     func run(_ command: String) async throws -> Data {
         let buffer = try await client.executeCommand(command, mergeStreams: true)
+        return Data(buffer.readableBytesView)
+    }
+
+    func run(_ command: String, cancellationScope: SSHChildChannelScope) async throws -> Data {
+        let buffer = try await client.executeCommand(command, mergeStreams: true,
+                                                     cancellationScope: cancellationScope)
         return Data(buffer.readableBytesView)
     }
 
