@@ -5,7 +5,7 @@
 #
 # Xcode itself is not managed here — install it from the App Store.
 
-# Generates Moshpit.xcodeproj from project.yml (the source of truth).
+# Generates Hermit.xcodeproj from project.yml (the source of truth).
 brew "xcodegen"
 
 # Lint + format. Configured by .swiftlint.yml and .swiftformat at the repo root.

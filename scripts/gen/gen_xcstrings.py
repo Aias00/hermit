@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Generate the four strings catalogs: Moshpit/Resources/Localizable.xcstrings (the app),
-Extensions/MoshpitIsland/Localizable.xcstrings (the widget),
-Extensions/MoshpitPush/Localizable.xcstrings (the notification service extension) and
-Extensions/MoshpitShare/Localizable.xcstrings (the share extension).
+"""Generate the four strings catalogs: Hermit/Resources/Localizable.xcstrings (the app),
+Extensions/HermitIsland/Localizable.xcstrings (the widget),
+Extensions/HermitPush/Localizable.xcstrings (the notification service extension) and
+Extensions/HermitShare/Localizable.xcstrings (the share extension).
 
 Source language: en (the key IS the English value).
 Each entry carries complete zh-Hans + ja translations inline; zh-Hant, ko, de, es,
 fr and pt-BR live in scripts/gen/locales/<locale>.json (see STYLE.md there).
-Moshpit/Resources/InfoPlist.xcstrings (permission texts) is written too.
+Hermit/Resources/InfoPlist.xcstrings (permission texts) is written too.
 SAME = identical value in every language (brand names, protocol words, glyphs).
 """
 import json, os, re, sys
@@ -32,7 +32,7 @@ def plural_spec(key, en_one, zh, ja, en_other=None):
     return spec
 
 # ---------- Brand / protocol / glyphs (identical everywhere) ----------
-for k in ["Moshpit", "Vibe Island", "MOSH", "SRTT", "REC",
+for k in ["Hermit", "Vibe Island", "MOSH", "SRTT", "REC",
           "ED25519", "ECDSA-sk", "RSA-4096", "tmux", "paste", "tmux prefix",
           "⌘B", "＋", "22", "60000", "61000", "/usr/local/bin/mosh-server",
           "ABCdef 012 ~/ssh $", "%lldms", "%lldpt",
@@ -58,9 +58,9 @@ add("Continue", "继续", "続ける")
 # ---------- Home (HomeView) ----------
 add("Your servers, on call.", "你的服务器，随叫随到。", "あなたのサーバー、いつでもオンコール。")
 add("No connections yet", "还没有连接", "接続はまだありません")
-add("Tap ＋ to add your first server. Moshpit keeps your sessions alive across Wi-Fi / 5G handoff.",
-    "点按 ＋ 添加第一台服务器。Moshpit 会在 Wi-Fi / 5G 切换时保持会话不断线。",
-    "＋をタップして最初のサーバーを追加。Moshpit は Wi-Fi / 5G の切り替えをまたいでセッションを維持します。")
+add("Tap ＋ to add your first server. Hermit keeps your sessions alive across Wi-Fi / 5G handoff.",
+    "点按 ＋ 添加第一台服务器。Hermit 会在 Wi-Fi / 5G 切换时保持会话不断线。",
+    "＋をタップして最初のサーバーを追加。Hermit は Wi-Fi / 5G の切り替えをまたいでセッションを維持します。")
 add("SIGNAL FOR YOUR AGENTS", "智能体信号站", "エージェントのシグナル")
 add("Delete %@?", "删除 %@？", "%@を削除しますか？")
 add("connection", "连接", "接続")
@@ -89,9 +89,9 @@ add("Paste PEM", "粘贴 PEM", "PEM を貼り付け")
 add("Paste a PEM instead…", "直接粘贴 PEM…", "代わりに PEM を貼り付け…")
 add("Private Key (PEM)", "私钥（PEM）", "秘密鍵（PEM）")
 add("ROAMING · MOSH", "漫游 · MOSH", "ローミング · MOSH")
-add("Mosh keeps the session alive across Wi-Fi / 5G handoff and sleep/wake. UDP must be open server-side; the client picks an unused port within range. With tmux, Moshpit attaches to your existing sessions and never creates or restyles them; only sessions you create through Moshpit get its native look (status bar hidden, restored on disconnect).",
-    "Wi-Fi 和 5G 之间切换、手机休眠再唤醒，Mosh 都能让会话不断线。服务器要放开 UDP，客户端会在下面的端口范围里挑一个没被占用的。用 tmux 时，Moshpit 只连你已有的会话，不会替你新建，也不会改它们的样式。只有在 Moshpit 里新建的会话才套 Moshpit 的外观（隐藏状态栏，断开后恢复）。",
-    "Mosh は Wi-Fi / 5G の切り替えやスリープ/復帰をまたいでセッションを維持します。サーバー側で UDP を開放してください。クライアントは範囲内の未使用ポートを選びます。tmux では Moshpit は既存セッションにアタッチするだけで、作成やスタイル変更は行いません。Moshpit から作成したセッションのみネイティブな外観（ステータスバー非表示、切断時に復元）になります。")
+add("Mosh keeps the session alive across Wi-Fi / 5G handoff and sleep/wake. UDP must be open server-side; the client picks an unused port within range. With tmux, Hermit attaches to your existing sessions and never creates or restyles them; only sessions you create through Hermit get its native look (status bar hidden, restored on disconnect).",
+    "Wi-Fi 和 5G 之间切换、手机休眠再唤醒，Mosh 都能让会话不断线。服务器要放开 UDP，客户端会在下面的端口范围里挑一个没被占用的。用 tmux 时，Hermit 只连你已有的会话，不会替你新建，也不会改它们的样式。只有在 Hermit 里新建的会话才套 Hermit 的外观（隐藏状态栏，断开后恢复）。",
+    "Mosh は Wi-Fi / 5G の切り替えやスリープ/復帰をまたいでセッションを維持します。サーバー側で UDP を開放してください。クライアントは範囲内の未使用ポートを選びます。tmux では Hermit は既存セッションにアタッチするだけで、作成やスタイル変更は行いません。Hermit から作成したセッションのみネイティブな外観（ステータスバー非表示、切断時に復元）になります。")
 add("Use Mosh", "使用 Mosh", "Mosh を使用")
 add("Wrap SSH with mosh-server (UDP)", "通过 SSH 启动 mosh-server（UDP）", "SSH を mosh-server (UDP) でラップ")
 add("UDP Port Range", "UDP 端口范围", "UDP ポート範囲")
@@ -146,9 +146,9 @@ add("KEYBOARD · KEYS", "键盘 · 密钥", "キーボード · キー")
 add("Shortcuts", "快捷键", "ショートカット")
 add("SSH Keys", "SSH 密钥", "SSH キー")
 add("NOTIFICATIONS", "通知", "通知")
-add("Moshpit watches the active tmux session for the terminal bell and posts a local alert when your agent needs attention.",
-    "Moshpit 会盯着当前 tmux 会话的终端响铃，智能体需要你处理时发本地通知。",
-    "Moshpit はアクティブな tmux セッションのターミナルベルを監視し、エージェントが注意を必要とするとローカル通知を出します。")
+add("Hermit watches the active tmux session for the terminal bell and posts a local alert when your agent needs attention.",
+    "Hermit 会盯着当前 tmux 会话的终端响铃，智能体需要你处理时发本地通知。",
+    "Hermit はアクティブな tmux セッションのターミナルベルを監視し、エージェントが注意を必要とするとローカル通知を出します。")
 add("Notifications", "通知", "通知")
 add("Alert when the agent rings the bell", "智能体响铃时提醒", "エージェントがベルを鳴らしたら通知")
 add("Live Activity", "实时活动", "ライブアクティビティ")
@@ -296,22 +296,22 @@ add("Raise the keyboard as soon as a terminal opens, instead of after you tap it
 # Offline host-setup sheet
 add("Automatic — connect to inspect", "自动完成，连上主机后可查看", "自動——接続すると確認できます")
 add("Host setup is automatic. Connecting to a host installs and repairs everything it needs — scripts, hooks registration, push pairing — and asks before its first install. Connect to a host to inspect or remove its setup here.",
-    "主机这边不用手动配置。每次连接时，Moshpit 会自动装好并修复需要的东西：脚本、hooks 注册、推送配对。第一次安装前会先问你。连上主机后，可以在这里查看或移除这些设置。",
+    "主机这边不用手动配置。每次连接时，Hermit 会自动装好并修复需要的东西：脚本、hooks 注册、推送配对。第一次安装前会先问你。连上主机后，可以在这里查看或移除这些设置。",
     "ホスト設定は自動です。ホストに接続すると必要なもの——スクリプト、フック登録、プッシュペアリング——を自動でインストール・修復し、初回インストール前には確認します。接続するとここで確認・削除できます。")
 add("PAIRED HOSTS", "已配对主机", "ペアリング済みホスト")
 add("paired %@", "配对于 %@", "%@ にペアリング")
 # Notification info sheet
 add("Agents stamp their state", "智能体自报状态", "エージェントが状態を報告")
-add("Coding agents (Claude Code, Codex, …) report working / needs-you / done through hooks Moshpit installs on your host — precise states, not guesses. The terminal bell still works as a fallback for everything else.",
-    "Claude Code、Codex 这类编程智能体，通过 Moshpit 装在主机上的 hooks 自己上报状态：工作中、等你、已完成。状态是准的，不是猜的。其他程序还是靠终端响铃兜底。",
-    "コーディングエージェント（Claude Code、Codex など）は Moshpit がホストにインストールするフックで「作業中 / あなた待ち / 完了」を報告します——推測ではなく正確な状態です。それ以外はターミナルベルがフォールバックとして機能します。")
+add("Coding agents (Claude Code, Codex, …) report working / needs-you / done through hooks Hermit installs on your host — precise states, not guesses. The terminal bell still works as a fallback for everything else.",
+    "Claude Code、Codex 这类编程智能体，通过 Hermit 装在主机上的 hooks 自己上报状态：工作中、等你、已完成。状态是准的，不是猜的。其他程序还是靠终端响铃兜底。",
+    "コーディングエージェント（Claude Code、Codex など）は Hermit がホストにインストールするフックで「作業中 / あなた待ち / 完了」を報告します——推測ではなく正確な状態です。それ以外はターミナルベルがフォールバックとして機能します。")
 add("While a session is attached, the Dynamic Island shows whether the agent is working, idle, or waiting on you. Tapping it deep-links straight back to that pane.",
     "连着会话时，灵动岛会显示智能体是在工作、闲着，还是在等你。点一下直接回到那个窗格。",
     "セッションのアタッチ中、Dynamic Island はエージェントが作業中・アイドル・あなた待ちのいずれかを表示します。タップするとそのペインへ直接ジャンプします。")
 add("Push, sealed end-to-end", "端到端加密的推送", "プッシュ、エンドツーエンド暗号化")
-add("When the app isn’t running, your host sends the alert through Moshpit’s push relay. It is encrypted on your host with a key only this device holds — the relay and Apple carry ciphertext and can read none of it. Delivered even from a locked phone.",
-    "App 没在运行时，通知由你的主机经 Moshpit 的中转服务器发过来。内容在主机上就用只有这台手机才有的密钥加密，中转服务器和 Apple 都只能看到密文。锁屏状态下也能收到。",
-    "アプリが起動していないとき、通知はホストから Moshpit のプッシュリレー経由で届きます。内容はこのデバイスだけが持つ鍵でホスト上で暗号化され、リレーも Apple も暗号文を運ぶだけで読めません。ロック中の iPhone にも届きます。")
+add("When the app isn’t running, your host sends the alert through Hermit’s push relay. It is encrypted on your host with a key only this device holds — the relay and Apple carry ciphertext and can read none of it. Delivered even from a locked phone.",
+    "App 没在运行时，通知由你的主机经 Hermit 的中转服务器发过来。内容在主机上就用只有这台手机才有的密钥加密，中转服务器和 Apple 都只能看到密文。锁屏状态下也能收到。",
+    "アプリが起動していないとき、通知はホストから Hermit のプッシュリレー経由で届きます。内容はこのデバイスだけが持つ鍵でホスト上で暗号化され、リレーも Apple も暗号文を運ぶだけで読めません。ロック中の iPhone にも届きます。")
 add("Quiet by design", "尽量不打扰", "静けさを前提に")
 add("A question must stand for 30 seconds before any phone hears about it — answered at your desk means never announced. All waiting agents share one summary card; only the first rings. A finished turn shows the prompt it answered and only chimes if it ran three minutes or more. Parked agents stay silent.",
     "智能体的提问要等 30 秒还没人答，手机才会收到通知。在电脑前顺手答掉，手机就不会响。所有等你的智能体合成一张摘要卡，只有第一条会响铃。完成通知会带上它刚做完的那条提示词，跑满三分钟的才有提示音。闲着的智能体不发通知。",
@@ -460,9 +460,9 @@ add("Connecting…", "连接中…", "接続中…")
 add("roaming…", "漫游中…", "ローミング中…")
 add("Network changed", "网络已切换", "ネットワークが切り替わりました")
 add("No tmux sessions", "没有 tmux 会话", "tmux セッションがありません")
-add("This server has no running sessions.\nMoshpit only attaches — create the first one to start.",
-    "这台服务器上没有在跑的会话。\nMoshpit 只连已有的会话，先新建一个。",
-    "このサーバーには実行中のセッションがありません。\nMoshpit はアタッチのみ行います — 最初のセッションを作成して始めましょう。")
+add("This server has no running sessions.\nHermit only attaches — create the first one to start.",
+    "这台服务器上没有在跑的会话。\nHermit 只连已有的会话，先新建一个。",
+    "このサーバーには実行中のセッションがありません。\nHermit はアタッチのみ行います — 最初のセッションを作成して始めましょう。")
 add("Creating…", "创建中…", "作成中…")
 add("Create Session", "创建会话", "セッションを作成")
 add("Attaching tmux…", "正在附加 tmux…", "tmux にアタッチ中…")
@@ -562,11 +562,11 @@ add("No datagrams yet.", "还没收到任何数据。", "まだデータグラ�
 add("%@ not installed on this host", "这台主机上没装 %@", "このホストに %@ がインストールされていません")
 add("Install %@", "安装 %@", "%@ をインストール")
 add("Create %@", "新建 %@", "%@ を作成")
-add("This server has no running %@.\nMoshpit only attaches — create the first one to start.",
-    "这台服务器上没有在跑的 %@。\nMoshpit 只连已有的，先新建一个。",
-    "このサーバーで実行中の %@ はありません。\nMoshpit はアタッチのみ行います——まず 1 つ作成してください。")
+add("This server has no running %@.\nHermit only attaches — create the first one to start.",
+    "这台服务器上没有在跑的 %@。\nHermit 只连已有的，先新建一个。",
+    "このサーバーで実行中の %@ はありません。\nHermit はアタッチのみ行います——まず 1 つ作成してください。")
 add("No %@ %@", "没有 %@ %@", "%@ %@ がありません")
-add("Moshpit needs %@ for %@ navigation.\nInstall it, then reconnect.",
+add("Hermit needs %@ for %@ navigation.\nInstall it, then reconnect.",
     "在 %2$@ 之间切换需要 %1$@。\n装好之后重新连接。",
     "%@ のナビゲーションには %@ が必要です。\nインストール後に再接続してください。")
 
@@ -575,7 +575,7 @@ add("Moshpit needs %@ for %@ navigation.\nInstall it, then reconnect.",
 # translating simulated `git status` output would misrepresent what a terminal
 # shows, and the preview exists precisely to be checked against reality.
 for k in ["git ", "status", "main", "On branch ", "warning: ", "hint: use --staged",
-          "MoshTransport.swift", "MoshpitMark.swift", "2 files changed",
+          "MoshTransport.swift", "HermitMark.swift", "2 files changed",
           "❯ ", "❯", "█", "+ ", "- "]:
     add(k, SAME)
 add("TERMINAL", "终端", "ターミナル")
@@ -611,9 +611,9 @@ add("This theme will be removed. Built-in themes are unaffected.",
 add("Duplicate a built-in theme to start from its palette, or import one as JSON. Long-press a theme for more.",
     "复制一个内置主题即可基于它的配色开始，也可以导入 JSON。长按主题可看到更多操作。",
     "内蔵テーマを複製してその配色から始めるか、JSON で読み込みます。テーマを長押しすると他の操作が表示されます。")
-add("Paste a theme exported from Moshpit, or any JSON object with \"background\", \"foreground\" and the eight ANSI color names (\"black\", \"red\", …). Bright colors are optional.",
-    "粘贴从 Moshpit 导出的主题，或任何带 “background”、“foreground” 和八个 ANSI 颜色名（“black”、“red” …）的 JSON 对象。高亮颜色可选。",
-    "Moshpit から書き出したテーマ、または \"background\"・\"foreground\" と 8 つの ANSI カラー名（\"black\"、\"red\" …）を持つ JSON オブジェクトを貼り付けます。明るいカラーは任意です。")
+add("Paste a theme exported from Hermit, or any JSON object with \"background\", \"foreground\" and the eight ANSI color names (\"black\", \"red\", …). Bright colors are optional.",
+    "粘贴从 Hermit 导出的主题，或任何带 “background”、“foreground” 和八个 ANSI 颜色名（“black”、“red” …）的 JSON 对象。高亮颜色可选。",
+    "Hermit から書き出したテーマ、または \"background\"・\"foreground\" と 8 つの ANSI カラー名（\"black\"、\"red\" …）を持つ JSON オブジェクトを貼り付けます。明るいカラーは任意です。")
 
 # Accent gallery
 add("MY ACCENTS", "我的强调色", "マイアクセント")
@@ -682,17 +682,17 @@ add("Show detail on lock screen", "在锁屏上显示详情", "ロック画面�
 add("Display what the agent is running, asking, or was asked — off keeps it private",
     "显示智能体在跑什么、在问什么、刚做完哪条提示词。关掉就不显示这些内容",
     "エージェントが実行中の内容、問いかけ、完了したプロンプトを表示します——オフにすると非表示のままです")
-add("Moshpit watches the active session for agent activity and posts a local alert when your agent needs attention — natively on herdr, via the bell and hooks on tmux.",
-    "Moshpit 会盯着当前会话里的智能体，需要你处理时发本地通知。herdr 原生支持，tmux 靠响铃和 hooks。",
-    "Moshpit はアクティブなセッションのエージェントの動きを監視し、対応が必要になるとローカル通知を送ります——herdr ではネイティブに、tmux ではベルとフックを介して行います。")
+add("Hermit watches the active session for agent activity and posts a local alert when your agent needs attention — natively on herdr, via the bell and hooks on tmux.",
+    "Hermit 会盯着当前会话里的智能体，需要你处理时发本地通知。herdr 原生支持，tmux 靠响铃和 hooks。",
+    "Hermit はアクティブなセッションのエージェントの動きを監視し、対応が必要になるとローカル通知を送ります——herdr ではネイティブに、tmux ではベルとフックを介して行います。")
 
 # Add Connection
 add("Multiplexer", "终端复用器", "マルチプレクサ")
 add("mosh-server path", "mosh-server 路径", "mosh-server のパス")
 add("Custom herdr Path", "自定义 herdr 路径", "herdr のカスタムパス")
-add("tmux and herdr hold separate, unrelated sessions. If the host doesn't have the one you pick, Moshpit says so and drops to a plain shell — it never quietly attaches the other. With Mosh, herdr runs its own terminal UI; native rendering needs SSH.",
-    "tmux 和 herdr 的会话互不相通。主机上没有你选的那个时，Moshpit 会直说，然后退回普通 shell，不会悄悄换成另一个。走 Mosh 时 herdr 用它自己的终端界面，要原生渲染得用 SSH。",
-    "tmux と herdr はそれぞれ独立した無関係のセッションを保持します。選んだ方がホストにない場合、Moshpit はそれを明示して通常のシェルに切り替えます——もう一方に黙ってアタッチすることはありません。Mosh と併用する場合、herdr は独自のターミナル UI を表示します。ネイティブ描画には SSH が必要です。")
+add("tmux and herdr hold separate, unrelated sessions. If the host doesn't have the one you pick, Hermit says so and drops to a plain shell — it never quietly attaches the other. With Mosh, herdr runs its own terminal UI; native rendering needs SSH.",
+    "tmux 和 herdr 的会话互不相通。主机上没有你选的那个时，Hermit 会直说，然后退回普通 shell，不会悄悄换成另一个。走 Mosh 时 herdr 用它自己的终端界面，要原生渲染得用 SSH。",
+    "tmux と herdr はそれぞれ独立した無関係のセッションを保持します。選んだ方がホストにない場合、Hermit はそれを明示して通常のシェルに切り替えます——もう一方に黙ってアタッチすることはありません。Mosh と併用する場合、herdr は独自のターミナル UI を表示します。ネイティブ描画には SSH が必要です。")
 # SOCKS5 proxy
 add("PROXY", "代理", "プロキシ")
 add("Use SOCKS5 Proxy", "使用 SOCKS5 代理", "SOCKS5 プロキシを使用")
@@ -715,9 +715,9 @@ add("Stop", "停止", "停止")
 add("Type a response…", "输入回复…", "返信を入力…")
 add("Next instruction…", "下一条指令…", "次の指示…")
 add("Not delivered", "未送达", "送信されませんでした")
-add("Your tap didn't reach the agent — open Moshpit and answer there.",
-    "没有送达智能体。打开 Moshpit，在里面回答。",
-    "タップがエージェントに届きませんでした——Moshpit を開いて操作してください。")
+add("Your tap didn't reach the agent — open Hermit and answer there.",
+    "没有送达智能体。打开 Hermit，在里面回答。",
+    "タップがエージェントに届きませんでした——Hermit を開いて操作してください。")
 add("Sent to your Mac", "已发给你的 Mac", "Mac に送信しました")
 add("Your answer was passed to the host. It takes effect if the agent is still waiting on that question.",
     "你的回答已交给主机。若智能体仍停在那个提问上，回答就会生效。",
@@ -731,13 +731,13 @@ add("Enable agent notifications on %@?",
 add("Enable", "启用", "有効にする")
 add("Not Now", "以后再说", "今はしない")
 add("Don't Ask Again", "不再询问", "今後確認しない")
-add("Moshpit installs its hook scripts in ~/.moshpit and registers them in Claude Code's settings, so agents can reach you when they need you. Everything can be removed from Host Setup.",
-    "Moshpit 会把 hooks 脚本装到 ~/.moshpit，并写进 Claude Code 的设置，智能体需要你时就能通知到你。这些都可以在「主机设置」里移除。",
-    "Moshpit は ~/.moshpit にフックスクリプトをインストールし、Claude Code の設定に登録します。エージェントがあなたを必要とするとき届くようにするためです。すべてホスト設定から削除できます。")
+add("Hermit installs its hook scripts in ~/.moshpit and registers them in Claude Code's settings, so agents can reach you when they need you. Everything can be removed from Host Setup.",
+    "Hermit 会把 hooks 脚本装到 ~/.moshpit，并写进 Claude Code 的设置，智能体需要你时就能通知到你。这些都可以在「主机设置」里移除。",
+    "Hermit は ~/.moshpit にフックスクリプトをインストールし、Claude Code の設定に登録します。エージェントがあなたを必要とするとき届くようにするためです。すべてホスト設定から削除できます。")
 add("Prompt already gone", "这个提问已经过去了", "問いかけは既にありません")
-add("That request was already answered or has changed — nothing was sent. Open Moshpit to see the current state.",
-    "那个请求已经有人答过，或者已经变了，所以什么都没发。打开 Moshpit 看看现在的状态。",
-    "そのリクエストは既に回答済みか変化しています——何も送信されていません。Moshpit を開いて現在の状態を確認してください。")
+add("That request was already answered or has changed — nothing was sent. Open Hermit to see the current state.",
+    "那个请求已经有人答过，或者已经变了，所以什么都没发。打开 Hermit 看看现在的状态。",
+    "そのリクエストは既に回答済みか変化しています——何も送信されていません。Hermit を開いて現在の状態を確認してください。")
 
 # Island hooks installer
 add("AGENT", "智能体", "エージェント")
@@ -745,21 +745,21 @@ add("Not run", "未运行", "未実行")
 add("Run an agent turn in any pane, then re-check.",
     "在任意窗格里跑一轮智能体，然后重新检查。", "任意のペインでエージェントを 1 ターン実行し、再確認してください。")
 add("Backs up your config", "会备份你的配置", "設定をバックアップします")
-add("Copies the agent's config to a timestamped backup before merging Moshpit's hook groups.",
-    "写入 Moshpit 的 hooks 之前，先把智能体的配置文件备份一份，文件名带时间戳。",
-    "Moshpit のフックを統合する前に、エージェントの設定をタイムスタンプ付きでバックアップします。")
+add("Copies the agent's config to a timestamped backup before merging Hermit's hook groups.",
+    "写入 Hermit 的 hooks 之前，先把智能体的配置文件备份一份，文件名带时间戳。",
+    "Hermit のフックを統合する前に、エージェントの設定をタイムスタンプ付きでバックアップします。")
 add("Never blocks the agent", "绝不阻塞智能体", "エージェントを妨げません")
 add("The hooks only stamp the tmux pane and exit 0 — the agent is never slowed, prompted, or interrupted.",
     "hooks 只给 tmux 窗格打个标记就 exit 0，不会拖慢智能体，也不会弹窗或打断它。",
     "フックは tmux ペインに印を付けて exit 0 するだけです——エージェントが遅くなったり、確認を求められたり、中断されることはありません。")
-add("Idempotent: re-running de-dupes Moshpit's hooks instead of stacking them.",
+add("Idempotent: re-running de-dupes Hermit's hooks instead of stacking them.",
     "可以反复运行。已经装过的 hooks 会被识别出来，不会重复叠加。",
-    "冪等です。再実行すると Moshpit のフックは重複除去され、積み重なりません。")
+    "冪等です。再実行すると Hermit のフックは重複除去され、積み重なりません。")
 add("Edits %@ (a timestamped backup is written first).",
     "会修改 %@（先写一份带时间戳的备份）。", "%@ を編集します（先にタイムスタンプ付きのバックアップを書き出します）。")
-add("Install Moshpit's hooks so the Vibe Island shows exactly when your agent is working, what it's running, when it needs you, and when it's done — instead of guessing from output. Moshpit backs up your config first and never blocks the agent.",
-    "装上 Moshpit 的 hooks，Vibe Island 就能准确知道智能体什么时候在干活、在跑什么、什么时候等你、什么时候做完了，不用从输出里猜。安装前会先备份你的配置，hooks 也不会拖慢智能体。",
-    "Moshpit のフックをインストールすると、Vibe Island はエージェントがいつ作業中か、何を実行しているか、いつあなたを必要としているか、いつ完了したかを正確に表示します——出力から推測する必要はありません。Moshpit は先に設定をバックアップし、エージェントを妨げることはありません。")
+add("Install Hermit's hooks so the Vibe Island shows exactly when your agent is working, what it's running, when it needs you, and when it's done — instead of guessing from output. Hermit backs up your config first and never blocks the agent.",
+    "装上 Hermit 的 hooks，Vibe Island 就能准确知道智能体什么时候在干活、在跑什么、什么时候等你、什么时候做完了，不用从输出里猜。安装前会先备份你的配置，hooks 也不会拖慢智能体。",
+    "Hermit のフックをインストールすると、Vibe Island はエージェントがいつ作業中か、何を実行しているか、いつあなたを必要としているか、いつ完了したかを正確に表示します——出力から推測する必要はありません。Hermit は先に設定をバックアップし、エージェントを妨げることはありません。")
 
 # Host key verification (Components)
 add("%lld", SAME)
@@ -841,11 +841,11 @@ add("Switch agent", "切换智能体", "エージェントを切り替え")
 # extension fails to decrypt in time — see docs/PUSH.md. The keys ARE the
 # English, so a missed lookup still reads as a sentence.
 add("An agent needs you", "有智能体在等你", "エージェントが待っています")
-add("Open Moshpit to see what it is asking.",
-    "打开 Moshpit 看它在问什么。", "Moshpit を開いて内容を確認してください。")
+add("Open Hermit to see what it is asking.",
+    "打开 Hermit 看它在问什么。", "Hermit を開いて内容を確認してください。")
 add("An agent finished", "有智能体做完了", "エージェントが完了しました")
-add("Open Moshpit to send the next instruction.",
-    "打开 Moshpit 发下一条指令。", "Moshpit を開いて次の指示を送ってください。")
+add("Open Hermit to send the next instruction.",
+    "打开 Hermit 发下一条指令。", "Hermit を開いて次の指示を送ってください。")
 add("pane %lld", "窗格 %lld", "ペイン %lld")
 
 # Multiplexer choice (Add Connection)
@@ -862,9 +862,9 @@ add("herdr not found on this host — plain shell session.",
     "このホストに herdr が見つかりません——通常のシェルセッションになります。")
 add("herdr isn't installed on this host.", "这台主机上没装 herdr。", "このホストに herdr がインストールされていません。")
 add("mosh isn't installed on this host.", "这台主机上没装 mosh。", "このホストに mosh がインストールされていません。")
-add("Installs to ~/.local/bin. Moshpit looks there when probing and launching, so you don't need to change PATH.",
-    "安装到 ~/.local/bin。Moshpit 探测和启动时都会去那里找，所以你不用改 PATH。",
-    "~/.local/bin にインストールされます。Moshpit は検出時も起動時もそこを参照するため、PATH を変更する必要はありません。")
+add("Installs to ~/.local/bin. Hermit looks there when probing and launching, so you don't need to change PATH.",
+    "安装到 ~/.local/bin。Hermit 探测和启动时都会去那里找，所以你不用改 PATH。",
+    "~/.local/bin にインストールされます。Hermit は検出時も起動時もそこを参照するため、PATH を変更する必要はありません。")
 add("Mosh isn't receiving data — your network may be blocking UDP (VPN, proxy, or firewall).",
     "Mosh 收不到数据，你的网络可能拦了 UDP（VPN、代理或防火墙）。",
     "Mosh がデータを受信できていません——ネットワークが UDP を遮断している可能性があります（VPN・プロキシ・ファイアウォール）。")
@@ -916,9 +916,9 @@ add("The worktree was created but has no pane", "工作树已创建，但没有�
 add("Couldn't read the saved credential. After re-installing or re-signing the app (e.g. via SideStore), open Edit and re-enter your password / re-select your key.",
     "读不出已保存的凭据。重装或重签名 App（例如通过 SideStore）之后，请打开「编辑」重新输入密码 / 重新选择密钥。",
     "保存された認証情報を読み取れませんでした。アプリを再インストールまたは再署名した後（SideStore 経由など）は、「編集」を開いてパスワードを再入力するか、キーを選び直してください。")
-add("The connection failed for a reason Moshpit didn't recognise. Check the host, port and that the server is reachable, then try again.",
-    "连接失败，Moshpit 也没认出是什么原因。检查一下主机、端口，确认服务器能连通，再试一次。",
-    "Moshpit が識別できない理由で接続に失敗しました。ホスト・ポート・サーバーに到達できるかを確認して、もう一度お試しください。")
+add("The connection failed for a reason Hermit didn't recognise. Check the host, port and that the server is reachable, then try again.",
+    "连接失败，Hermit 也没认出是什么原因。检查一下主机、端口，确认服务器能连通，再试一次。",
+    "Hermit が識別できない理由で接続に失敗しました。ホスト・ポート・サーバーに到達できるかを確認して、もう一度お試しください。")
 add("The server closed the connection while setting up SSH. Check that the port really is an SSH server, and that a firewall or proxy isn't cutting the connection.",
     "SSH 还没建好，服务器就把连接关了。确认这个端口跑的确实是 SSH，中间也没有防火墙或代理把连接掐断。",
     "SSH の確立中にサーバーが接続を閉じました。そのポートが本当に SSH サーバーであること、ファイアウォールやプロキシが接続を切断していないことを確認してください。")
@@ -935,18 +935,18 @@ add("Send Image to Agent", "把图片发给智能体", "エージェントに画
 add("Sent to %@.", "已发给 %@。", "%@ に送信しました。")
 add("Uploads images to the agent's server and hands it the file paths.", "把图片上传到智能体所在的服务器，再把文件路径交给它。", "画像をエージェントのサーバーにアップロードし、ファイルパスを渡します。")
 # Hook config / installer
-add("Codex won't run a newly added hook until you trust it. Run /hooks inside Codex on this host and trust the four Moshpit entries — until you do, nothing will be sent.",
-    "Codex 不会执行没经过你确认的新 hook。在这台主机上的 Codex 里运行 /hooks，把 Moshpit 的四条设为信任。确认之前不会有任何通知发出。",
-    "Codex は信頼されるまで新しく追加されたフックを実行しません。このホストの Codex で /hooks を実行し、Moshpit の 4 つのエントリを信頼してください。それまでは何も送信されません。")
-add("That config file isn't valid JSON (%@). Fix it on the host, or move it aside and Moshpit will write a fresh one.",
-    "这个配置文件不是合法的 JSON（%@）。到主机上修好它，或者先挪走，Moshpit 会重新写一份。",
-    "この設定ファイルは有効な JSON ではありません（%@）。ホスト上で修正するか、いったん退避させれば Moshpit が新しく書き出します。")
-add("That config file's top level isn't a JSON object, so Moshpit can't merge hooks into it.",
-    "这个配置文件的顶层不是 JSON 对象，Moshpit 没法把 hooks 合并进去。",
-    "この設定ファイルのトップレベルが JSON オブジェクトではないため、Moshpit はフックをマージできません。")
-add("The manifest on this host names a config path Moshpit won't run a command against: %@",
-    "这台主机上的清单指向了一个 Moshpit 不会对它执行命令的配置路径：%@",
-    "このホストのマニフェストには、Moshpit がコマンドを実行しない設定パスが指定されています：%@")
+add("Codex won't run a newly added hook until you trust it. Run /hooks inside Codex on this host and trust the four Hermit entries — until you do, nothing will be sent.",
+    "Codex 不会执行没经过你确认的新 hook。在这台主机上的 Codex 里运行 /hooks，把 Hermit 的四条设为信任。确认之前不会有任何通知发出。",
+    "Codex は信頼されるまで新しく追加されたフックを実行しません。このホストの Codex で /hooks を実行し、Hermit の 4 つのエントリを信頼してください。それまでは何も送信されません。")
+add("That config file isn't valid JSON (%@). Fix it on the host, or move it aside and Hermit will write a fresh one.",
+    "这个配置文件不是合法的 JSON（%@）。到主机上修好它，或者先挪走，Hermit 会重新写一份。",
+    "この設定ファイルは有効な JSON ではありません（%@）。ホスト上で修正するか、いったん退避させれば Hermit が新しく書き出します。")
+add("That config file's top level isn't a JSON object, so Hermit can't merge hooks into it.",
+    "这个配置文件的顶层不是 JSON 对象，Hermit 没法把 hooks 合并进去。",
+    "この設定ファイルのトップレベルが JSON オブジェクトではないため、Hermit はフックをマージできません。")
+add("The manifest on this host names a config path Hermit won't run a command against: %@",
+    "这台主机上的清单指向了一个 Hermit 不会对它执行命令的配置路径：%@",
+    "このホストのマニフェストには、Hermit がコマンドを実行しない設定パスが指定されています：%@")
 # Push service
 add("Couldn't save the pairing on this phone, so nothing was installed on the host. The diagnostics log has the reason.",
     "配对信息没能保存到这台手机上，所以主机那边什么都没装。原因在诊断日志里。",
@@ -964,7 +964,7 @@ add("Retry", "重试", "再試行")
 add("Restart server", "重启服务", "サーバーを再起動")
 # Home
 add("New", "新建", "新規")
-add("Add a host to keep your agents within reach. Moshpit keeps sessions alive across Wi-Fi / 5G handoff.",
+add("Add a host to keep your agents within reach. Hermit keeps sessions alive across Wi-Fi / 5G handoff.",
     "添加一台主机，智能体就在手边。Wi-Fi 和 5G 之间切换，会话也不断线。",
     "ホストを追加すると、エージェントがいつでも手元に。Wi-Fi / 5G の切り替えでもセッションは維持されます。")
 add("Connections", "连接", "接続")
@@ -979,15 +979,15 @@ add("Installing on %@…", "正在安装到 %@…", "%@ にインストール中
 add("Minting a send token at the relay…", "正在向中转服务器申请发送令牌…", "リレーで送信トークンを発行中…")
 add("Open a tmux pane on this host to test the hooks.", "在这台主机上打开一个 tmux 窗格，才能测试 hooks。", "フックをテストするには、このホストで tmux のペインを開いてください。")
 add("The host reported: %@", "主机返回：%@", "ホストからの報告：%@")
-add("The host sent one, but this screen never saw it arrive. Most likely Moshpit was not in the foreground — the test can only be confirmed while you are looking at this screen, so try again without leaving it. If it still fails, check that notifications are allowed and that the relay can reach Apple.",
-    "主机发了一条，但这个页面没收到。最可能是 Moshpit 当时不在前台。这个测试只有你停留在这个页面时才能确认，别切走再试一次。还是不行的话，检查通知是否已允许，以及中转服务器能不能连上 Apple。",
-    "ホストは 1 件送信しましたが、この画面には届きませんでした。おそらく Moshpit がフォアグラウンドにありませんでした。テストはこの画面を見ている間だけ確認できるので、離れずにもう一度お試しください。それでも失敗する場合は、通知が許可されているか、リレーが Apple に到達できるかを確認してください。")
+add("The host sent one, but this screen never saw it arrive. Most likely Hermit was not in the foreground — the test can only be confirmed while you are looking at this screen, so try again without leaving it. If it still fails, check that notifications are allowed and that the relay can reach Apple.",
+    "主机发了一条，但这个页面没收到。最可能是 Hermit 当时不在前台。这个测试只有你停留在这个页面时才能确认，别切走再试一次。还是不行的话，检查通知是否已允许，以及中转服务器能不能连上 Apple。",
+    "ホストは 1 件送信しましたが、この画面には届きませんでした。おそらく Hermit がフォアグラウンドにありませんでした。テストはこの画面を見ている間だけ確認できるので、離れずにもう一度お試しください。それでも失敗する場合は、通知が許可されているか、リレーが Apple に到達できるかを確認してください。")
 add("The pane came back as \"%@\" instead of the test stamp.", "窗格返回的是 \"%@\"，不是测试标记。", "ペインからテストスタンプではなく \"%@\" が返ってきました。")
 add("The stamp script ran but the pane came back empty.%@", "标记脚本跑了，但窗格返回为空。%@", "スタンプスクリプトは実行されましたが、ペインは空で返ってきました。%@")
 add("This host is missing %@ — install those and try again.", "这台主机缺少 %@。装好再试。", "このホストには %@ がありません。インストールしてからもう一度お試しください。")
-add("This host's tmux isn't on the default socket, so Moshpit can't run the test. The hooks themselves are unaffected.",
-    "这台主机的 tmux 没用默认 socket，Moshpit 跑不了这个测试。hooks 本身不受影响。",
-    "このホストの tmux はデフォルトのソケットを使っていないため、Moshpit はテストを実行できません。フック自体には影響ありません。")
+add("This host's tmux isn't on the default socket, so Hermit can't run the test. The hooks themselves are unaffected.",
+    "这台主机的 tmux 没用默认 socket，Hermit 跑不了这个测试。hooks 本身不受影响。",
+    "このホストの tmux はデフォルトのソケットを使っていないため、Hermit はテストを実行できません。フック自体には影響ありません。")
 add("AGENT STATUS", "智能体状态", "エージェントの状態")
 add("Current", "最新", "最新")
 add("Fires the stamp script and reads the pane back — no need to run an agent turn.", "直接触发标记脚本再读回窗格，不用真跑一轮智能体。", "スタンプスクリプトを実行してペインを読み戻します。エージェントのターンを実行する必要はありません。")
@@ -1005,9 +1005,9 @@ add("Pairing", "配对", "ペアリング")
 add("Proven — it arrived on this phone.", "验证通过，这台手机收到了。", "確認済み。この iPhone に届きました。")
 add("Pushes need %@ on this host.", "推送需要这台主机上有 %@。", "プッシュにはこのホストに %@ が必要です。")
 add("Re-pair", "重新配对", "再ペアリング")
-add("Reaches you when Moshpit isn't running. Your relay signs the push; it never sees what the agent said.",
-    "Moshpit 没在运行时也能找到你。中转服务器只负责签发推送，看不到智能体说了什么。",
-    "Moshpit が起動していないときも届きます。リレーはプッシュに署名するだけで、エージェントの内容は見えません。")
+add("Reaches you when Hermit isn't running. Your relay signs the push; it never sees what the agent said.",
+    "Hermit 没在运行时也能找到你。中转服务器只负责签发推送，看不到智能体说了什么。",
+    "Hermit が起動していないときも届きます。リレーはプッシュに署名するだけで、エージェントの内容は見えません。")
 add("Reinstall", "重新安装", "再インストール")
 add("Send a test notification", "发一条测试通知", "テスト通知を送信")
 add("Set up this host", "设置这台主机", "このホストを設定")
@@ -1151,9 +1151,9 @@ add("MESSAGE", "内容", "メッセージ")
 add("MOSH")
 add("Mail isn’t set up on this device. Copy the address and write from anywhere.", "这台设备没有配置邮件。复制地址，用任何方式写给我们。", "この端末ではメールが設定されていません。アドレスをコピーして、お好きな方法で送ってください。")
 add("MoshTransport.swift")
-add("Moshpit")
-add("Moshpit never installs anything silently. Run the command below in your shell — sudo and its output stay fully visible.", "Moshpit 不会悄悄装任何东西。把下面的命令贴到你的 shell 里运行，sudo 和输出全程都看得见。", "Moshpit が黙ってインストールすることはありません。以下のコマンドをシェルで実行してください — sudo とその出力はすべて表示されます。")
-add("MoshpitMark.swift")
+add("Hermit")
+add("Hermit never installs anything silently. Run the command below in your shell — sudo and its output stay fully visible.", "Hermit 不会悄悄装任何东西。把下面的命令贴到你的 shell 里运行，sudo 和输出全程都看得见。", "Hermit が黙ってインストールすることはありません。以下のコマンドをシェルで実行してください — sudo とその出力はすべて表示されます。")
+add("HermitMark.swift")
 add("Move down", "下", "下へ")
 add("Move left", "左", "左へ")
 add("Move right", "右", "右へ")
@@ -1210,7 +1210,7 @@ add("❯")
 add("❯ ")
 add("➜")
 
-# ---------- Vibe Island + widgets (the MoshpitIsland extension) ----------
+# ---------- Vibe Island + widgets (the HermitIsland extension) ----------
 # Text keys and String(localized:) resolve against Bundle.main, which inside the
 # widget extension is the EXTENSION — every string the Live Activity, Dynamic
 # Island and home/lock-screen widgets show needs a key in this table.
@@ -1220,28 +1220,28 @@ def island(key, zh, ja):
     S[key] = (zh, ja)
 island("working", "工作中", "作業中")
 island("idle", "空闲", "アイドル")
-# AgentState.label (MoshpitKit) is the other two; "Switch" cycles the pill.
+# AgentState.label (HermitKit) is the other two; "Switch" cycles the pill.
 for k in ["needs you", "done", "Switch"]:
     ISLAND[k] = S[k]
 ISLAND["%lldms"] = SAME  # latency unit chip in the Island UI
-ISLAND["Moshpit"] = SAME
+ISLAND["Hermit"] = SAME
 # Header summaries ("1 needs you · 2 working · 1 done") and widget copy.
 ISLAND["%lld needs you"] = plural_spec("%lld needs you", "%lld needs you",
                                        "%lld 个在等你", "対応待ち %lld", en_other="%lld need you")
 ISLAND["%lld working"] = ("%lld 个工作中", "作業中 %lld")
 ISLAND["%lld done"] = plural_spec("%lld done", "%lld done", "%lld 个已完成", "完了 %lld")
 ISLAND["+%lld more"] = ("还有 %lld 个", "ほか %lld 件")
-ISLAND["paused — open Moshpit to refresh"] = ("已暂停，打开 Moshpit 刷新", "一時停止中 — Moshpit を開くと更新されます")
-ISLAND["paused — open Moshpit"] = ("已暂停，打开 Moshpit", "一時停止中 — Moshpit を開く")
+ISLAND["paused — open Hermit to refresh"] = ("已暂停，打开 Hermit 刷新", "一時停止中 — Hermit を開くと更新されます")
+ISLAND["paused — open Hermit"] = ("已暂停，打开 Hermit", "一時停止中 — Hermit を開く")
 ISLAND["no active agents"] = ("没有智能体在跑", "稼働中のエージェントなし")
-ISLAND["Moshpit · no agents"] = ("Moshpit · 没有智能体", "Moshpit · エージェントなし")
+ISLAND["Hermit · no agents"] = ("Hermit · 没有智能体", "Hermit · エージェントなし")
 ISLAND["Agent Status"] = ("智能体状态", "エージェントの状況")
-ISLAND["Live status of your Moshpit agents."] = ("实时查看 Moshpit 里各个智能体在做什么。", "Moshpit のエージェントの状況をリアルタイムで表示します。")
+ISLAND["Live status of your Hermit agents."] = ("实时查看 Hermit 里各个智能体在做什么。", "Hermit のエージェントの状況をリアルタイムで表示します。")
 # Circular lock-screen widget: one tiny word under the count.
 ISLAND["wait"] = ("等你", "待ち")
 ISLAND["agt"] = ("智能体", "体")
 
-# ---------- Share sheet (the MoshpitShare extension) ----------
+# ---------- Share sheet (the HermitShare extension) ----------
 # Same Bundle.main rule as the widget: the share extension has its own catalog.
 SHARE = {}
 for k in ["working", "needs you", "done", "idle", "Cancel"]:
@@ -1256,21 +1256,21 @@ SHARE["%lld images — pick the agent that should see them"] = (
 SHARE["Agent list is from %lld min ago — targets may have moved on. Queued images are delivered when the session is next live."] = (
     "这份智能体列表是 %lld 分钟前的，对方可能已经换了地方。排队的图片会在会话下次连上时送到。",
     "このエージェント一覧は %lld 分前のものなので、状況が変わっているかもしれません。キューに入れた画像は、次にセッションがつながったときに届きます。")
-SHARE["Delivered as an uploaded path the moment the session is live — instantly, if Moshpit is connected right now."] = (
-    "会话一连上，图片就会上传，并把路径交给智能体；Moshpit 现在正连着的话，马上就到。",
-    "セッションがつながった時点でアップロードし、そのパスを渡します。いま Moshpit が接続中なら、すぐに届きます。")
+SHARE["Delivered as an uploaded path the moment the session is live — instantly, if Hermit is connected right now."] = (
+    "会话一连上，图片就会上传，并把路径交给智能体；Hermit 现在正连着的话，马上就到。",
+    "セッションがつながった時点でアップロードし、そのパスを渡します。いま Hermit が接続中なら、すぐに届きます。")
 SHARE["No agents to send to"] = ("没有可以发送的智能体", "送信先のエージェントがありません")
-SHARE["Open Moshpit and connect to a session with a running agent first — the share sheet lists every agent Moshpit is watching."] = (
-    "先打开 Moshpit，连上一个有智能体在跑的会话。这里会列出 Moshpit 正在留意的每个智能体。",
-    "まず Moshpit を開き、エージェントが動いているセッションに接続してください。共有シートには Moshpit が見守っているすべてのエージェントが並びます。")
+SHARE["Open Hermit and connect to a session with a running agent first — the share sheet lists every agent Hermit is watching."] = (
+    "先打开 Hermit，连上一个有智能体在跑的会话。这里会列出 Hermit 正在留意的每个智能体。",
+    "まず Hermit を開き、エージェントが動いているセッションに接続してください。共有シートには Hermit が見守っているすべてのエージェントが並びます。")
 SHARE["Couldn't queue the images"] = ("图片没能排进队列", "画像をキューに入れられませんでした")
 SHARE["Queued for %@"] = ("已排队，等着发给 %@", "%@ 宛てにキューに入れました")
-SHARE["Moshpit uploads and hands over the path the moment that session is live."] = (
-    "那个会话一连上，Moshpit 就会上传图片并把路径交过去。",
-    "そのセッションがつながった時点で、Moshpit がアップロードしてパスを渡します。")
+SHARE["Hermit uploads and hands over the path the moment that session is live."] = (
+    "那个会话一连上，Hermit 就会上传图片并把路径交过去。",
+    "そのセッションがつながった時点で、Hermit がアップロードしてパスを渡します。")
 
 # ---------- Agent notifications (shared with the push extension) ----------
-# AgentNotificationCopy (MoshpitKit) composes every agent card — the local one
+# AgentNotificationCopy (HermitKit) composes every agent card — the local one
 # the app posts and the pushed one the notification service extension writes.
 # String(localized:) resolves against Bundle.main, which inside the extension is
 # the EXTENSION, so it carries these keys in a catalog of its own.
@@ -1295,11 +1295,11 @@ INFOPLIST_ZH_JA = {
         "语音输入要用麦克风，这样你可以把命令和提示词直接说进终端。音频在这台设备上转写，用 Apple 的语音模型或你下载的 Whisper 模型，不会上传到任何地方。",
         "音声入力はマイクを使い、コマンドやプロンプトをターミナルに向けて話せるようにします。音声はこの端末上で、Apple の音声モデルまたはダウンロードした Whisper モデルによって書き起こされ、どこにもアップロードされません。"),
     "NSSpeechRecognitionUsageDescription": (
-        "听写在本机做语音识别。你的语音和转写文字都不会离开这台设备，Moshpit 不使用服务器端识别。",
-        "音声入力は端末内で音声認識を行います。音声も書き起こしもこの端末を離れず、Moshpit はサーバー側の認識を使いません。"),
+        "听写在本机做语音识别。你的语音和转写文字都不会离开这台设备，Hermit 不使用服务器端识别。",
+        "音声入力は端末内で音声認識を行います。音声も書き起こしもこの端末を離れず、Hermit はサーバー側の認識を使いません。"),
     "NSLocalNetworkUsageDescription": (
-        "Moshpit 通过 SSH 和 mosh（UDP）连接你局域网里的服务器。没有这个权限，连 192.168.x.x 这类内网主机会失败。",
-        "Moshpit は SSH と mosh（UDP）でローカルネットワーク上のサーバーに接続します。この許可がないと、192.168.x.x のような LAN 上のホストへの接続は失敗します。"),
+        "Hermit 通过 SSH 和 mosh（UDP）连接你局域网里的服务器。没有这个权限，连 192.168.x.x 这类内网主机会失败。",
+        "Hermit は SSH と mosh（UDP）でローカルネットワーク上のサーバーに接続します。この許可がないと、192.168.x.x のような LAN 上のホストへの接続は失敗します。"),
     "NSCameraUsageDescription": (
         "相机用来拍点东西，比如白板、草图、屏幕，然后附到终端会话里。照片会在这台设备上去掉位置信息，只上传到你自己的服务器。",
         "カメラでホワイトボードやスケッチ、画面などを撮影し、ターミナルセッションに添付できます。写真はこの端末上で位置情報を取り除き、あなた自身のサーバーにのみアップロードされます。"),
@@ -1506,7 +1506,7 @@ def check(paths):
         except Exception:
             return None
 
-    derived = os.path.expanduser("~/Library/Developer/Xcode/DerivedData/Moshpit-*")
+    derived = os.path.expanduser("~/Library/Developer/Xcode/DerivedData/Hermit-*")
     if "--derived-data" in sys.argv:
         derived = sys.argv[sys.argv.index("--derived-data") + 1]
     needed = {}
@@ -1555,11 +1555,11 @@ def check(paths):
 
 
 root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-CATALOGS = [os.path.join(root, "Moshpit/Resources/Localizable.xcstrings"),
-            os.path.join(root, "Extensions/MoshpitIsland/Localizable.xcstrings"),
-            os.path.join(root, "Extensions/MoshpitPush/Localizable.xcstrings"),
-            os.path.join(root, "Extensions/MoshpitShare/Localizable.xcstrings")]
-INFOPLIST_CATALOG = os.path.join(root, "Moshpit/Resources/InfoPlist.xcstrings")
+CATALOGS = [os.path.join(root, "Hermit/Resources/Localizable.xcstrings"),
+            os.path.join(root, "Extensions/HermitIsland/Localizable.xcstrings"),
+            os.path.join(root, "Extensions/HermitPush/Localizable.xcstrings"),
+            os.path.join(root, "Extensions/HermitShare/Localizable.xcstrings")]
+INFOPLIST_CATALOG = os.path.join(root, "Hermit/Resources/InfoPlist.xcstrings")
 
 if "--check" in sys.argv:
     raise SystemExit(check(CATALOGS + [INFOPLIST_CATALOG]))

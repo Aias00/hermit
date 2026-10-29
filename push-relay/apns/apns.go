@@ -15,7 +15,7 @@
 //	                   every bundle id in the team, and for BOTH the sandbox and
 //	                   production hosts with no separate material.
 //
-// For Moshpit that last property is what settles it: the same relay deployment
+// For Hermit that last property is what settles it: the same relay deployment
 // can serve TestFlight/dev builds (sandbox) and App Store builds (production)
 // off one secret, selected per request by which host we dial.
 //
@@ -88,7 +88,7 @@ const (
 	tokenLifetime = 45 * time.Minute
 )
 
-// PushType values for the apns-push-type header. Only the two Moshpit needs are
+// PushType values for the apns-push-type header. Only the two Hermit needs are
 // named; the header is mandatory, and guessing wrong is a 400.
 const (
 	PushTypeAlert = "alert"
@@ -137,7 +137,7 @@ type Notification struct {
 	Payload  []byte
 	PushType string
 	Priority int
-	// CollapseID replaces an unread earlier push with the same id. For Moshpit
+	// CollapseID replaces an unread earlier push with the same id. For Hermit
 	// it is a per-pane value, so an agent that re-prompts twice does not stack
 	// two lock-screen cards for one question.
 	CollapseID string

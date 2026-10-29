@@ -4,12 +4,12 @@
 #
 # Three implementations must agree byte for byte: the openssl pipeline in
 # scripts/host/moshpit-push.sh (which runs on users' servers), the Go one in
-# push-relay/sealbox, and the Swift one in Packages/MoshpitKit
+# push-relay/sealbox, and the Swift one in Packages/HermitKit
 # (Push/PushSealedBox.swift). The vector is how that agreement is TESTED
 # rather than assumed, and it is pinned in two places:
 #
 #   push-relay/sealbox/sealbox_test.go       TestOpenSSLVector
-#   Tests/MoshpitTests/Services/PushSealedBoxTests.swift
+#   Tests/HermitTests/Services/PushSealedBoxTests.swift
 #
 # Run this, then paste the output into BOTH. Never update one alone — a vector
 # that only one side agrees with tests nothing.

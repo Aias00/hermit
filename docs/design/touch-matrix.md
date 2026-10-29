@@ -57,7 +57,7 @@
 
 1. app `positionTap` **等待 double/triple tap 失败**（否则双击的第一击就发 click）。
 2. app 单指 pan 在 `selection.active` 时 **shouldBegin=false**（选择 pan 独占拖动）。
-3. fork singleTap 未聚焦分支：链接 → 打开并 return；否则 `focusOnTap`（Moshpit=false）→ 什么都不做。键盘判定完全归 app 的 `handleTap`。
+3. fork singleTap 未聚焦分支：链接 → 打开并 return；否则 `focusOnTap`（Hermit=false）→ 什么都不做。键盘判定完全归 app 的 `handleTap`。
 4. `shouldRecognizeSimultaneouslyWith` 全局返回 true（app delegate）——防冲突靠 1/2 的显式让步，不靠互斥。
 5. 选择 pan 是 fork 动态装卸的（enable/disableSelectionPanGesture），没有 delegate——它的“独占”由 2 保证。
 

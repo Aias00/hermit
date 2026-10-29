@@ -1,7 +1,7 @@
 name: CI
 
-# Moshpit is an iOS 18 app whose Xcode project is generated from project.yml
-# by xcodegen (project.yml is the source of truth; Moshpit.xcodeproj is a
+# Hermit is an iOS 18 app whose Xcode project is generated from project.yml
+# by xcodegen (project.yml is the source of truth; Hermit.xcodeproj is a
 # generated artifact), so CI regenerates it from scratch rather than trusting
 # the checked-in copy. Runs on every push to main and on pull requests; the
 # manual trigger stays for re-running a flaky simulator boot.
@@ -72,19 +72,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.SPM_CACHE_DIR }}
-          key: spm-${{ runner.os }}-${{ hashFiles('Moshpit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          key: spm-${{ runner.os }}-${{ hashFiles('Hermit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
           restore-keys: |
             spm-${{ runner.os }}-
 
       - name: Resolve SwiftPM dependencies
         run: |
           xcodebuild -resolvePackageDependencies \
-            -project Moshpit.xcodeproj \
-            -scheme Moshpit \
+            -project Hermit.xcodeproj \
+            -scheme Hermit \
             -clonedSourcePackagesDirPath "$SPM_CACHE_DIR"
 
-      # Run the unit + UI test targets (MoshpitTests + MoshpitUITests, both wired
-      # into the shared "Moshpit" scheme's test action in project.yml).
+      # Run the unit + UI test targets (HermitTests + HermitUITests, both wired
+      # into the shared "Hermit" scheme's test action in project.yml).
       #
       # Real SystemKeychain tests need the simulator app's signed entitlements;
       # unsigned builds fail with errSecMissingEntitlement (-34018). Ad hoc
@@ -98,8 +98,8 @@ jobs:
           TEST_RUNNER_MOSHPIT_CI: "1"
         run: |
           xcodebuild test \
-            -project Moshpit.xcodeproj \
-            -scheme Moshpit \
+            -project Hermit.xcodeproj \
+            -scheme Hermit \
             -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
             -clonedSourcePackagesDirPath "$SPM_CACHE_DIR" \
             CODE_SIGNING_ALLOWED=YES \

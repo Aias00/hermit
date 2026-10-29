@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Produce the open-source tree of Moshpit from this (private) development repo.
+# Produce the open-source tree of Hermit from this (private) development repo.
 #
 # The public repository (github.com/Cluas/moshpit) is not a mirror of this one:
 # it carries the app, its extensions, the tests, the push relay and the
@@ -63,8 +63,8 @@ done
 DEST=$(mkdir -p "$DEST" && cd "$DEST" && pwd)
 
 PUBLIC=(
-  Moshpit Extensions Tests Packages
-  Moshpit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+  Hermit Extensions Tests Packages
+  Hermit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
   project.yml Signing.xcconfig BUILD_NUMBER Brewfile .swiftlint.yml .swiftformat .gitignore
   .github
   LICENSE README.md README-zh.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md NOTICES.md CHANGELOG.md
@@ -97,7 +97,7 @@ export_tree() {
 
   # DEST is a working checkout too (people run xcodegen and build there), so
   # "stale" means files git would track that are no longer listed — never the
-  # generated Moshpit.xcodeproj or build/, which the exported .gitignore covers.
+  # generated Hermit.xcodeproj or build/, which the exported .gitignore covers.
   [ -d "$DEST/.git" ] || git -C "$DEST" init -q -b main
   rsync -a --files-from="$LIST" "$SRC/" "$DEST/"
   git -C "$DEST" ls-files -z --cached --others --exclude-standard | tr '\0' '\n' | LC_ALL=C sort -u > "$LIST.dest"
@@ -168,7 +168,7 @@ if ! git -C "$DEST" rev-parse -q --verify HEAD >/dev/null 2>&1; then
   dangling_refs
   HEAD_SHA=$(git -C "$ROOT" rev-parse HEAD)
   git -C "$DEST" add -A
-  git -C "$DEST" commit -q -m "Moshpit goes open source: the app, its extensions and the push relay" \
+  git -C "$DEST" commit -q -m "Hermit goes open source: the app, its extensions and the push relay" \
     -m "Exported from the development tree at ${HEAD_SHA:0:7} by scripts/export-oss.sh." \
     -m "Source-Commit: $HEAD_SHA"
   git -C "$DEST" log --oneline -1

@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 // Builds every ALTERNATE app icon as an Icon Composer document, in the same
-// Liquid Glass language as the primary (Moshpit/Resources/AppIcon.icon): white glass
+// Liquid Glass language as the primary (Hermit/Resources/AppIcon.icon): white glass
 // figures on a coloured fill, a darker fill for the Dark appearance, and the
 // system deriving Clear and Tinted on its own. Each alternate is a DIFFERENT
 // figure — the picker offers real alternatives, not recolours of one mark —
 // and each carries one fill colour, so the colour range survives.
 //
 // Output (all checked in):
-//   Moshpit/Resources/AlternateIcons/AppIcon-<Tag>.icon/   icon.json + Assets/*.png
-//   Moshpit/Resources/AlternateIcons/Previews/IconPreview-<Tag>@3x.png
+//   Hermit/Resources/AlternateIcons/AppIcon-<Tag>.icon/   icon.json + Assets/*.png
+//   Hermit/Resources/AlternateIcons/Previews/IconPreview-<Tag>@3x.png
 //     the picker's thumbnails, rendered by ictool exactly the way SpringBoard
-//     renders the icon on iOS 26 (also one for the primary, "Moshpit").
+//     renders the icon on iOS 26 (also one for the primary, "Hermit").
 //
 // Xcode compiles the documents because project.yml lists their names in
 // ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES; actool then writes the
@@ -25,8 +25,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const OUT = join(ROOT, 'Moshpit/Resources/AlternateIcons');
-const PRIMARY = join(ROOT, 'Moshpit/Resources/AppIcon.icon');
+const OUT = join(ROOT, 'Hermit/Resources/AlternateIcons');
+const PRIMARY = join(ROOT, 'Hermit/Resources/AppIcon.icon');
 const ICTOOL = '/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool';
 const W = '#FFFFFF';
 
@@ -166,16 +166,16 @@ const previews = join(OUT, 'Previews');
 mkdirSync(previews, { recursive: true });
 const preview = (doc, tag, rendition = 'Default', file = join(previews, `IconPreview-${tag}@3x.png`)) =>
   execFileSync(ICTOOL, [doc, '--export-image', '--output-file', file, '--platform', 'iOS', '--rendition', rendition, '--width', '80', '--height', '80', '--scale', '3']);
-preview(PRIMARY, 'Moshpit');
+preview(PRIMARY, 'Hermit');
 for (const icon of icons) preview(join(OUT, `AppIcon-${icon.tag}.icon`), icon.tag);
-console.log('previews', ['Moshpit', ...icons.map((i) => i.tag)].join(' '));
+console.log('previews', ['Hermit', ...icons.map((i) => i.tag)].join(' '));
 
 // ── Optional review sheet: every icon, Default and Dark ────────────────────
 const sheetArg = process.argv.indexOf('--sheet');
 if (sheetArg > 0) {
   const tmp = join(process.env.TMPDIR ?? '/tmp', 'moshpit-icon-sheet');
   rmSync(tmp, { recursive: true, force: true }); mkdirSync(tmp, { recursive: true });
-  const docs = [['Moshpit', PRIMARY], ...icons.map((i) => [i.tag, join(OUT, `AppIcon-${i.tag}.icon`)])];
+  const docs = [['Hermit', PRIMARY], ...icons.map((i) => [i.tag, join(OUT, `AppIcon-${i.tag}.icon`)])];
   for (const [tag, doc] of docs) for (const r of ['Default', 'Dark'])
     execFileSync(ICTOOL, [doc, '--export-image', '--output-file', join(tmp, `${tag}-${r}.png`), '--platform', 'iOS', '--rendition', r, '--width', '256', '--height', '256', '--scale', '1']);
   const py = `

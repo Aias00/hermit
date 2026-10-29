@@ -226,7 +226,7 @@ def main():
     parser.add_argument("--before-dir", type=Path)
     options = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
-    source = root / "Moshpit/Services/Herdr"
+    source = root / "Hermit/Services/Herdr"
     with tempfile.TemporaryDirectory(prefix="moshpit-herdr-handoff-") as directory:
         work = Path(directory)
         current = compile_commands(source, work / "current")

@@ -1,12 +1,12 @@
 # Security Policy
 
-Moshpit holds SSH keys, passwords and live terminal sessions, so security
+Hermit holds SSH keys, passwords and live terminal sessions, so security
 reports take priority over every other kind of issue.
 
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security problem. Email
-cluas@live.cn with:
+rokkki@163.com with:
 
 - what the issue is and where it lives (file, screen or protocol layer),
 - steps or a proof of concept that reproduces it,

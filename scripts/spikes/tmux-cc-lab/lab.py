@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tmux -CC lab: deterministic experiments + fixture recorder for Moshpit's
+"""tmux -CC lab: deterministic experiments + fixture recorder for Hermit's
 SSH+tmux (-CC) renderer.
 
 Runs a PRIVATE tmux server (-L moshpit-lab-<pid>, -f lab.conf) — it never

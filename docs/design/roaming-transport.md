@@ -26,7 +26,7 @@
 | 许可 | **v0.8.0 起 Apache-2.0**(#1340 逐人授权迁移;**≤0.7.5 仍是 AGPL,fork 必须从 ≥0.8.0 拉**);无 CLA | `LICENSE`;CHANGELOG |
 | 生态位 | 29.9k★/4.7 个月,homebrew-core 月装 21.7k;第三方客户端一大排(collie ★430、herdr-remote ★258、ghosthub、whip、herdr-mobile-relay……)**全部以外部进程形态存在,没有一个解决了原生漫游**;`Mic92/herdr-eternal`(QUIC+WS 外置代理)是与本设计同形态的先行者(Disc #1923,无维护者回应) | GitHub;awesome-herdr |
 
-**唯一缺的:字节管道只有 SSH(TCP)一种形态**——换网即断、iOS 后台即死。这正是 Moshpit 的地盘。
+**唯一缺的:字节管道只有 SSH(TCP)一种形态**——换网即断、iOS 后台即死。这正是 Hermit 的地盘。
 
 ## 上游现实:实质关闭(证据链)
 
@@ -50,7 +50,7 @@
 仓库内 `docs/next/.../how-to-work.mdx:58`)。竞争读法:
 
 - herdr 对手机场景的官方叙事是「装任意 SSH 客户端连上去跑 herdr TUI」——moshi 占的是
-  **通用 SSH 客户端**推荐位。Moshpit 的原生 herdr 集成(帧通道原生渲染、agent 状态直入
+  **通用 SSH 客户端**推荐位。Hermit 的原生 herdr 集成(帧通道原生渲染、agent 状态直入
   灵动岛、零 hook 安装)与本设计的漫游传输,都是 moshi 叙事覆盖不到的层——**差异化在
   「原生 + 漫游」,不在「也能连上」**。
 - 该推荐位不是排他的("apps like"),靠产品事实可以进入/替换;渠道是 Show and tell
@@ -64,7 +64,7 @@
 2. 唯一值得提的微型补丁:`Command::new("ssh")` 硬编码(`src/remote/attach.rs:458`)加程序覆盖
    ——一行、非架构、解锁整个外置传输生态(Mic92 也在等)。注意它按 PATH 解析,
    **今天就可以用名为 `ssh` 的 shim 二进制绕过,无需等上游**。
-3. Show and tell 发 Moshpit 集成(collie/whip/herd-eternal 都在那)。
+3. Show and tell 发 Hermit 集成(collie/whip/herd-eternal 都在那)。
 4. **盯住 backend 重写**:server-owned protocol 落地时重估本设计。
 
 ## 三轨对比(v2.1 定稿)
@@ -79,7 +79,7 @@
 ## 薄桥设计(v2.1)
 
 ```
-Moshpit (iOS)                            远端主机
+Hermit (iOS)                            远端主机
 ┌──────────────────────┐                ┌────────────────────────────────────┐
 │ HerdrControlClient   │                │ bridge daemon(新,Rust,~1-2k 行)  │
 │  → JSON 直连+订阅    │ ←UDP 信封+通道→ │  通道类型A ↔ connect herdr.sock     │
@@ -137,7 +137,7 @@ Moshpit (iOS)                            远端主机
   stdin EOF 干净 `terminal.closed`,不需要 PTY/stty。
 - **`HerdrSocketClient` 落地**(`Services/Herdr/HerdrSocketClient.swift`):传输无关
   (feed + write 闭包,`TmuxControlClient.feed` 同款模式),请求关联、超时、空 id 全灭、
-  EOF 全灭、订阅编码;9 条单测吃真实抓包(`MoshpitTests/Fixtures/herdr-socket-*`),
+  EOF 全灭、订阅编码;9 条单测吃真实抓包(`HermitTests/Fixtures/herdr-socket-*`),
   全套 605 条单测通过。响应行原样交给 `HerdrSnapshot.decode`(socket 信封与 CLI 一致,
   `result.snapshot` 嵌套)。
 - **Citadel 0.12.1 复验:exec 通道仍无可写 stdin**(`ExecCommandStream` 只有 stdout/stderr;
@@ -159,7 +159,7 @@ Moshpit (iOS)                            远端主机
 剩余:真机验证(事件推送延迟 <100ms、灵动岛状态翻转即时、后台恢复路径)。
 
 **Phase 1 — 薄桥 daemon(漫游)**
-L0/L1/L2 落地;Moshpit 把 Phase 0 管道换成 UDP 通道。
+L0/L1/L2 落地;Hermit 把 Phase 0 管道换成 UDP 通道。
 验收:WiFi↔蜂窝切换打字不断;后台 5 分钟回前台 ≤1s;断网 30s 通道重开 + 重 attach 自动完成。
 
 **Phase 2 — sidecar 退役 + 灵动岛事件驱动**

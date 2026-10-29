@@ -17,7 +17,7 @@ app. No word-for-word rendering, no English rhetoric carried over, no
 sentence that lets the reader reconstruct the English. Apple's own UI
 vocabulary for that language wins when it exists (Settings, Lock Screen,
 Dynamic Island, Live Activity, Keychain, Face ID, Wi-Fi, cellular…).
-Product and tool names stay in English: Moshpit, tmux, herdr, mosh, SSH,
+Product and tool names stay in English: Hermit, tmux, herdr, mosh, SSH,
 Claude Code, Codex, git worktree, hooks, Whisper, Hugging Face, PATH.
 Format specifiers must match the English (positions may be reordered with
 `%1$@`). Placeholders such as `%@` and `%lld` are filled at runtime — leave a

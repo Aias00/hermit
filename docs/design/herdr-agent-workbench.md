@@ -7,7 +7,7 @@
 
 ## 问题
 
-herdr 接进来之后,Moshpit 在它上面**能做的事**已经不少:原生单窗格渲染、切换、增删、agent 状态进灵动岛。但**界面问的还是 tmux 的问题**:
+herdr 接进来之后,Hermit 在它上面**能做的事**已经不少:原生单窗格渲染、切换、增删、agent 状态进灵动岛。但**界面问的还是 tmux 的问题**:
 
 > 哪个 session?哪个 window?哪个 pane?
 
@@ -21,7 +21,7 @@ L1 已经把词和键位按多路复用器分流了(workspace/tab、`⌃ b w`/`�
 
 ## 为什么 herdr 才让这件事成立
 
-tmux 里"哪个 agent 在等我"是**推断**出来的:用户得先装 Moshpit 的私有 hook,hook 往 `@moshpit_*` tmux option 里写状态,我们再 `list-panes` 刮出来。没装 hook 的窗格只能靠输出启发式猜。**数据不齐的 agent 界面比没有更糟** —— 它会漏掉一半 agent,而用户不知道漏了。
+tmux 里"哪个 agent 在等我"是**推断**出来的:用户得先装 Hermit 的私有 hook,hook 往 `@moshpit_*` tmux option 里写状态,我们再 `list-panes` 刮出来。没装 hook 的窗格只能靠输出启发式猜。**数据不齐的 agent 界面比没有更糟** —— 它会漏掉一半 agent,而用户不知道漏了。
 
 herdr 里这是**查询**:`agent_status` 是协议字段,自动从 pane 上卷到 tab 和 workspace,`agent list` 按 agent 名寻址。装 `herdr integration install claude` 会更权威(agent 主动上报,而非屏幕匹配),但**不装也有值**。
 
@@ -246,7 +246,7 @@ poll 间顺序稳定,以及 `AgentSignal` 的映射/排序/聚合/配色);
    聚焦不到(争抢退避、poller 死了)返回 false,通知层回落到"打开 App"。
 2. **状态语义色跟着主题走,且两个表面已经分叉。** `AgentSignal.working` 用的是
    `Ink.accent`(用户可自定义),灵动岛却硬编码 teal —— 同一个 working,锁屏青色、App 内随主题。
-   收进 MoshpitKit 的 **`Island/AgentPalette.swift`**(App 和 island 都链接这个 package),
+   收进 HermitKit 的 **`Island/AgentPalette.swift`**(App 和 island 都链接这个 package),
    三个状态色固定;测试钉死 `AgentPalette.attention == Ink.warn`、全部 ≠ `Ink.accent`。
 3. **L2 · agent 面包屑。** 第三段在窗格有 hook 时显示 **agent 名 + 状态点**,needs-you 整胶囊转琥珀;
    宽度问题(原型页草图发现的"三段放不下 402pt")用 **session 段收成 icon-only** 解——仍可点,
@@ -282,7 +282,7 @@ poll 间顺序稳定,以及 `AgentSignal` 的映射/排序/聚合/配色);
 现在拍不到 blocked+working 就拒绝出片)、Tabs sheet 先关再开 Workspaces sheet(22 号镜头
 曾经拍了个寂寞)、新增 43 号镜头(agent 面包屑)。
 
-**W5 · herdr 词汇/行为泄漏审计**(2026-08-08)——派专门代理全量扫 `Moshpit/`,
+**W5 · herdr 词汇/行为泄漏审计**(2026-08-08)——派专门代理全量扫 `Hermit/`,
 找出 herdr 连接下仍然显示 tmux 措辞、tmux 键位、或 tmux 形状行为的地方。
 **结论:泄漏比预期严重,5 处是功能性 bug 而非用词问题。** 已修:
 

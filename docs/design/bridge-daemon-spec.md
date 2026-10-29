@@ -4,7 +4,7 @@
 上游文档:`roaming-transport.md`(v2.1,架构决策:为什么是薄桥、为什么长在 herdr 上、三轨对比)。
 本文是它的下一层:字节格式、状态机、实现与测试计划。实现前本文先行评审。
 
-> 命名:**roadie**(巡演搬运工——给乐队搬设备的人,贴 Moshpit 的演出隐喻,
+> 命名:**roadie**(巡演搬运工——给乐队搬设备的人,沿用上游 Moshpit 的演出隐喻,
 > 短、可 brew、不含 "Mosh" 商标)。备选:`stagehand`(舞台工作人员,略长)、
 > `pitcrew`。最终定名待批准,本文以 roadie 行文;协议常量不含名字,改名零成本。
 
@@ -142,7 +142,7 @@ roadie/
 | M | 内容 | 验收 |
 |---|---|---|
 | M0 | envelope+channel+null 端点,loopback | mangler 10% 丢包下 1MB 回声零差错;channel property 测试绿 |
-| M1 | herdr-api 端点 + Swift 客户端最小闭环 | Moshpit(模拟器)经 roadie 拿 snapshot + 订阅推送;方向键走 send_keys <10ms |
+| M1 | herdr-api 端点 + Swift 客户端最小闭环 | Hermit(模拟器)经 roadie 拿 snapshot + 订阅推送;方向键走 send_keys <10ms |
 | M2 | 漫游 + 保活 + TCP 兜底 | mangler 中途换源端口/地址,通道不断;UDP 全丢 3s 内落 TCP |
 | M3 | herdr-attach/observe 端点,SessionHub 切换 | mosh+herdr 与 SSH+herdr 统一走桥;sidecar、python 泵、raw-attach 循环全部退役;真机 WiFi↔蜂窝打字不断 |
 | M4 | 自动分发 + Install Assist + 降级矩阵 | 干净主机一次确认即用;拔掉 roadie 二进制,连接自动回落今天的形态且有横幅 |

@@ -10,7 +10,7 @@ SSH+tmux 模式下 App 是一个 **tmux 控制客户端（`-CC`）**：`TmuxSess
 
 ## 三层测试
 
-### 1. 单元回放（CI 常驻）— `Tests/MoshpitTests/Services/TmuxSessionControllerTests.swift`
+### 1. 单元回放（CI 常驻）— `Tests/HermitTests/Services/TmuxSessionControllerTests.swift`
 
 `MockTmuxTransport` 把 -CC 协议行直接推进控制器，逐格断言 SwiftTerm 网格。
 关键场景（2026-08-19 新增）：

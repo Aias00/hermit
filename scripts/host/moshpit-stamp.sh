@@ -3,12 +3,12 @@
 #
 # Installed on the DEV HOST at ~/.moshpit/moshpit-stamp.sh. Each agent's config
 # registers it against four events; every fire stamps the CURRENT tmux pane with
-# @moshpit_state / @moshpit_agent / @moshpit_since, so Moshpit reads precise
+# @moshpit_state / @moshpit_agent / @moshpit_since, so Hermit reads precise
 # agent status over the tmux control channel instead of guessing from output.
 #
 # It also hands `attention` and `done` — and only those two — to
 # moshpit-push.sh, detached and silenced, so a paired host can wake a phone that
-# is not running Moshpit. `working` fires on every tool call and is deliberately
+# is not running Hermit. `working` fires on every tool call and is deliberately
 # never pushed.
 #
 # Two rules this script must never break, because it runs INSIDE an agent's turn:
@@ -23,7 +23,7 @@
 # card can say what finished. Whenever no title is derivable it is cleared, so a
 # stale one never lingers.
 #
-# Canonical copy. Moshpit/Services/Install/HostScripts.swift carries a
+# Canonical copy. Hermit/Services/Install/HostScripts.swift carries a
 # byte-identical literal (the app cannot read a repo file on a phone);
 # scripts/gen/gen-host-scripts.py regenerates it and a test fails if they drift.
 [ -n "$TMUX" ] || exit 0

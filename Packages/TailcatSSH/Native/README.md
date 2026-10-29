@@ -86,6 +86,6 @@ The upstream BSD-3-Clause license is in `Licenses/tailcat.LICENSE`. The build
 generates `DEPENDENCIES.json` and `THIRD-PARTY-NOTICES.txt` from dependencies
 selected by all three target builds, including the Go runtime. Include these
 notices when distributing the binary. The script also copies the combined notice
-to `Moshpit/Resources/ThirdParty/tailcat-licenses.txt` for the app bundle.
+to `Hermit/Resources/ThirdParty/tailcat-licenses.txt` for the app bundle.
 Regenerate them when changing the pin,
 toolchain, feature tags, or dependency patches.

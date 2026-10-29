@@ -22,10 +22,10 @@
 
 ## 为什么值得做
 
-herdr 是专门给 CLI coding agent 写的多路复用器 —— 和 Moshpit 的用户是同一批人。
-它不是"tmux 的另一种皮肤",而是把 Moshpit 现在自己扛的三件苦活做进了服务端:
+herdr 是专门给 CLI coding agent 写的多路复用器 —— 和 Hermit 的用户是同一批人。
+它不是"tmux 的另一种皮肤",而是把 Hermit 现在自己扛的三件苦活做进了服务端:
 
-| Moshpit 现状 | herdr 提供的 |
+| Hermit 现状 | herdr 提供的 |
 |---|---|
 | Agent 状态要用户在主机上装 hooks,往 tmux option 写 `@moshpit_*`(`IslandHooksInstallView`) | `agent_status` 是协议一等字段(`idle/working/blocked/done/unknown`),pane→tab→workspace 自动上卷,**零安装** |
 | 滚动要靠 `#{mouse_any_flag}` 自己判"这个 pane 是鼠标应用还是 shell",分别发滚轮序列或 copy-mode(`project_scroll_architecture`) | `terminal.scroll` 是协议动作,服务端 `runtime.wheel_routing()` 自己决定转成 mouse report 还是走宿主 scrollback(`src/server/headless.rs:340`) |
@@ -44,9 +44,9 @@ herdr 有两层"会话":
 * **命名 session** —— 独立的服务器进程 + 独立 socket(`~/.config/herdr/sessions/<name>/herdr.sock`,默认 `~/.config/herdr/herdr.sock`),靠 `--session <name>` / `HERDR_SESSION` 选择。更像"另开一个 tmux server",不是 tmux session。
 * **workspace / tab / pane** —— 服务器内部的三层树。
 
-对到 Moshpit 现有模型:
+对到 Hermit 现有模型:
 
-| Moshpit(`TmuxTypes.swift`) | tmux | herdr | 说明 |
+| Hermit(`TmuxTypes.swift`) | tmux | herdr | 说明 |
 |---|---|---|---|
 | `SessionInfo` | session `$0` | **workspace** `w1` | 带 `label` / `agent_status` / `pane_count` / `tab_count` / `worktree` |
 | `WindowInfo` | window `@0` | **tab** `t1` | 带 `label` / `number` / `agent_status` / `pane_count`;没有 tmux 那种 layout 字符串,布局单独走 `layout.export` |
@@ -86,7 +86,7 @@ protocol / version
 
 写操作全部是独立 CLI 调用(每次一个 exec):
 
-| Moshpit 动作 | herdr 命令 |
+| Hermit 动作 | herdr 命令 |
 |---|---|
 | 新建 session | `herdr workspace create [--label X] [--cwd P]` |
 | 重命名 / 关闭 session | `herdr workspace rename <id> <name>` / `workspace close <id>` |
@@ -128,7 +128,7 @@ herdr terminal session control <target> --cols 52 --rows 30 [--takeover]
 三条必须知道的语义:
 
 1. **resize 只改这一个 pane**(`src/server/headless.rs:2972-2993`)。TerminalAttach 模式的客户端 resize 直接打到 `runtime.resize(rows, cols, …)`,不走 `resize_shared_runtime_to_effective_size()`。手机的 52×30 不会把用户笔记本上的布局压扁 —— tmux 那套 window pin 的活儿全部消失。
-2. **附着是独占的**。`terminal_attach_owners` 里已有 owner 且不是自己时,不带 `--takeover` 会被直接拒(`src/server/headless.rs:2616`)。Moshpit 断线重连必然撞上自己的旧连接,所以**默认带 `--takeover`**;但这会不会踢掉用户笔记本上那条直连,要实机验证(普通 TUI 客户端不是 TerminalAttach 模式,理论上不冲突)。
+2. **附着是独占的**。`terminal_attach_owners` 里已有 owner 且不是自己时,不带 `--takeover` 会被直接拒(`src/server/headless.rs:2616`)。Hermit 断线重连必然撞上自己的旧连接,所以**默认带 `--takeover`**;但这会不会踢掉用户笔记本上那条直连,要实机验证(普通 TUI 客户端不是 TerminalAttach 模式,理论上不冲突)。
 3. `terminal session observe` 是只读版:同样吐帧,但**不 resize**、不接受输入。可以拿来做"窗格预览"(sheet 里的缩略),不抢 owner。
 
 ### 2.3 和 tmux `-CC` 的对照
@@ -146,7 +146,7 @@ herdr terminal session control <target> --cols 52 --rows 30 [--takeover]
 
 ---
 
-## 3. 传输:怎么接进 Moshpit
+## 3. 传输:怎么接进 Hermit
 
 ### SSH(完整能力)
 
@@ -164,7 +164,7 @@ herdr terminal session control <target> --cols 52 --rows 30 [--takeover]
 
 mosh 传的是渲染完的屏幕差分,承载不了行分帧的控制协议 —— 这一点 tmux `-CC` 上已经踩过并写进了 `TmuxTransport.swift` 的注释,herdr 同理。所以 mosh 模式下:
 
-* 终端里跑 herdr 自己的 TUI(`herdr`),Moshpit 只当渲染器,和现在 mosh+tmux 完全同构;
+* 终端里跑 herdr 自己的 TUI(`herdr`),Hermit 只当渲染器,和现在 mosh+tmux 完全同构;
 * 控制面另开一条轻量 SSH 连接跑 `api snapshot` 轮询,喂原生 sheet(和现在的 `moshControl` sidecar 同构)。
 
 前缀键 herdr 默认也是 `ctrl+b`,现有的 prefix 处理和快捷键面板基本能复用。
@@ -271,7 +271,7 @@ ADVANCED
 
 验收结果:
 
-* 单测 389 全过,新增 25 条 —— 解码器吃**真实 0.7.3 抓包**(`Tests/MoshpitTests/Fixtures/herdr-snapshot.json`)、版本容差、shell 注入引号、轮询失败保留旧树。
+* 单测 389 全过,新增 25 条 —— 解码器吃**真实 0.7.3 抓包**(`Tests/HermitTests/Fixtures/herdr-snapshot.json`)、版本容差、shell 注入引号、轮询失败保留旧树。
 * 实机双向验证:App 里点 Sessions sheet 的 workspace 行 → 服务端 `focused_workspace_id` 从 w1 变 w2;反过来在终端 `herdr workspace rename` → App 面包屑在一个轮询周期内跟上。
 * `scripts/verify/verify-herdr-launch.sh` 现在同时断言"服务端活着"和"App 读到了树"。
 
@@ -451,11 +451,11 @@ pane 切过去 **一行 `%output` 都没有**,capture 回包只要个位数毫�
 ## 6. 未决 / 需实机验证
 
 1. ~~**Citadel 能不能在 exec channel 上写 stdin**~~ —— 已验:**不能**,公开 API 里没有。走方案 B(PTY + `stty raw -echo`),见 Phase 2。
-2. ~~**`--takeover` 会不会踢掉别的客户端**~~ —— **会,而且咬了一次(2026-08-07 修复)**。两个 Moshpit 连同一台主机时,后连的那个带 `--takeover` 把先连的帧通道**直接踢掉**,被踢的一方 `terminal.closed` → 目标清空 → 而 retarget 只在"焦点变化"时触发,焦点根本没变,于是**永远黑屏不恢复**。
+2. ~~**`--takeover` 会不会踢掉别的客户端**~~ —— **会,而且咬了一次(2026-08-07 修复)**。两个 Hermit 连同一台主机时,后连的那个带 `--takeover` 把先连的帧通道**直接踢掉**,被踢的一方 `terminal.closed` → 目标清空 → 而 retarget 只在"焦点变化"时触发,焦点根本没变,于是**永远黑屏不恢复**。
    修法:控制面每次轮询都重报当前焦点窗格(不再只在变化时报),retarget 里的相等判断让重复调用零成本,被踢后 ≤2s 自动重连。实测:小偷抢走 → 1 秒后 App 抢回来 → 打字正常。
    代价是两个直连客户端会**互相抢**(各自 2s 重连一次),这是 herdr 独占式直连的固有行为,不是能在客户端消掉的。TUI 客户端不占 `terminal_attach_owners`,所以"笔记本开 herdr TUI + 手机连同一台"仍然安全 —— 这一条还是没验到。
 3. **带宽/帧率**:增量 ANSI 帧走 SSH,`claude --dangerously-skip-permissions` 那种狂刷输出的场景,和 tmux `-CC` 比是多是少,**还没量**。逐格定位的重绘可能比 tmux 的 `%output` 更费字节。
-4. ~~**`herdr` 会自动建 workspace**~~ —— 更正:那是**从 `~/.config/herdr/session.json` 恢复**,不是新建。真正干净的 `herdr server` 起来是**零 workspace**。所以冷主机引导必须"起服务器 + 建 workspace"两步(`bootstrapServer`),验证脚本的前置也踩过同一个坑。原始记录如下:Moshpit 现在的原则是"绝不替用户创建会话"(见 `attachMoshTmux` 注释)。Phase 0 接受了这个差异(终端里就是 herdr 自己的 UI,用户看到的和自己敲 `herdr` 一模一样,`HerdrLaunch` 的注释记了这一点);Phase 1 有了控制面之后,应改成先 `api snapshot` 探测、没有就显示空状态让用户显式点"新建",与 tmux 对齐。
+4. ~~**`herdr` 会自动建 workspace**~~ —— 更正:那是**从 `~/.config/herdr/session.json` 恢复**,不是新建。真正干净的 `herdr server` 起来是**零 workspace**。所以冷主机引导必须"起服务器 + 建 workspace"两步(`bootstrapServer`),验证脚本的前置也踩过同一个坑。原始记录如下:Hermit 现在的原则是"绝不替用户创建会话"(见 `attachMoshTmux` 注释)。Phase 0 接受了这个差异(终端里就是 herdr 自己的 UI,用户看到的和自己敲 `herdr` 一模一样,`HerdrLaunch` 的注释记了这一点);Phase 1 有了控制面之后,应改成先 `api snapshot` 探测、没有就显示空状态让用户显式点"新建",与 tmux 对齐。
 5. **协议漂移** —— 已证实(见开头的版本警告)。解码器按"字段缺失即降级"写,并在 `protocol` 超出已知范围时挂横幅,而不是崩。另外别忘了响应是**信封**:`result.snapshot`,不是裸对象。
 6. **没有全量 scrollback API**:`pane.read` 的 source 只有 `visible / recent / recent_unwrapped / detection`,没有"把整个回滚缓冲导出来"。所以 herdr 模式下的历史浏览必须走 `terminal.scroll` 的服务端翻页,现有 `TerminalScrollback` 那条本地路径不适用。
-7. **命名 session** 暂不进 UI。如果用户在主机上用 `--session` 分了多个服务器,Moshpit 第一版只看得见默认那个 —— 要在设置里写清楚。
+7. **命名 session** 暂不进 UI。如果用户在主机上用 `--session` 分了多个服务器,Hermit 第一版只看得见默认那个 —— 要在设置里写清楚。

@@ -25,7 +25,7 @@ env TEST_RUNNER_MOSHPIT_TMUX_LAB_PORT="$DATA_PORT" \
     TEST_RUNNER_MOSHPIT_TMUX_LAB_CTL_PORT="$CTL_PORT" \
     TEST_RUNNER_MOSHPIT_CC_TAP="$TAP_DIR" \
 xcodebuild test \
-  -project Moshpit.xcodeproj -scheme Moshpit \
+  -project Hermit.xcodeproj -scheme Hermit \
   -destination "id=$UDID" \
-  -only-testing:MoshpitTests/TmuxLabE2ETests \
+  -only-testing:HermitTests/TmuxLabE2ETests \
   2>&1 | grep -E "Test Suite|Test Case|passed|failed|error:|SKIPPED|diverged" || true

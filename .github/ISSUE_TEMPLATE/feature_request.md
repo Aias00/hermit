@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea or improvement for Moshpit
+about: Suggest an idea or improvement for Hermit
 title: "[Feature] "
 labels: enhancement
 assignees: ''
@@ -8,7 +8,7 @@ assignees: ''
 
 ## Problem
 
-What are you trying to do that Moshpit makes hard or impossible today? Describe
+What are you trying to do that Hermit makes hard or impossible today? Describe
 the situation, not just the solution.
 
 ## Proposed solution

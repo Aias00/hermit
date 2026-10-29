@@ -15,7 +15,7 @@ handoff. It never imports credentials or replaces the App's authentication.
 No project/test-plan defaults or production settings are changed by this script.
 
 Usage:
-  python3 prepare_live_ui_run.py --input /path/Moshpit.xctestrun --mode smoke
+  python3 prepare_live_ui_run.py --input /path/Hermit.xctestrun --mode smoke
   xcodebuild test-without-building -xctestrun <printed path> -destination ... \
       -collect-test-diagnostics never -parallel-testing-enabled NO
 
@@ -107,7 +107,7 @@ def main():
         for configuration in result["TestConfigurations"]:
             targets = []
             for target in configuration.get("TestTargets", []):
-                if target.get("ProductModuleName") == "MoshpitUITests":
+                if target.get("ProductModuleName") == "HermitUITests":
                     targets.append(configure_target(target, source, args.mode, metadata))
                     found = True
             if targets:
@@ -117,11 +117,11 @@ def main():
     else:
         result = {key: value for key, value in result.items() if key.startswith("__")}
         for name, target in data.items():
-            if isinstance(target, dict) and (name == "MoshpitUITests" or target.get("ProductModuleName") == "MoshpitUITests"):
+            if isinstance(target, dict) and (name == "HermitUITests" or target.get("ProductModuleName") == "HermitUITests"):
                 result[name] = configure_target(target, source, args.mode, metadata)
                 found = True
     if not found:
-        parser.error("The input has no MoshpitUITests target")
+        parser.error("The input has no HermitUITests target")
     output = args.output.expanduser().resolve() if args.output else (
         Path(tempfile.mkdtemp(prefix="moshpit-access-ui-")).resolve() / (args.mode + ".xctestrun"))
     if output == source or output.exists():

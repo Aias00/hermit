@@ -16,7 +16,7 @@
 #                — tmux's OWN cell model, the ground truth SwiftTerm must match
 #   meta.json    grid, phase→pane map, file list
 #
-# Tests/MoshpitTests/Services/MoshSwitchReplayTests.swift replays the .bin files
+# Tests/HermitTests/Services/MoshSwitchReplayTests.swift replays the .bin files
 # into a headless SwiftTerm `Terminal` and diffs every cell against the
 # truth. Divergence = the bug, and the mismatching row tells you which of the
 # content generator's tagged cases seeded it.
@@ -55,11 +55,11 @@ echo "== 1/6 compile the app's SSP client into a capture CLI =="
 swiftc -O -parse-as-library -o "$BIN" \
   "$REPO_ROOT/scripts/capture/capture_mosh_switch_bytes.swift" \
   "$REPO_ROOT/scripts/spikes/spike_mosh_shims.swift" \
-  "$REPO_ROOT/Moshpit/Services/Mosh/MoshTransport.swift" \
-  "$REPO_ROOT/Moshpit/Services/Mosh/MoshWire.swift" \
-  "$REPO_ROOT/Moshpit/Services/Mosh/MoshCrypto.swift" \
-  "$REPO_ROOT/Moshpit/Services/Mosh/MoshCompression.swift" \
-  "$REPO_ROOT/Moshpit/Services/Mosh/OCB3.swift" \
+  "$REPO_ROOT/Hermit/Services/Mosh/MoshTransport.swift" \
+  "$REPO_ROOT/Hermit/Services/Mosh/MoshWire.swift" \
+  "$REPO_ROOT/Hermit/Services/Mosh/MoshCrypto.swift" \
+  "$REPO_ROOT/Hermit/Services/Mosh/MoshCompression.swift" \
+  "$REPO_ROOT/Hermit/Services/Mosh/OCB3.swift" \
   -framework Network
 
 echo "== 2/6 generate the two panes' content (${COLS} cols) =="

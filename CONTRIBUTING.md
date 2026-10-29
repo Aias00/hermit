@@ -1,6 +1,6 @@
-# Contributing to Moshpit
+# Contributing to Hermit
 
-Thanks for your interest in contributing. Moshpit is an iOS SSH / Mosh / tmux
+Thanks for your interest in contributing. Hermit is an iOS SSH / Mosh / tmux
 terminal client built with SwiftUI, targeting iOS 18. This guide covers the
 project's workflow and conventions so your change lands cleanly.
 
@@ -8,7 +8,7 @@ By participating you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## The xcodegen-first workflow
 
-**The `Moshpit.xcodeproj` is generated. Never hand-edit it.** `project.yml` is
+**The `Hermit.xcodeproj` is generated. Never hand-edit it.** `project.yml` is
 the single source of truth for targets, build settings, Info.plist keys,
 entitlements, and Swift Package dependencies. The `.xcodeproj` is regenerated
 from it by [XcodeGen](https://github.com/yonaskolb/XcodeGen) and any manual
@@ -23,14 +23,17 @@ setting, adding a dependency, or editing an Info.plist value:
 3. Build and commit — commit `project.yml`, not out-of-band `.xcodeproj` edits.
 
 New source files placed under a path already listed in `project.yml` (e.g.
-`Moshpit/`) are picked up automatically on the next `xcodegen generate` — no
+`Hermit/`) are picked up automatically on the next `xcodegen generate` — no
 project.yml edit needed for those.
 
 Code that an extension needs as well as the app (the widget, the notification
-service, the share sheet) goes in `Packages/MoshpitKit`, the local Swift
+service, the share sheet) goes in `Packages/HermitKit`, the local Swift
 package every target links, and is `public` there. Do not list an app file
 into an extension target by path; the one exception, `AgentCycleIntent`,
-explains itself in its header.
+explains itself in its header. The package/product is named `HermitKit`, but its
+Swift module remains `MoshpitKit`; the app module likewise remains `Moshpit`.
+Use those module names in imports while using `Hermit` for the app target and
+scheme. These stable module identities preserve compatibility across the rename.
 
 ### One-time setup
 
@@ -52,23 +55,23 @@ live in `Packages/TailcatSSH/Native/`. CI performs this step automatically.
 xcodegen generate
 
 # Build for the simulator
-xcodebuild -project Moshpit.xcodeproj -scheme Moshpit \
+xcodebuild -project Hermit.xcodeproj -scheme Hermit \
   -sdk iphonesimulator \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \
   DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= CODE_SIGNING_REQUIRED=YES build
 
 # Or open in Xcode and Cmd+R
-open Moshpit.xcodeproj
+open Hermit.xcodeproj
 ```
 
 ### Run the tests
 
-The test suite is the Moshpit scheme's `MoshpitTests` (unit) and `MoshpitUITests`
+The test suite is the Hermit scheme's `HermitTests` (unit) and `HermitUITests`
 targets. Run them locally before opening a PR:
 
 ```bash
-xcodebuild test -project Moshpit.xcodeproj -scheme Moshpit \
+xcodebuild test -project Hermit.xcodeproj -scheme Hermit \
   -sdk iphonesimulator \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \
@@ -152,14 +155,14 @@ The hard external boundaries — the SSH client, the keychain, and the tmux
 control transport — are each fronted by a narrow protocol with a
 mock/in-memory implementation for tests:
 
-- **SSH** — `SSHClientProvider` (`Moshpit/Services/SSHService.swift`), with a
-  mock exercised in `Tests/MoshpitTests/Services/SSHServiceMockTests.swift`.
-- **Keychain** — `KeychainBackend` (`Moshpit/Services/KeychainService.swift`),
+- **SSH** — `SSHClientProvider` (`Hermit/Services/SSHService.swift`), with a
+  mock exercised in `Tests/HermitTests/Services/SSHServiceMockTests.swift`.
+- **Keychain** — `KeychainBackend` (`Hermit/Services/KeychainService.swift`),
   with `InMemoryKeychainBackend` and `KeychainService.inMemory(...)` for tests,
   plus a file-vault backend for the simulator.
 - **tmux transport** — `TmuxTransport` / `TmuxControlling`
-  (`Moshpit/Services/Tmux/`), with `MockTmuxTransport`
-  (`Tests/MoshpitTests/Mocks/MockTmuxTransport.swift`).
+  (`Hermit/Services/Tmux/`), with `MockTmuxTransport`
+  (`Tests/HermitTests/Mocks/MockTmuxTransport.swift`).
 
 New code that crosses one of these boundaries should follow the same pattern:
 depend on the protocol, not the concrete type, and provide (or reuse) a test
@@ -203,12 +206,14 @@ fix much faster.
 
 ## License and provenance
 
-Moshpit is licensed under GPL-3.0-only (see [LICENSE](LICENSE)). By submitting a
+Hermit is licensed under GPL-3.0-only (see [LICENSE](LICENSE)). By submitting a
 pull request you agree that your contribution is licensed under the same terms.
 
-This public repository is published from the maintainer's development tree:
-`scripts/export-oss.sh` there produces exactly the files you see here — one
-commit per development commit, with the original author, date and message and
-a `Source-Commit` trailer naming its origin. The App Store release pipeline
-and store metadata, and the marketing site, are separate private repositories.
-Pull requests are merged into that tree and appear here on the next export.
+Hermit is maintained in [Aias00/hermit](https://github.com/Aias00/hermit) and
+is based on [Cluas/moshpit](https://github.com/Cluas/moshpit). Keep the original
+copyright, license and third-party notices when modifying inherited code.
+
+Some inherited documentation describes the upstream export and App Store
+release process. Those records explain Moshpit's provenance; they do not imply
+that Hermit is published through that maintainer's private repositories or
+App Store listing. Submit Hermit changes to this repository.

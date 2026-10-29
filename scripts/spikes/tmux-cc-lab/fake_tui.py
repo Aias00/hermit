@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mini Claude-Code-like TUI for the tmux -CC lab.
 
-Reproduces the rendering contract that matters for Moshpit's -CC renderer:
+Reproduces the rendering contract that matters for Hermit's -CC renderer:
   - alternate screen + SGR mouse (DECSET 1049, 1002, 1006) — like Claude Code
   - content lines between STATIC border columns; a real TUI's differ never
     repaints cells it believes unchanged, so the borders (and the shared

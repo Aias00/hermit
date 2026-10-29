@@ -16,7 +16,7 @@
 #     actually reach tmux and stamp a real pane?
 #
 # Every command template here is copied VERBATIM from
-# Moshpit/Services/Install/HostChannel.swift; the script prints the source lines
+# Hermit/Services/Install/HostChannel.swift; the script prints the source lines
 # it was copied from so the transcription can be checked by eye.
 #
 # Usage:  sh verify-host-install.sh [user@host]     (default: localhost)
@@ -49,7 +49,7 @@ printf "target %s   scratch HOME %s\n" "$TARGET" "$SCRATCH"
 chan() { $SSH "$TARGET" "HOME='$SCRATCH' sh -c '$(printf '%s' "$1" | sed "s/'/'\\\\''/g")'"; }
 
 say "the templates under test, as they appear in HostChannel.swift"
-sed -n '60,65p;83,86p;144,147p;163,166p' "$REPO/Moshpit/Services/Install/HostChannel.swift"
+sed -n '60,65p;83,86p;144,147p;163,166p' "$REPO/Hermit/Services/Install/HostChannel.swift"
 
 # ---------------------------------------------------------------- writeFile
 # HostCommands.writeFile(path:mode:base64:)
@@ -120,12 +120,12 @@ chan 'python3 -c "import json,os,sys; json.load(open(os.environ[\"HOME\"]+\"/.cl
   || fail "what landed is not valid JSON"
 ok "and it still parses as JSON on the host"
 
-say "backupOnce keeps exactly one pre-Moshpit copy"
+say "backupOnce keeps exactly one pre-Hermit copy"
 chan 'if [ -f "$HOME/.claude/settings.json" ] && [ ! -f "$HOME/.claude/settings.json.moshpit.orig" ]; then cp "$HOME/.claude/settings.json" "$HOME/.claude/settings.json.moshpit.orig"; fi'
 chan 'if [ -f "$HOME/.claude/settings.json" ] && [ ! -f "$HOME/.claude/settings.json.moshpit.orig" ]; then cp "$HOME/.claude/settings.json" "$HOME/.claude/settings.json.moshpit.orig"; fi'
 N=$(chan 'ls "$HOME"/.claude/settings.json.moshpit.orig* 2>/dev/null | wc -l' | tr -d ' ')
 [ "$N" = "1" ] || fail "expected exactly 1 .orig, found $N"
-ok "run twice, still one .orig — it means 'before Moshpit', not 'before this run'"
+ok "run twice, still one .orig — it means 'before Hermit', not 'before this run'"
 
 say "preflight, as one round trip"
 chan 'printf "home=%s\n" "$HOME"; printf "shell=%s\n" "${SHELL:-unknown}"; printf "uname=%s\n" "$(uname -s 2>/dev/null || echo unknown)"; for t in openssl curl jq tmux python3 base64; do if command -v "$t" >/dev/null 2>&1; then printf "%s=yes\n" "$t"; else printf "%s=no\n" "$t"; fi; done' | sed 's/^/   /'

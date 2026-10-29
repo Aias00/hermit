@@ -66,7 +66,7 @@ enum PrivateFile {
         return Data("""
         <!doctype html><html lang="en"><meta charset="utf-8">
         <meta name="referrer" content="no-referrer">
-        <title>Moshpit Cloudflare compatibility probe</title>
+        <title>Hermit Cloudflare compatibility probe</title>
         <h1>Cloudflare Access login</h1>
         <p>Keep the terminal probe running. This link belongs to this one login attempt.</p>
         <p><a rel="noreferrer" href="\(escaped)">Continue to your configured Cloudflare Access application</a></p>

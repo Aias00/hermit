@@ -3,16 +3,16 @@
 # free Apple ID. No Team ID needed here — the sideloader handles signing
 # and (with AltServer running) auto-refreshes before the 7-day expiry.
 #
-# Output: build/Moshpit.ipa  → drag into AltStore, or `altserver` install.
+# Output: build/Hermit.ipa  → drag into AltStore, or `altserver` install.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 CONFIG="${1:-Debug}"
 DERIVED="build/ipa"
-APP="$DERIVED/Build/Products/$CONFIG-iphoneos/Moshpit.app"
+APP="$DERIVED/Build/Products/$CONFIG-iphoneos/Hermit.app"
 
 echo "▶ Building $CONFIG (device, unsigned)…"
-xcodebuild -project Moshpit.xcodeproj -scheme Moshpit -configuration "$CONFIG" \
+xcodebuild -project Hermit.xcodeproj -scheme Hermit -configuration "$CONFIG" \
   -sdk iphoneos -derivedDataPath "$DERIVED" \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build >/dev/null
 
@@ -43,11 +43,11 @@ done
 echo "▶ Stamped build $BUILDNUM ($STAMP)"
 
 echo "▶ Packaging .ipa…"
-rm -rf build/Payload build/Moshpit.ipa
+rm -rf build/Payload build/Hermit.ipa
 mkdir -p build/Payload
 cp -R "$APP" build/Payload/
-( cd build && zip -qry Moshpit.ipa Payload )
+( cd build && zip -qry Hermit.ipa Payload )
 rm -rf build/Payload
 
-echo "✓ build/Moshpit.ipa  ($(du -h build/Moshpit.ipa | cut -f1))"
-echo "  Install via AltStore (drag in) or: altserver -u <UDID> build/Moshpit.ipa"
+echo "✓ build/Hermit.ipa  ($(du -h build/Hermit.ipa | cut -f1))"
+echo "  Install via AltStore (drag in) or: altserver -u <UDID> build/Hermit.ipa"

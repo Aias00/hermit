@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate Moshpit/Services/Install/HostScripts.swift from the canonical shell files.
+"""Regenerate Hermit/Services/Install/HostScripts.swift from the canonical shell files.
 
 Two copies of each host script exist because the app cannot read a repo file at
 runtime on a phone: the file under scripts/host/ is canonical (and is what the shell
@@ -12,7 +12,7 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-OUT = ROOT / "Moshpit" / "Services" / "Install" / "HostScripts.swift"
+OUT = ROOT / "Hermit" / "Services" / "Install" / "HostScripts.swift"
 
 SCRIPTS = [
     ("stamp", "scripts/host/moshpit-stamp.sh",
@@ -23,7 +23,7 @@ SCRIPTS = [
 
 HEADER = '''import Foundation
 
-/// The shell Moshpit installs on a dev host, verbatim.
+/// The shell Hermit installs on a dev host, verbatim.
 ///
 /// Each literal is byte-for-byte its file under `scripts/host/`, which is the
 /// canonical copy and the one the shell and Go tests actually execute. Two

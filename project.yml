@@ -1,4 +1,4 @@
-name: Moshpit
+name: Hermit
 options:
   bundleIdPrefix: com.cluas
   developmentLanguage: en
@@ -49,13 +49,13 @@ packages:
   # snapshot, the share queue, the sealed-push envelope and pairing store).
   # A local package rather than files listed into four targets by path, so
   # the app/extension boundary is a module boundary the compiler checks.
-  MoshpitKit:
-    path: Packages/MoshpitKit
+  HermitKit:
+    path: Packages/HermitKit
   SwiftTerm:
     # Forked from migueldeicaza/SwiftTerm at v1.13.0 (see the fork's commit
     # messages): (1)+(2) two OSC-8 hyperlink underline-overshoot fixes in
     # oscHyperlink's close handler, (3) a new public API (viewportLineText /
-    # tagPlainTextLink) letting Moshpit linkify plain http(s) URLs it detects
+    # tagPlainTextLink) letting Hermit linkify plain http(s) URLs it detects
     # itself, reusing the same cell.hasPayload path a real OSC-8 hyperlink
     # uses — SwiftTerm's own built-in implicit-link regex is too permissive
     # (matches bare file paths) to turn on globally, (4) singleTap checks for
@@ -79,7 +79,7 @@ packages:
     # nothing to the terminal, instead of nuking the whole composition in
     # one shot with real (wrong) backspace keypresses — fixes hold-to-repeat
     # delete under the Pinyin keyboard, (8) a new public `isRowWrapped(_:)`
-    # on Terminal exposing the emulator's own soft-wrap bit, so Moshpit can
+    # on Terminal exposing the emulator's own soft-wrap bit, so Hermit can
     # join a URL that wrapped across rows exactly instead of guessing from
     # row text width (which broke, silently truncating the opened link,
     # whenever a CJK/emoji character earlier on the row threw off a
@@ -114,7 +114,7 @@ packages:
     # and dropped; whether the remote gets the clipboard is the host's call
     # (groundwork for clipboard-image paste over SSH, Claude Code #42712) —
     # and (15) `focusOnTap`: a host flag (default true) that stops a tap on
-    # an unfocused terminal from grabbing first responder at all. Moshpit
+    # an unfocused terminal from grabbing first responder at all. Hermit
     # sets it false: on iOS focus is the keyboard, reading is a first-class
     # activity, and the keyboard has its own toggle on the shortcut bar —
     # and (16) selection you can use unfocused: the handle-grab window is
@@ -170,13 +170,13 @@ packages:
     from: "1.34.0"
 
 targets:
-  Moshpit:
+  Hermit:
     type: application
     platform: iOS
     sources:
-      - path: Moshpit
+      - path: Hermit
     entitlements:
-      path: Moshpit/App/Moshpit.entitlements
+      path: Hermit/App/Hermit.entitlements
       properties:
         com.apple.developer.icloud-container-identifiers:
           - "$(MOSHPIT_ICLOUD_CONTAINER_ID)"
@@ -192,7 +192,7 @@ targets:
         #    repo's release flow archives development-signed then re-signs on export
         #    (scripts/release/release-archive.sh), so the shipped binary gets "production".
         #    Verify after an export, never assume:
-        #      codesign -d --entitlements - Moshpit.app | grep aps-environment
+        #      codesign -d --entitlements - Hermit.app | grep aps-environment
         #
         # 2. The Push Notifications capability is NOT available to a free Personal
         #    Team. A device build under docs/install-free-account.md fails to sign
@@ -228,11 +228,13 @@ targets:
         com.apple.developer.usernotifications.time-sensitive: true
     settings:
       base:
-        INFOPLIST_FILE: Moshpit/App/Info.plist
+        INFOPLIST_FILE: Hermit/App/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.cluas.moshpit
+        # Preserve the Swift module identity across the Hermit rebrand.
+        PRODUCT_MODULE_NAME: Moshpit
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Alternate icons are Icon Composer documents too
-        # (Moshpit/Resources/AlternateIcons, built by scripts/gen/generate-alternate-icons.mjs).
+        # (Hermit/Resources/AlternateIcons, built by scripts/gen/generate-alternate-icons.mjs).
         # Listing them here makes actool compile each as a Liquid Glass stack,
         # flatten its iOS 18/19 fallbacks, and write the CFBundleAlternateIcons
         # entries into Info.plist itself — the iPad sizes included, which the
@@ -255,7 +257,7 @@ targets:
         # target. Target settings win over the project-level ones above, so
         # fixing this at the project level alone silently achieves nothing.
         # Verify after `xcodegen generate` with:
-        #   grep -c 'iPhone Developer' Moshpit.xcodeproj/project.pbxproj   # 0
+        #   grep -c 'iPhone Developer' Hermit.xcodeproj/project.pbxproj   # 0
         #
         # Release is "Apple Development" ON PURPOSE, not a typo: with
         # automatic signing the ARCHIVE is development-signed and the
@@ -277,24 +279,24 @@ targets:
         product: CloudflareSSH
       - package: CloudflareSSH
         product: CloudflareAccess
-      - package: MoshpitKit
+      - package: HermitKit
       - package: SwiftTerm
       - package: Citadel
       - package: WhisperKit
         product: WhisperKit
       - package: NIOSOCKS
         product: NIOSOCKS
-      - target: MoshpitIsland
+      - target: HermitIsland
         embed: true
-      - target: MoshpitShare
+      - target: HermitShare
         embed: true
-      - target: MoshpitPush
+      - target: HermitPush
         embed: true
     info:
-      path: Moshpit/App/Info.plist
+      path: Hermit/App/Info.plist
       properties:
-        CFBundleName: Moshpit
-        CFBundleDisplayName: Moshpit
+        CFBundleName: Hermit
+        CFBundleDisplayName: Hermit
         NSBonjourServices:
           - _ssh._tcp
         UIAppFonts:
@@ -305,7 +307,7 @@ targets:
           - IBMPlexMono-Regular.ttf
           - Hack-Regular.ttf
           - AnonymousPro-Regular.ttf
-        # The primary icon is Moshpit/Resources/AppIcon.icon (Icon Composer, Liquid
+        # The primary icon is Hermit/Resources/AppIcon.icon (Icon Composer, Liquid
         # Glass); actool writes CFBundleIcons / CFBundleIcons~ipad for it and
         # for every alternate named in ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES.
         CFBundleIconName: AppIcon
@@ -355,35 +357,36 @@ targets:
         # below say "audio" rather than a blanket "nothing leaves the device".
         # Keep code and copy in lockstep if either ever changes.
         NSMicrophoneUsageDescription: "Voice input uses the microphone so you can dictate commands and prompts into your terminal. Your audio is transcribed on this device — by Apple's speech models or by a Whisper model you download — and is never uploaded anywhere."
-        NSSpeechRecognitionUsageDescription: "Dictation runs on-device speech recognition. Your voice and transcripts never leave this device — Moshpit does not use server-based recognition."
+        NSSpeechRecognitionUsageDescription: "Dictation runs on-device speech recognition. Your voice and transcripts never leave this device — Hermit does not use server-based recognition."
         # MUST live here, not just in Info.plist: XcodeGen regenerates that file
         # from this block, so a key added to the plist by hand silently vanishes
         # at the next `xcodegen generate`. Without this key iOS drops UDP to LAN
         # addresses on the floor, which presents as "SSH connects but mosh
         # black-screens" against a 192.168.x.x host.
-        NSLocalNetworkUsageDescription: "Moshpit connects to servers on your local network over SSH and mosh (UDP). Without this permission, connections to LAN hosts (e.g. 192.168.x.x) will fail."
+        NSLocalNetworkUsageDescription: "Hermit connects to servers on your local network over SSH and mosh (UDP). Without this permission, connections to LAN hosts (e.g. 192.168.x.x) will fail."
         # Camera is an attach-image SOURCE (photograph a whiteboard, hand it
         # to the agent) — the shot is processed like any picked image: scaled,
         # EXIF/GPS-stripped on device, uploaded only to YOUR server. Say so.
         NSCameraUsageDescription: "The camera lets you photograph something — a whiteboard, a sketch, a screen — and attach it to your terminal session. Photos are stripped of location data on this device and uploaded only to your own server."
         CFBundleURLTypes:
           - CFBundleURLSchemes:
+              - hermit
               - moshpit
             CFBundleURLName: com.cluas.moshpit
 
-  MoshpitIsland:
+  HermitIsland:
     type: app-extension
     platform: iOS
     sources:
-      - path: Extensions/MoshpitIsland
+      - path: Extensions/HermitIsland
       # The one file shared by path: an App Intent belongs to the bundle that
       # declares it, and the widget's Button needs the type while the app runs
       # its perform() — see the comment in the file.
-      - path: Moshpit/App/AgentCycleIntent.swift
+      - path: Hermit/App/AgentCycleIntent.swift
     dependencies:
-      - package: MoshpitKit
+      - package: HermitKit
     entitlements:
-      path: Extensions/MoshpitIsland/MoshpitIsland.entitlements
+      path: Extensions/HermitIsland/HermitIsland.entitlements
       properties:
         com.apple.security.application-groups:
           - group.com.cluas.moshpit
@@ -391,9 +394,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cluas.moshpit.island
     info:
-      path: Extensions/MoshpitIsland/Info.plist
+      path: Extensions/HermitIsland/Info.plist
       properties:
-        CFBundleDisplayName: Moshpit Island
+        CFBundleDisplayName: Hermit Island
         # Keep the extension's version in lockstep with the app — a mismatch is
         # an App Store rejection. Driven by the shared MARKETING_VERSION /
         # CURRENT_PROJECT_VERSION in settings.base, same as the app target.
@@ -402,16 +405,16 @@ targets:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
 
-  MoshpitShare:
+  HermitShare:
     type: app-extension
     platform: iOS
     sources:
-      - path: Extensions/MoshpitShare
+      - path: Extensions/HermitShare
     dependencies:
       # The App Group snapshot the target list reads and the queue the app drains.
-      - package: MoshpitKit
+      - package: HermitKit
     entitlements:
-      path: Extensions/MoshpitShare/MoshpitShare.entitlements
+      path: Extensions/HermitShare/HermitShare.entitlements
       properties:
         com.apple.security.application-groups:
           - group.com.cluas.moshpit
@@ -427,13 +430,14 @@ targets:
         # device/cert is added. Simulator builds ignore it; export re-signs
         # with a cloud-minted App Store profile as usual.
         CODE_SIGN_STYLE: Manual
+        # Existing profile name is a signing identifier, not the product brand.
         PROVISIONING_PROFILE_SPECIFIER: Moshpit Share Dev
         CODE_SIGN_IDENTITY: Apple Development
     info:
-      path: Extensions/MoshpitShare/Info.plist
+      path: Extensions/HermitShare/Info.plist
       properties:
-        CFBundleDisplayName: Moshpit
-        # Version lockstep with the app, same as MoshpitIsland — a mismatch
+        CFBundleDisplayName: Hermit
+        # Version lockstep with the app, same as HermitIsland — a mismatch
         # is an App Store rejection.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
@@ -448,18 +452,18 @@ targets:
   # text on screen. iOS runs this for any push carrying mutable-content: 1 —
   # including while the device is locked and the app is not running, which is the
   # entire reason the push path exists.
-  MoshpitPush:
+  HermitPush:
     type: app-extension
     platform: iOS
     sources:
-      - path: Extensions/MoshpitPush
+      - path: Extensions/HermitPush
     dependencies:
       # The envelope format, the pairing secrets, the rendering, the prefs mirror,
       # the diagnostics ring, the standing-attention set and the log facade: all
       # shared with the app so there is exactly one implementation of each.
-      - package: MoshpitKit
+      - package: HermitKit
     entitlements:
-      path: Extensions/MoshpitPush/MoshpitPush.entitlements
+      path: Extensions/HermitPush/HermitPush.entitlements
       properties:
         com.apple.security.application-groups:
           - group.com.cluas.moshpit
@@ -467,9 +471,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cluas.moshpit.push
     info:
-      path: Extensions/MoshpitPush/Info.plist
+      path: Extensions/HermitPush/Info.plist
       properties:
-        CFBundleDisplayName: Moshpit Push
+        CFBundleDisplayName: Hermit Push
         # Version lockstep with the app, same as the other two extensions — a
         # mismatch is an App Store rejection.
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -478,36 +482,36 @@ targets:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
           NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).NotificationService"
 
-  MoshpitUITests:
+  HermitUITests:
     type: bundle.ui-testing
     platform: iOS
     sources:
-      - path: Tests/MoshpitUITests
+      - path: Tests/HermitUITests
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cluas.moshpit.uitests
-        TEST_TARGET_NAME: Moshpit
+        TEST_TARGET_NAME: Hermit
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
-      - target: Moshpit
+      - target: Hermit
 
-  MoshpitTests:
+  HermitTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: Tests/MoshpitTests
+      - path: Tests/HermitTests
       # The notification service extension's entry point, so a test can drive
       # `didReceive` itself rather than only the rendering helper it calls. That
       # method is the closest thing to a real push this repo can exercise without
       # an APNs key and a physical phone.
-      - path: Extensions/MoshpitPush/NotificationService.swift
+      - path: Extensions/HermitPush/NotificationService.swift
       # The Live Activity's lock-screen layout, so a test can MEASURE it. iOS
       # clips this card at a fixed height and says nothing; the only signal is a
       # screenshot from a real phone with the top and bottom sliced off, which
       # is exactly how the overflow was found. Rendering it here turns that into
       # a number.
-      - path: Extensions/MoshpitIsland/MoshpitIslandWidget.swift
-      - path: Extensions/MoshpitIsland/ConnectionLiveActivityWidget.swift
+      - path: Extensions/HermitIsland/HermitIslandWidget.swift
+      - path: Extensions/HermitIsland/ConnectionLiveActivityWidget.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cluas.moshpit.tests
@@ -517,60 +521,60 @@ targets:
           # Lets a source file shared with an app EXTENSION know it is being
           # compiled into the test bundle instead, and reach the app module for
           # types that are its own module elsewhere — see
-          # Extensions/MoshpitPush/NotificationService.swift. DEBUG is restated because a
+          # Extensions/HermitPush/NotificationService.swift. DEBUG is restated because a
           # target-level value replaces the config default rather than adding to it.
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG MOSHPIT_TESTS"
     dependencies:
-      - target: Moshpit
+      - target: Hermit
 
 schemes:
   # Unit tests only, and the point is what it leaves OUT.
   #
-  # `-only-testing:MoshpitTests` filters what RUNS, not what gets built and
-  # installed: the Moshpit scheme lists MoshpitUITests as testable, so every
+  # `-only-testing:HermitTests` filters what RUNS, not what gets built and
+  # installed: the Hermit scheme lists HermitUITests as testable, so every
   # unit-test run also compiled the UI test target and pushed its 18 MB runner
   # app onto the simulator alongside the 80 MB debug app, then waited through a
   # second launch handshake.
   #
-  # Measured on the Moshpit scheme: 172 s wall, of which the tests themselves
+  # Measured on the Hermit scheme: 172 s wall, of which the tests themselves
   # were 13.5 s (~8%). xcodebuild's own accounting put 135 s in the "Testing"
   # phase — install, launch, handshake, teardown — so the wait had almost
   # nothing to do with how many tests exist. This scheme attacks that instead.
   #
-  #   xcodebuild -scheme MoshpitUnitTests -destination '…' test
+  #   xcodebuild -scheme HermitUnitTests -destination '…' test
   #
   # Iterating on test code only? Build once with `build-for-testing`, then
   # `test-without-building` — that saves a further ~60 s per cycle. And do NOT
   # run `xcodegen generate` unless project.yml changed: rewriting the pbxproj
   # invalidates DerivedData and forces a full rebuild of WhisperKit, SwiftTerm,
   # Citadel and swift-nio.
-  MoshpitUnitTests:
+  HermitUnitTests:
     build:
       targets:
-        Moshpit: all
-        MoshpitTests: [test]
+        Hermit: all
+        HermitTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - MoshpitTests
+        - HermitTests
     analyze:
       config: Debug
 
-  Moshpit:
+  Hermit:
     build:
       targets:
-        Moshpit: all
-        MoshpitTests: [test]
-        MoshpitUITests: [test]
+        Hermit: all
+        HermitTests: [test]
+        HermitUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - MoshpitTests
-        - MoshpitUITests
+        - HermitTests
+        - HermitUITests
     profile:
       config: Release
     analyze:

@@ -1,5 +1,5 @@
 #!/bin/sh
-# moshpit-push.sh — seal one agent status and hand it to the Moshpit push relay.
+# moshpit-push.sh — seal one agent status and hand it to the Hermit push relay.
 #
 # Installed on the DEV HOST at ~/.moshpit/moshpit-push.sh, next to the stamp
 # script that the Vibe Island hooks already write there. The stamp script calls
@@ -12,7 +12,7 @@
 # option bridge, where it costs nothing.
 #
 # Why this exists at all: the tmux bridge only reaches a phone that is running
-# Moshpit with a live session. Once iOS suspends the app, the socket dies and no
+# Hermit with a live session. Once iOS suspends the app, the socket dies and no
 # amount of local cleverness can wake it. A push can — but only Apple can
 # deliver one, and only for a payload signed with the app's team key. So this
 # script seals the status with a key the relay does not have, and the relay does

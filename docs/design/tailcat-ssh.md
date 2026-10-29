@@ -147,7 +147,7 @@ so this option is explicit and does not become the default transport.
 
 ## Embedded Tailscale connection option
 
-Tailscale is a separate experimental transport. It enrolls Moshpit as its own
+Tailscale is a separate experimental transport. It enrolls Hermit as its own
 node on the user's tailnet; the phone does not need the system Tailscale VPN
 enabled. The remote Mac still needs Tailscale, a reachable ordinary SSH service,
 and an access policy allowing this app node to reach that SSH port.

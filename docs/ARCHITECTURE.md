@@ -1,11 +1,17 @@
-# Moshpit Architecture
+# Hermit Architecture
 
-Moshpit is an iOS SSH / Mosh / tmux terminal client, built with SwiftUI and
+Hermit is an iOS SSH / Mosh / tmux terminal client, built with SwiftUI and
 targeting iOS 18. It connects to remote servers, runs interactive shells and
 CLI coding agents (Claude Code, Codex, …), and surfaces live agent status on
 the Lock Screen and Dynamic Island. The project is managed by
 [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `project.yml` is the source
-of truth and `Moshpit.xcodeproj` is generated from it.
+of truth and `Hermit.xcodeproj` is generated from it.
+
+The public app and package names are Hermit and HermitKit. Their Swift module
+identities remain `Moshpit` and `MoshpitKit`, respectively, so existing app and
+extension types remain compatible. Bundle identifiers, Keychain/App Group
+names, cloud-record types and remote protocol markers also retain their prior
+identities; they are not branding strings.
 
 This document is an orientation for new contributors: how the code is layered,
 what the core services do, and the handful of designs that are non-obvious
@@ -17,12 +23,12 @@ the named source files alongside it.
 
 ## 1. Layering
 
-The app target lives under `Moshpit/`, split into layers by directory. Roughly
+The app target lives under `Hermit/`, split into layers by directory. Roughly
 top (UI) to bottom (transport):
 
 ```
-Moshpit/
-  App/          @main entry (MoshpitApp.swift), AppEnvironment, App Intents,
+Hermit/
+  App/          @main entry (HermitApp.swift), AppEnvironment, App Intents,
                 privacy manifest (Info.plist and entitlements are generated
                 from project.yml)
   UI/           SwiftUI surfaces by feature: Home, Terminal (screen, SwiftTerm
@@ -50,17 +56,17 @@ Moshpit/
 
 Extensions/      The three app extensions, one target each, named after
                  their bundles:
-  MoshpitIsland/   widget extension: Live Activity + home/lock widgets
-  MoshpitPush/     notification service extension: opens sealed remote pushes
-  MoshpitShare/    share extension: hands an image to an agent's pane
+  HermitIsland/   widget extension: Live Activity + home/lock widgets
+  HermitPush/     notification service extension: opens sealed remote pushes
+  HermitShare/    share extension: hands an image to an agent's pane
 Packages/
-  MoshpitKit/    local Swift package linked by the app and all three
+  HermitKit/    local Swift package linked by the app and all three
                  extensions: Log, the Live Activity payload and widget snapshot
                  (Island/), the sealed-push envelope, pairing store, prefs
                  mirror and notification rendering (Push/) — §6, §7.1
 Tests/
-  MoshpitTests/    unit tests, mirroring Moshpit/ (Fixtures/, Mocks/, Integration/)
-  MoshpitUITests/  UI tests
+  HermitTests/    unit tests, mirroring Hermit/ (Fixtures/, Mocks/, Integration/)
+  HermitUITests/  UI tests
 push-relay/      Go APNs relay (the only server-side component; docs/PUSH.md);
                  push-relay/deploy/ holds its k8s manifest
 scripts/         host/ (the shell installed on dev hosts), gen/ (generators),
@@ -72,9 +78,9 @@ scripts/         host/ (the shell installed on dev hosts), gen/ (generators),
 **Dependency direction is one-way, top-down.** UI observes its view models and
 `SessionHub`; the view models and the hub drive Services; Services talk to the
 network. Code that crosses the app/extension boundary lives in
-`Packages/MoshpitKit`, a local Swift package every target depends on, so the
+`Packages/HermitKit`, a local Swift package every target depends on, so the
 boundary is a module boundary: what an extension needs is `public` there, and
-nothing there can reach back into the app. Nothing in `Moshpit/` is compiled
+nothing there can reach back into the app. Nothing in `Hermit/` is compiled
 into an extension by path except `App/AgentCycleIntent.swift` — an App
 Intent is an entry point of the bundle that declares it, so the widget's
 Button needs the type and the app is where `perform()` runs.
@@ -154,7 +160,7 @@ reconnecting.
   `attach` / `new -A` re-lands on the same server-side session so panes and
   scrollback come right back. `isStopping` / `isReconnecting` guard against a
   keepalive tick and a death callback fighting each other.
-- **Window-size pins.** Moshpit pins the tmux window to the phone grid while the
+- **Window-size pins.** Hermit pins the tmux window to the phone grid while the
   terminal is on screen. On backgrounding the hub hands those pins back
   (`releaseWindowPinsForBackground`) so a desktop client sharing the window
   isn't stranded at phone width; `repinForeground()` (only for the currently
@@ -200,9 +206,9 @@ Observation-free *parser* of that stream (byte-level `%output` handling,
 octal-escape decoding, `%begin/%end` block tracking); `TmuxSessionController`
 (`@MainActor @Observable`) is the *state owner* that turns those callbacks into
 a single observable `TmuxSnapshot` (sessions/windows/panes) plus a pool of
-per-pane SwiftTerm `TerminalView`s. This is what powers Moshpit's native
+per-pane SwiftTerm `TerminalView`s. This is what powers Hermit's native
 breadcrumb and the Sessions/Windows/Panes sheets — the UI reads live tmux state
-instead of scraping a rendered TUI. **Moshpit never creates or modifies tmux
+instead of scraping a rendered TUI. **Hermit never creates or modifies tmux
 sessions on its own**: it attaches the user's existing sessions (most recent),
 and if the server has none it shows an empty state and lets the user create the
 first one explicitly.
@@ -212,7 +218,7 @@ first one explicitly.
 You cannot run tmux `-CC` over mosh: mosh transmits *screen diffs*, not the raw
 line-framed control stream `-CC` needs (verified empirically). So when the user
 wants **both** roaming (mosh) **and** the native session/window/pane UI (tmux
-`-CC`), Moshpit runs **two transports at once** against the same tmux server:
+`-CC`), Hermit runs **two transports at once** against the same tmux server:
 
 ```
                     ┌─────────────────────────── remote host ──┐
@@ -253,7 +259,7 @@ teardown; `TmuxSelectionStore` lets a reconnect re-target the right session.
 
 ## 5. Capability probe & degrade
 
-Before committing to tmux `-CC` or mosh, Moshpit probes the host so a missing
+Before committing to tmux `-CC` or mosh, Hermit probes the host so a missing
 dependency degrades gracefully instead of stalling on a failing command.
 
 - **The probe.** `HostCapabilities.probeCommand` runs over the first SSH
@@ -286,7 +292,7 @@ dependency degrades gracefully instead of stalling on a failing command.
 
 ## 6. Concurrency model
 
-Moshpit leans hard on Swift's actor model to keep transport bytes, terminal
+Hermit leans hard on Swift's actor model to keep transport bytes, terminal
 rendering, and UI state from racing.
 
 - **`SessionHub` / `ActiveSession` / `TmuxSessionController` are `@MainActor`.**
@@ -301,7 +307,7 @@ rendering, and UI state from racing.
 
 Independently-spawned `Task {}`s have **no ordering guarantee relative to each
 other**. When several must reach a transport in the exact order they were
-issued, Moshpit chains them explicitly instead of firing bare tasks:
+issued, Hermit chains them explicitly instead of firing bare tasks:
 
 - **`ActiveSession.moshWriteChain`** serializes mosh keystroke writes. Without
   it, typing a word and immediately tapping an arrow key could deliver the arrow
@@ -327,17 +333,17 @@ keepalive or attach loops.
 
 ---
 
-## 7. The MoshpitIsland widget extension & App Group
+## 7. The HermitIsland widget extension & App Group
 
-`Extensions/MoshpitIsland/` is a separate widget-extension target that renders the Vibe
+`Extensions/HermitIsland/` is a separate widget-extension target that renders the Vibe
 Island: a Dynamic Island pill / Lock Screen Live Activity, plus a home/lock
 timeline widget, both showing live agent status. The types shared across the
-app/extension boundary live in MoshpitKit's `Island/`: `AgentActivityAttributes`
+app/extension boundary live in HermitKit's `Island/`: `AgentActivityAttributes`
 (the Live Activity payload), `AgentWidgetState` + `AgentWidgetStore` (the App
 Group snapshot), `AgentPalette`, `ShareQueue`, and the `AgentControlBridge` /
 `AgentNotificationHandler` pair. `AgentActivityMonitor` (the `@MainActor`
 producer that watches tmux panes and computes agent state) is app-only and
-lives in `Moshpit/Services/Island/`.
+lives in `Hermit/Services/Island/`.
 
 `AgentActivityMonitor` observes each session's `TmuxSessionController` — pane
 output, bells, and the precise per-pane `@moshpit_*` hook stamps that coding
@@ -358,7 +364,7 @@ kinds are updated in fundamentally different ways:
    socket.
 
 2. **WidgetKit timeline pulling a JSON snapshot → the home/lock widget.** A
-   `StaticConfiguration` timeline widget (`MoshpitStatusWidget`) **cannot** read
+   `StaticConfiguration` timeline widget (`HermitStatusWidget`) **cannot** read
    the pushed ActivityKit state — a `TimelineProvider` runs on the OS's own
    schedule, in the extension process, with no access to the app's memory. So
    the monitor also **writes** the same agent list as JSON into a shared **App
@@ -375,12 +381,12 @@ dictated by what each widget kind can actually see.
 
 ### 7.1 When the app is not running: remote push
 
-Everything above needs Moshpit to be executing. iOS suspends it seconds after it
+Everything above needs Hermit to be executing. iOS suspends it seconds after it
 leaves the screen and kills its sockets shortly after, so an agent that blocks on
 a permission prompt while your phone is in your pocket reaches nobody. That is
 not a bug in the monitor; it is the ceiling of a local-only design.
 
-`Extensions/MoshpitPush/` is a notification service extension, and `push-relay/` is a small
+`Extensions/HermitPush/` is a notification service extension, and `push-relay/` is a small
 Go service, which together lift it: the agent hook on the dev host seals its
 status with a key only the phone has, a relay signs the push with the app's APNs
 key (which cannot be handed out to users' machines), and the extension opens the
@@ -390,12 +396,12 @@ one does, so `AgentNotificationHandler` → `AgentControlBridge` → the live pa
 works unchanged — the lock-screen Allow / Deny / Reply surface has no
 push-specific branch at all.
 
-Shared across that boundary, in MoshpitKit's `Push/`: `PushSealedBox` (the
+Shared across that boundary, in HermitKit's `Push/`: `PushSealedBox` (the
 envelope), `PushPairing` + `PushPairingStore` (per-connection secrets, in the App
 Group container rather than the keychain because an extension on the lock screen
 cannot read `WhenUnlocked` items), and `PushRemoteNotification` (rendering).
 
-Getting any of it ONTO a host is `Moshpit/Services/Install/`, which is one engine
+Getting any of it ONTO a host is `Hermit/Services/Install/`, which is one engine
 for both the push pairing and the agent hooks: `HostChannel` (a single `run`
 primitive over the SSH exec channel image attachment uses), `HostCommands` (every
 remote command as a pinned pure function), `AgentHookConfig` (config merges done
@@ -420,10 +426,10 @@ control path that does not need the app to reconnect).
 - **Mosh SSP:** `MoshTransport.handleDatagram` (the diff-apply state machine)
   and `MoshBootstrap`.
 - **Widget bridge:** `AgentActivityMonitor.sync` / `writeWidgetSnapshot`, then
-  `Extensions/MoshpitIsland/MoshpitIslandWidget.swift` (Live Activity) and
-  `Extensions/MoshpitIsland/MoshpitStatusWidget.swift` (timeline).
+  `Extensions/HermitIsland/HermitIslandWidget.swift` (Live Activity) and
+  `Extensions/HermitIsland/HermitStatusWidget.swift` (timeline).
 - **A remote notification, end to end:** `scripts/host/moshpit-push.sh` (seals on the
-  host) → `push-relay/main.go` `handleNotify` → `MoshpitPush/NotificationService`
+  host) → `push-relay/main.go` `handleNotify` → `HermitPush/NotificationService`
   → `AgentNotificationHandler`. Run `scripts/verify/verify-push-e2e.sh` to watch the
   whole chain work with no Apple credentials.
 

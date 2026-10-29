@@ -170,7 +170,7 @@ say "the host scripts and their Swift copies have not drifted"
 python3 - "$ROOT" <<'PY'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])
-swift = (root / "Moshpit/Services/Install/HostScripts.swift").read_text()
+swift = (root / "Hermit/Services/Install/HostScripts.swift").read_text()
 for name, rel in [("stamp", "scripts/host/moshpit-stamp.sh"), ("sender", "scripts/host/moshpit-push.sh")]:
     marker = f'    static let {name} = #"""\n'
     start = swift.index(marker) + len(marker)

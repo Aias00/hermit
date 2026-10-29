@@ -2,9 +2,9 @@
 # Your private key rides in argv and into the simulator keychain — see the
 # "WHERE YOUR PRIVATE KEY GOES" note in scripts/verify/smoke-localhost.sh, and prefer
 # a throwaway key via MOSHPIT_SSH_KEY.
-# Moshpit — end-to-end check that a herdr connection boots herdr's TUI.
+# Hermit — end-to-end check that a herdr connection boots herdr's TUI.
 #
-# Phase 0 of docs/design/herdr-multiplexer.md: Moshpit probes for herdr,
+# Phase 0 of docs/design/herdr-multiplexer.md: Hermit probes for herdr,
 # launches it in the remote shell, and renders its full-screen UI. This script
 # proves that against a real herdr server over real SSH (localhost), because
 # the unit tests can only prove the command STRING is right.
@@ -123,16 +123,16 @@ if [ "$STATE" != "Booted" ]; then
   sleep 10
 fi
 
-echo "▶ Building Moshpit"
+echo "▶ Building Hermit"
 DERIVED="$(mktemp -d)"
 xcodebuild \
-  -project "$REPO_ROOT/Moshpit.xcodeproj" -scheme Moshpit \
+  -project "$REPO_ROOT/Hermit.xcodeproj" -scheme Hermit \
   -configuration Debug -sdk iphonesimulator \
   -destination "platform=iOS Simulator,name=$SIM_NAME" \
   -derivedDataPath "$DERIVED" \
   CODE_SIGNING_ALLOWED=NO build > "$DERIVED/build.log" 2>&1 \
   || { echo "✘ build failed"; tail -30 "$DERIVED/build.log"; exit 1; }
-APP="$(find "$DERIVED/Build/Products" -name 'Moshpit.app' -type d | head -1)"
+APP="$(find "$DERIVED/Build/Products" -name 'Hermit.app' -type d | head -1)"
 
 echo "▶ Installing app on $SIM_UDID"
 xcrun simctl install "$SIM_UDID" "$APP"
@@ -142,7 +142,7 @@ xcrun simctl status_bar "$SIM_UDID" override \
 xcrun simctl terminate "$SIM_UDID" "$BUNDLE_ID" 2>/dev/null || true
 
 # MOSHPIT_MOSH=1 runs the same check over mosh. Both transports render herdr's
-# TUI identically in Phase 0 (Moshpit is only the renderer), so the one thing
+# TUI identically in Phase 0 (Hermit is only the renderer), so the one thing
 # this actually distinguishes is whether the launch line reaches the shell
 # through the mosh keystroke channel rather than the SSH PTY.
 TRANSPORT_ARGS=()
@@ -278,7 +278,7 @@ else
 fi
 
 # Phase 1: the control plane. `herdr api snapshot` above proves the SERVER is
-# alive; this proves Moshpit is reading it — the breadcrumb only renders
+# alive; this proves Hermit is reading it — the breadcrumb only renders
 # session/window crumbs when a snapshot has been decoded into the app's model.
 echo "▶ Control plane (breadcrumb driven by herdr api snapshot):"
 CRUMBS="$(idb ui describe-all --udid "$SIM_UDID" 2>/dev/null | python3 -c "
@@ -444,7 +444,7 @@ echo "✓ Done."
 echo "  Screenshot: $OUT"
 echo "  Open with:  open $OUT"
 if [ "$LABEL" = "ssh" ]; then
-  echo "  Expect ONE full-width pane under Moshpit's own breadcrumb — herdr's"
+  echo "  Expect ONE full-width pane under Hermit's own breadcrumb — herdr's"
   echo "  sidebar and tab bar should be absent (that's the frame channel)."
 else
   echo "  Expect herdr's own TUI (sidebar + tab bar): mosh can't carry the"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Moshpit — end-to-end localhost SSH smoke test.
+# Hermit — end-to-end localhost SSH smoke test.
 #
-# Builds Moshpit, installs onto an iPhone simulator, launches with seed
+# Builds Hermit, installs onto an iPhone simulator, launches with seed
 # args that:
 #   1. Write `~/.ssh/id_ed25519` into the app's keychain
 #   2. Register a `127.0.0.1:22` connection
@@ -95,16 +95,16 @@ if [ "$STATE" != "Booted" ]; then
   sleep 10
 fi
 
-echo "▶ Building Moshpit"
+echo "▶ Building Hermit"
 DERIVED="$(mktemp -d)"
 xcodebuild \
-  -project "$REPO_ROOT/Moshpit.xcodeproj" -scheme Moshpit \
+  -project "$REPO_ROOT/Hermit.xcodeproj" -scheme Hermit \
   -configuration Debug -sdk iphonesimulator \
   -destination "platform=iOS Simulator,name=$SIM_NAME" \
   -derivedDataPath "$DERIVED" \
   CODE_SIGNING_ALLOWED=NO build > "$DERIVED/build.log" 2>&1 \
   || { echo "✘ build failed"; tail -30 "$DERIVED/build.log"; exit 1; }
-APP="$(find "$DERIVED/Build/Products" -name 'Moshpit.app' -type d | head -1)"
+APP="$(find "$DERIVED/Build/Products" -name 'Hermit.app' -type d | head -1)"
 
 echo "▶ Installing app on $SIM_UDID"
 xcrun simctl install "$SIM_UDID" "$APP"

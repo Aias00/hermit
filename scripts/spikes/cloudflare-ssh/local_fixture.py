@@ -97,7 +97,7 @@ prompt = no
 distinguished_name = dn
 x509_extensions = ca
 [dn]
-CN = Moshpit disposable loopback fixture CA
+CN = Hermit disposable loopback fixture CA
 [ca]
 basicConstraints = critical,CA:TRUE,pathlen:0
 keyUsage = critical,keyCertSign,cRLSign

@@ -107,8 +107,8 @@ python3 "$PACKAGE/Native/collect-licenses.py" "$PACKAGE/Native" \
   "$WORK/slices/ios-arm64/modules.txt" \
   "$WORK/slices/ios-arm64-simulator/modules.txt" \
   "$WORK/slices/macos-arm64/modules.txt"
-mkdir -p "$ROOT/Moshpit/Resources/ThirdParty"
-cp "$PACKAGE/Native/THIRD-PARTY-NOTICES.txt" "$ROOT/Moshpit/Resources/ThirdParty/tailcat-licenses.txt"
+mkdir -p "$ROOT/Hermit/Resources/ThirdParty"
+cp "$PACKAGE/Native/THIRD-PARTY-NOTICES.txt" "$ROOT/Hermit/Resources/ThirdParty/tailcat-licenses.txt"
 
 # Build to a disposable path so an unsuccessful build leaves the last artifact intact.
 STAGING="$WORK/CTailcat.xcframework"

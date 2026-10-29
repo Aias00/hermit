@@ -1,8 +1,14 @@
 # Third-Party Notices
 
-Moshpit is licensed under the GNU General Public License, version 3 only
+Hermit is licensed under the GNU General Public License, version 3 only
 (GPL-3.0-only; see [LICENSE](LICENSE)). It
 incorporates the following third-party components, each under its own license.
+
+## Upstream Application
+
+Hermit is based on [Moshpit by Cluas](https://github.com/Cluas/moshpit), licensed
+under GPL-3.0-only. Original copyright and license notices are retained; the
+Hermit name does not change the authorship of inherited code.
 
 ## Swift Package Dependencies
 
@@ -12,7 +18,7 @@ incorporates the following third-party components, each under its own license.
 - Upstream: https://github.com/migueldeicaza/SwiftTerm
 - License: MIT
 
-Moshpit depends on a fork of SwiftTerm maintained at
+Hermit depends on a fork of SwiftTerm maintained at
 `github.com/Cluas/SwiftTerm`, forked from `migueldeicaza/SwiftTerm`. The fork
 carries a small set of terminal-rendering and hyperlink/IME fixes (see the
 fork's commit history and the annotated `SwiftTerm` entry in `project.yml`).
@@ -23,7 +29,7 @@ Both the upstream project and the fork are distributed under the MIT License.
 - Source: https://github.com/orlandos-nl/Citadel
 - License: MIT
 
-Citadel provides the SSH client implementation used by Moshpit.
+Citadel provides the SSH client implementation used by Hermit.
 
 ### WhisperKit
 
@@ -37,7 +43,7 @@ library product is linked; the package's CLI target and that target's
 
 ## Downloaded Speech Models
 
-Moshpit ships **no** speech model weights. When you choose the Whisper engine
+Hermit ships **no** speech model weights. When you choose the Whisper engine
 and download a model, the files are fetched at runtime from the
 [`argmaxinc/whisperkit-coreml`](https://huggingface.co/argmaxinc/whisperkit-coreml)
 repository on Hugging Face and stored in the app's Application Support
@@ -47,14 +53,14 @@ Argmax under the MIT License. No audio or transcript is uploaded by this
 download — it only fetches model files.
 
 Apple's own speech models (the default engine) are part of iOS and are managed
-by the system, not by Moshpit.
+by the system, not by Hermit.
 
 ## Bundled Fonts
 
-Moshpit bundles several programmer monospace fonts, selectable under
+Hermit bundles several programmer monospace fonts, selectable under
 Settings ▸ Display ▸ Font. Each font is redistributable and retains its own
 license. The per-font license and source table is maintained in
-[`Moshpit/Resources/Fonts/LICENSES.md`](Moshpit/Resources/Fonts/LICENSES.md) and
+[`Hermit/Resources/Fonts/LICENSES.md`](Hermit/Resources/Fonts/LICENSES.md) and
 is incorporated here by reference.
 
 In summary, the bundled fonts are covered by the SIL Open Font License 1.1
@@ -64,9 +70,10 @@ referenced file for full attribution, source URLs, and license text pointers.
 
 ## Clean-Room Disclaimer — Mosh State Synchronization Protocol
 
-The Swift sources under `Moshpit/Services/Mosh/` (`MoshBootstrap.swift`,
+The Swift sources under `Hermit/Services/Mosh/` (`MoshBootstrap.swift`,
 `MoshCompression.swift`, `MoshCrypto.swift`, `MoshTransport.swift`,
-`MoshWire.swift`, `OCB3.swift`) are an **independent, clean-room Swift
+`MoshWire.swift`, `OCB3.swift`) are inherited from upstream Moshpit. Its original
+provenance notice describes them as an **independent, clean-room Swift
 reimplementation** of mosh's State Synchronization Protocol (SSP) and its
 associated wire format and cryptography.
 
@@ -76,10 +83,10 @@ the sole purpose of interoperating with mosh servers. It is **not** derived
 from, and does not copy or translate, mosh's own GPL-3.0-licensed C++ source
 code.
 
-Because it is an original work implementing an interoperable protocol rather
-than a derivative of the mosh codebase, this code is Moshpit's own copyright:
-it is distributed under Moshpit's GPL-3.0-only license along with the rest of
-the project, and its provenance does not depend on mosh's license.
+The original implementation is attributed to the upstream Moshpit authors;
+Hermit retains their copyright and provenance notices. This inherited code is
+distributed under GPL-3.0-only with the rest of the project. Renaming the app
+does not claim new authorship or ownership of that implementation.
 
 "mosh" is a project of Keith Winstein and contributors; the name is used here
 only to identify the protocol being interoperated with.

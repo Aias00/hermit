@@ -2,7 +2,7 @@
 # Your private key rides in argv and into the simulator keychain — see the
 # "WHERE YOUR PRIVATE KEY GOES" note in scripts/verify/smoke-localhost.sh, and prefer
 # a throwaway key via MOSHPIT_SSH_KEY.
-# T4 — end-to-end self-verification of Moshpit over REAL mosh+tmux to localhost.
+# T4 — end-to-end self-verification of Hermit over REAL mosh+tmux to localhost.
 #
 # What it proves, with screenshots I can inspect myself (no device, no sideload):
 #   * Bug A (garble): renders ASCII + CJK + Japanese + box-drawing through the
@@ -65,13 +65,13 @@ SIM_UDID="$(xcrun simctl list devices booted --json | python3 -c 'import json,sy
 SIM_NAME="$(xcrun simctl list devices --json | python3 -c 'import json,sys;u=sys.argv[1];d=json.load(sys.stdin);print(next((x["name"] for ds in d["devices"].values() for x in ds if x.get("udid")==u),""))' "$SIM_UDID")"
 echo "▶ Simulator: $SIM_NAME ($SIM_UDID)"
 
-echo "▶ Building Moshpit"
+echo "▶ Building Hermit"
 DERIVED="$(mktemp -d)"
-xcodebuild -project "$REPO_ROOT/Moshpit.xcodeproj" -scheme Moshpit -configuration Debug \
+xcodebuild -project "$REPO_ROOT/Hermit.xcodeproj" -scheme Hermit -configuration Debug \
   -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_UDID" \
   -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO build > "$DERIVED/build.log" 2>&1 \
   || { echo "✘ build failed"; tail -30 "$DERIVED/build.log"; exit 1; }
-APP="$(find "$DERIVED/Build/Products" -name 'Moshpit.app' -type d | head -1)"
+APP="$(find "$DERIVED/Build/Products" -name 'Hermit.app' -type d | head -1)"
 
 echo "▶ Installing + launching (mosh + tmux, isolated socket)"
 xcrun simctl install "$SIM_UDID" "$APP"

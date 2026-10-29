@@ -1,4 +1,4 @@
-# Moshpit push relay on k3s.
+# Hermit push relay on k3s.
 #
 # The relay holds the APNs signing key and its own HMAC master, and nothing
 # else: no message content, no host names, no device registry — it is

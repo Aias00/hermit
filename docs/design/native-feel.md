@@ -1,6 +1,6 @@
-# Moshpit 原生质感优化方案
+# Hermit 原生质感优化方案
 
-日期：2026-09-11。范围：Moshpit iOS App（SwiftUI，iOS 18+，Xcode 26）。证据来自当前 v2 分支源码的 grep 计数、站点仓库 `moshpit-site` 的 `shots/*.png`
+日期：2026-09-11。范围：Hermit iOS App（SwiftUI，iOS 18+，Xcode 26）。证据来自当前 v2 分支源码的 grep 计数、站点仓库 `moshpit-site` 的 `shots/*.png`
 里的当前构建截图，以及 2026-09-11 在 iPhone 17 Pro 模拟器（iOS 26.2）上的实机截图。本方案只提建议，不改代码。
 
 与 `docs/APP-DESIGN-AUDIT.md`（2026-09-10）的关系：那份讲**信息架构**（首页放什么、任务怎么排、终端顶栏两行）；这份讲**质感**：
@@ -12,7 +12,7 @@
 > 设置.app；P3 把 App 自己的视觉语言收回到这些容器上（见文末「P3 回收」）。留着原文，是因为它解释了为什么容器还是系统件：行为（Dynamic Type、滑动操作、编辑模式、
 > 键盘避让、玻璃）来自容器，性格来自容器里画什么。
 
-App 不像原生，根源不是颜色，而是**零件不是系统的**。`Moshpit/UI` 下 27 个视图文件里没有一个 `List` 或 `Form`；
+App 不像原生，根源不是颜色，而是**零件不是系统的**。`Hermit/UI` 下 27 个视图文件里没有一个 `List` 或 `Form`；
 导航页头、分组列表、表单、底部弹层、拖拽编辑手柄、空状态，全是 `VStack`/`HStack` 手画的；字号全部是固定 pt，
 不跟随系统字号；没有 Reduce Motion 分支。这些手画件在 iOS 26 上尤其吃亏：系统零件自动拿到 Liquid Glass 的材质、
 圆角、转场和玻璃工具栏，手画件永远停在上一代。
@@ -22,7 +22,7 @@ App 不像原生，根源不是颜色，而是**零件不是系统的**。`Moshp
 
 ## 现状证据
 
-grep 于 2026-09-11，范围 `Moshpit/`（不含测试）：
+grep 于 2026-09-11，范围 `Hermit/`（不含测试）：
 
 | 指标 | 数值 | 含义 |
 |---|---|---|
@@ -42,11 +42,11 @@ grep 于 2026-09-11，范围 `Moshpit/`（不含测试）：
 
 按屏幕看（截图见站点仓库 `moshpit-site` 的 `shots/`）：
 
-1. **首页** `01-agents.png`，`Moshpit/UI/Home/HomeView.swift`：隐藏了系统导航栏（`.toolbar(.hidden, for: .navigationBar)` :220），
+1. **首页** `01-agents.png`，`Hermit/UI/Home/HomeView.swift`：隐藏了系统导航栏（`.toolbar(.hidden, for: .navigationBar)` :220），
    用一张品牌卡片代替（`HomeHeader` :344：46pt 图标 + 38pt 圆体字标 + 等宽口号 + 两颗圆形按钮）；主机卡片自绘（左侧强调竖条、
-   内嵌会话树、底部 `Edit`/`Disconnect` 按钮条 `CardActionButton` :1953）；空状态自绘卡片（:323）；整页铺 `MoshpitBackground` 网格 + 斜纹。
+   内嵌会话树、底部 `Edit`/`Disconnect` 按钮条 `CardActionButton` :1953）；空状态自绘卡片（:323）；整页铺 `HermitBackground` 网格 + 斜纹。
    系统 App 里没有一个首页长这样：它们是大标题导航栏 + inset grouped 列表 + 右上角两个工具栏按钮。
-2. **设置** `Moshpit/UI/Settings/SettingsScreen.swift`：已经用了 `NavigationStack` + `.toolbar { Button("Done") }`（:211，iOS 26 上
+2. **设置** `Hermit/UI/Settings/SettingsScreen.swift`：已经用了 `NavigationStack` + `.toolbar { Button("Done") }`（:211，iOS 26 上
    自动成了玻璃胶囊，模拟器截图里能看到），这是对的；但内容是 `ScrollView` + 自绘分组行，不是 `Form`；分组标题是等宽大写字距；
    `preferredColorScheme(.dark)` :219。
 3. **添加连接** `34-add-connection.png`，`AddConnectionView.swift`：结构已经是表单，但每一行都是自绘，Password/SSH Key 是自绘分段控件。
@@ -73,7 +73,7 @@ grep 于 2026-09-11，范围 `Moshpit/`（不含测试）：
 
 ### A. 导航与页头
 
-- 首页：删掉 `HomeHeader` 品牌卡，改 `.navigationTitle("Moshpit")` + `.navigationBarTitleDisplayMode(.large)`；
+- 首页：删掉 `HomeHeader` 品牌卡，改 `.navigationTitle("Hermit")` + `.navigationBarTitleDisplayMode(.large)`；
   右上角 `ToolbarItemGroup` 放 ＋ 和 ⚙（iOS 26 自动成玻璃按钮，iOS 18 是标准工具栏）。口号 "THE PIT NEVER CLOSES" 移到设置页脚 / About。
   "1 live connection · agents quiet" 这条状态保留，做成列表第一节的一行（可点），不再是卡片里的胶囊。
   与 `APP-DESIGN-AUDIT.md`「紧凑页头」一致，这里给出的是原生实现方式。
@@ -112,7 +112,7 @@ grep 于 2026-09-11，范围 `Moshpit/`（不含测试）：
 - 深色仍是默认外观，但底色和前景改用系统语义色：`Color(.systemGroupedBackground)`、`.secondarySystemGroupedBackground`、
   `.primary/.secondary/.tertiary`。`Ink` 只保留强调色（跟随主题）、状态色（signal/success/warn/danger）和终端色。
   这样高对比、增大字体、iOS 26 玻璃材质的取色都自动正确，将来做浅色模式也只是放开开关。
-- 去掉日常页面的 `MoshpitBackground` 网格与斜纹（首页、设置、图库），只在连接中页面保留为舞台。系统 App 的底是平的。
+- 去掉日常页面的 `HermitBackground` 网格与斜纹（首页、设置、图库），只在连接中页面保留为舞台。系统 App 的底是平的。
 - 不再自己画玻璃（`Ink.chromeSheen` 之类的高光渐变）。iOS 26 上用 `glassEffect`、系统工具栏、sheet 材质；iOS 18 回退 `Material`。
 - 浅色模式：本轮不做。用了语义色之后成本很低，P2 评估。
 
@@ -147,8 +147,8 @@ grep 于 2026-09-11，范围 `Moshpit/`（不含测试）：
 
 ```
 现在                                      改为（大标题 + inset grouped）
-┌──────────────────────────────┐          Moshpit                        ⚙  ＋
-│ [icon] Moshpit               │          ─────────────────────────────────────
+┌──────────────────────────────┐          Hermit                        ⚙  ＋
+│ [icon] Hermit               │          ─────────────────────────────────────
 │        THE PIT NEVER CLOSES  │          ● 1 live connection · agents quiet  ›
 │ ⚡ 1 live connection …     › │
 └──────────────────────────────┘          MAC-STUDIO · SSH · LIVE 1h
@@ -177,7 +177,7 @@ grep 于 2026-09-11，范围 `Moshpit/`（不含测试）：
   语音识别/语言/模型）全部 `Form` + `Section(header:footer:)`；`FormGroup` 退化为 `Section` 薄包装，`moshpitForm()` 只做背景替换。
   `LabeledContent` 用在带值的行（端口、UDP 范围、Accent/App Icon/Theme），AX 字号下自动上下堆叠；`ChevronRow` 同样在 AX 字号下堆叠。
 - 字体：`Face.display/text/mono` 按最近的系统 `TextStyle` 映射（<9.75pt 保持固定，用于卡片上的 SAVED/SSH 小标）；Dynamic Type 生效。
-- 背景：`MoshpitBackground` 已删除，`SignalGrid` 只留在连接中屏；`.background(Ink.screenBG)` 统一。
+- 背景：`HermitBackground` 已删除，`SignalGrid` 只留在连接中屏；`.background(Ink.screenBG)` 统一。
 - Reduce Motion：`TransportPill`、光标预览、漫游横幅、`BreathingIconMark`、`PaneLoaderGlyph`、`PulseDots`、语音 `PulsingDot` 全部分支。
 - 验证：iPhone 17 Pro / iOS 26.2 模拟器逐屏截图（默认 + AccessibilityL），`MainFlowUITest`、`ThemeFlowUITest`、`AppearanceFlowUITest` 全绿；
   三个套件里对 `Form` 之下折叠区域的断言改经 `XCUIApplication.reveal(_:)` 滚动到位（`Form`/`List` 惰性建行，视口外的行不在 AX 树里）。
@@ -258,7 +258,7 @@ grep 于 2026-09-11，范围 `Moshpit/`（不含测试）：
 - 验证：`/tmp/p0/cap.sh` 同一套屏默认 + AccessibilityL 两遍截图，与旧版/P2 三栏对照（`/tmp/p0/compare/triples`）；本机 tmux 真连看 Windows 弹层；三套回归 UI 测试。
 
 风险：`TerminalScreen` 外壳改动必须保证视图 identity 不变（纯视觉变化不能触发 SSH 重连或终端重建）；`Ink.accent`
-主题 API 和 `AppIconMark`/`MoshpitMark` 规则保留；72 处 `accessibilityIdentifier` 一个不能丢。
+主题 API 和 `AppIconMark`/`HermitMark` 规则保留；72 处 `accessibilityIdentifier` 一个不能丢。
 
 ## 验收（全部自动化）
 

@@ -1,14 +1,14 @@
-# Moshpit Cloudflare SSH 接入方案
+# Hermit Cloudflare SSH 接入方案
 
 状态：实验实现及真实 Cloudflare 联调进行中；2026-10-27 按用户要求新增 Mac mini 的常驻 SSH 入口。入口部署与客户端 G1/G2 验收分别记录，见 [实施记录](cloudflare-access-implementation.md)，客户端尚未正式发布。设计日期：2026-10-27。
-适用范围：当前定制版 Moshpit（iOS）经 Cloudflare 访问 SSH 服务，可选择普通 Shell、tmux 或 Herdr；后续扩展到多用户、多设备。
+适用范围：当前定制版 Hermit（iOS）经 Cloudflare 访问 SSH 服务，可选择普通 Shell、tmux 或 Herdr；后续扩展到多用户、多设备。
 
 ## 1. 目标与结论
 
-显式选择 Cloudflare 的连接无需手机启用 Tailscale，即可在 Moshpit 原生终端内访问 SSH。保留主机密钥验证、PTY、exec 和文件传输；tmux、Herdr 是可选会话模式，不是连接或认证的前提。
+显式选择 Cloudflare 的连接无需手机启用 Tailscale，即可在 Hermit 原生终端内访问 SSH。保留主机密钥验证、PTY、exec 和文件传输；tmux、Herdr 是可选会话模式，不是连接或认证的前提。
 第一阶段复用 SSH，在底层增加 Cloudflare 传输，不重写 Herdr 或终端协议。
 
-核心问题是手机依赖外部 Tailscale VPN 状态：掉线后用户必须离开 Moshpit 手动重连。目标体验是打开 Moshpit 即可访问自己的电脑，由 App 管理连接检测、重连以及所选会话模式的恢复；仅在认证过期或需要用户决策时提示。
+核心问题是手机依赖外部 Tailscale VPN 状态：掉线后用户必须离开 Hermit 手动重连。目标体验是打开 Hermit 即可访问自己的电脑，由 App 管理连接检测、重连以及所选会话模式的恢复；仅在认证过期或需要用户决策时提示。
 
 连接方式按每条服务配置明确选择，不全局切换默认入口。普通连接沿用现有直连/SOCKS 流程，包含公网、局域网地址、普通域名以及 Tailscale IP/MagicDNS。只有用户显式选择 Cloudflare 的连接才进入 Access 登录和隧道流程；这类连接不依赖手机启用 Tailscale。本方案不涉及 Magpie API 或其 Key。
 
@@ -24,15 +24,15 @@ Cloudflare Tunnel 是网络中继，Cloudflare Access 是入口身份校验，SS
 
 | 位置 | 已有能力 | 接入意义 |
 | --- | --- | --- |
-| `Moshpit/Services/SSHService.swift` | `SSHClientProvider.connect(on: Channel, ...)`；直连与 SOCKS 分支；统一凭据及 TOFU 校验 | 新增隧道拨号分支，继续使用 Citadel SSH |
-| `Moshpit/Services/SOCKSProxyDialer.swift` | 返回握手完成后的 NIO Channel | 可借鉴拨号、超时、关闭纪律；不直接复用 SOCKS 协议 |
-| `Moshpit/Models/ServerConnection.swift` | Codable 连接模型、可选 SOCKS 字段、SSH/Herdr 设置 | 新字段必须兼容旧存储 |
-| `Moshpit/Services/Herdr/HerdrSocketClient.swift` | 与传输无关的 JSON 字节管道；断连不支持事件重放 | 保留协议解析，恢复时重新 snapshot/subscribe |
-| `Moshpit/Services/Herdr/HerdrFrameChannel.swift` | Herdr 终端帧及控制 | 保留终端渲染和重新附着语义 |
-| `Moshpit/Services/SessionHub.swift` | 会话生命周期、重连及 sidecar 管理 | 新传输必须覆盖主连接、控制连接和附属连接 |
-| `Moshpit/Services/HostKeyValidator.swift` | SSH 主机密钥信任 | 不因使用 HTTPS 而跳过 |
-| `Moshpit/Services/KeychainService.swift` | 凭据存储 | Access 凭据另设命名空间 |
-| `Moshpit/UI/Home/AddConnectionView.swift` | 连接编辑 | 增加 Cloudflare 入口配置及登录状态 |
+| `Hermit/Services/SSHService.swift` | `SSHClientProvider.connect(on: Channel, ...)`；直连与 SOCKS 分支；统一凭据及 TOFU 校验 | 新增隧道拨号分支，继续使用 Citadel SSH |
+| `Hermit/Services/SOCKSProxyDialer.swift` | 返回握手完成后的 NIO Channel | 可借鉴拨号、超时、关闭纪律；不直接复用 SOCKS 协议 |
+| `Hermit/Models/ServerConnection.swift` | Codable 连接模型、可选 SOCKS 字段、SSH/Herdr 设置 | 新字段必须兼容旧存储 |
+| `Hermit/Services/Herdr/HerdrSocketClient.swift` | 与传输无关的 JSON 字节管道；断连不支持事件重放 | 保留协议解析，恢复时重新 snapshot/subscribe |
+| `Hermit/Services/Herdr/HerdrFrameChannel.swift` | Herdr 终端帧及控制 | 保留终端渲染和重新附着语义 |
+| `Hermit/Services/SessionHub.swift` | 会话生命周期、重连及 sidecar 管理 | 新传输必须覆盖主连接、控制连接和附属连接 |
+| `Hermit/Services/HostKeyValidator.swift` | SSH 主机密钥信任 | 不因使用 HTTPS 而跳过 |
+| `Hermit/Services/KeychainService.swift` | 凭据存储 | Access 凭据另设命名空间 |
+| `Hermit/UI/Home/AddConnectionView.swift` | 连接编辑 | 增加 Cloudflare 入口配置及登录状态 |
 
 Mac mini 当前运行 Herdr 0.9.5，JSON socket 为 `~/.config/herdr/herdr.sock`；没有发现 Herdr 自身监听 HTTP 端口。
 现有 `ai.aias.eu.org` Tunnel 用于 Magpie，不应混用其 API 路径与管理凭据。
@@ -51,7 +51,7 @@ Mac mini 当前运行 Herdr 0.9.5，JSON socket 为 `~/.config/herdr/herdr.sock`
 
 ```mermaid
 flowchart LR
-    I[Moshpit iOS] -->|HTTPS 登录| A[Cloudflare Access / 身份提供商]
+    I[Hermit iOS] -->|HTTPS 登录| A[Cloudflare Access / 身份提供商]
     I -->|WSS 承载 SSH 字节流| E[Cloudflare 边缘]
     E --> T[Cloudflare Tunnel]
     T --> C[Mac mini cloudflared]
@@ -248,7 +248,7 @@ Tunnel 多连接可改善连接器可用性，但单台 Mac mini 仍是故障点
 | P4 产品控制面 | 账号、设备配对、撤销、自动配置 | 新用户不用 Cloudflare 控制台即可完成绑定 |
 
 P0 是必须的决策关口，不在协议和登录未验证时排定完整实现工期。
-首个真机里程碑是：远端不安装 Herdr，手机关闭 Tailscale → Moshpit 内登录 → 完成 SSH exec 和普通 Shell。随后分别验收普通 Shell 的断线重建提示、tmux/Herdr 的存续会话恢复，全程无需操作外部 VPN。P0 验证失败时转向薄桥路线，不把安装 Tailscale 作为最终解决办法。
+首个真机里程碑是：远端不安装 Herdr，手机关闭 Tailscale → Hermit 内登录 → 完成 SSH exec 和普通 Shell。随后分别验收普通 Shell 的断线重建提示、tmux/Herdr 的存续会话恢复，全程无需操作外部 VPN。P0 验证失败时转向薄桥路线，不把安装 Tailscale 作为最终解决办法。
 
 ## 11. 验证矩阵
 
@@ -272,7 +272,7 @@ P0 是必须的决策关口，不在协议和登录未验证时排定完整实�
 - [Cloudflare 客户端 cloudflared SSH 接入](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/use-cases/ssh/ssh-cloudflared-authentication/)
 - [Cloudflare WebSocket 支持、连接终止与心跳](https://developers.cloudflare.com/network/websockets/)
 - [Cloudflare Tunnel 路由](https://developers.cloudflare.com/tunnel/concepts/routing/)
-- [浏览器 SSH（独立备选，不是原生 Moshpit 传输）](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/use-cases/ssh/ssh-browser-rendering/)
+- [浏览器 SSH（独立备选，不是原生 Hermit 传输）](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/use-cases/ssh/ssh-browser-rendering/)
 
 待 P0 明确：所选版本的原生 WSS 封装、Access 原生登录与刷新机制、iOS 登录交接可行性、实际配额及目标网络可用性。
 当前已实现可自行配置的实验客户端，并记录固定版本的协议行为；另建了隔离测试入口及用户要求的 Mac mini 常驻 SSH 入口。现有 SSH 服务及其他应用的 Access 策略未改动。真实租户登录、蜂窝网络及真机生命周期验证仍是启用正式客户端支持前的关口。

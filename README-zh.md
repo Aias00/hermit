@@ -1,100 +1,114 @@
-# Moshpit
+# Hermit
 
 [English](README.md) · **中文**
 
-**Moshpit 是 iPhone 和 iPad 上的 SSH / Mosh / tmux 终端，给在远程机器上跑 coding agent
-的人用。** Claude Code 或 Codex 在服务器上继续干活；需要你拍板时，锁屏上来一条通知，点一下
-就落在提问的那个窗格里。其余时间，灵动岛上看得见谁在干活、谁在等你、等了多久。
+**Hermit 是 iPhone 和 iPad 上的 SSH / Mosh 终端，用于在远程机器上操作 coding agent。**
+支持 tmux、herdr、直连 SSH、Cloudflare Access 和内置 Tailscale，提供本地语音输入，
+并在锁屏和灵动岛展示连接与任务状态。
 
-[App Store](https://apps.apple.com/app/id6799896801) ·
-[官网](https://moshpit.cluas.eu.org/zh) ·
-[文档](https://moshpit.cluas.eu.org/zh/docs) ·
-[Issues](https://github.com/Cluas/moshpit/issues)
+Hermit 在本仓库维护，基于 [Cluas 的 Moshpit](https://github.com/Cluas/moshpit)
+继续开发，保留上游来源、原有版权及许可证声明。
+
+[代码仓库](https://github.com/Aias00/hermit) ·
+[架构文档](docs/ARCHITECTURE.md) ·
+[构建指南](CONTRIBUTING.md) ·
+[问题反馈](https://github.com/Aias00/hermit/issues)
 
 ## 截图
 
-| 一眼看全 agent | agent 的窗格 | tmux 窗口 | 锁屏通知 | 九个图标 |
+以下截图继承自上游 Moshpit，展示终端、agent 状态和图标功能。Hermit 当前的主机列表
+和语音审阅流程已在此基础上调整。
+
+| Agent 状态 | Agent 的窗格 | tmux 窗口 | 锁屏通知 | 九个图标 |
 |---|---|---|---|---|
-| ![首页的 Agents 区：谁需要你、谁在干活](docs/assets/agents.png) | ![终端里的一个 Claude Code 窗格](docs/assets/agent-terminal.png) | ![tmux 窗口列表，每一行带着自己 agent 的状态](docs/assets/tmux-windows.png) | ![锁屏上一条来自主机的加密通知](docs/assets/lock-screen.png) | ![图标库里的九个 Liquid Glass 图标](docs/assets/icons.png) |
+| ![上游主界面的 agent 状态](docs/assets/agents.png) | ![终端中的 Claude Code 窗格](docs/assets/agent-terminal.png) | ![带 agent 状态的 tmux 窗口列表](docs/assets/tmux-windows.png) | ![锁屏上的主机加密通知](docs/assets/lock-screen.png) | ![Liquid Glass 图标库](docs/assets/icons.png) |
 
-## 能做什么
+## 功能
 
-**首先是一个真正的终端**
+**终端与连接**
 
-- SSH 和 Mosh。Wi-Fi 与 5G 之间切换、手机息屏、酒店的烂网络，会话都断不了。
-- tmux 控制模式：原生渲染，左右滑动切换窗口和窗格，能新建、改名、关闭。不是把一块桌面硬塞进手机屏。
-- 支持 [herdr](https://github.com/herdrdev/herdr)：为 coding agent 设计的多路复用器，一次只渲染一个满宽窗格。
-- iPad：左边是主机，右边是终端，tmux 的选择器以浮窗弹出。外接键盘支持 ⌘K、⌘1–⌘9、⌘W。
-- 自定义主题、七种终端字体、九个 Liquid Glass 图标，esc / ctrl / alt / 方向键的快捷键栏，输入法组合输入，可点击的链接，端侧听写。
+- SSH 和 Mosh，提供网络切换后的连接恢复与诊断。
+- 可配置的 [Cloudflare Access](docs/design/cloudflare-herdr-access.md) 和
+  [内置 Tailscale](docs/design/tailcat-ssh.md) 接入，以及实验性的 Tailcat 传输。
+- tmux 控制模式，原生渲染、窗口与窗格导航、会话管理。
+- 支持 [herdr](https://github.com/herdrdev/herdr)，一次渲染一个满宽窗格。
+- iPad 主机侧栏、原生选择器、外接键盘快捷键、自定义主题与字体、快捷键栏、输入法组合输入和可点击链接。
 
-**为 agent 工作而生**
+**输入与会话状态**
 
-- 一眼看全每个 agent：谁需要你、谁在干活、干了多久、谁闲着。
-- 「需要你」的通知直接落在锁屏上，端到端加密，App 没开也照样送到。点一下，就在提问的那个窗格里。
-- 在手机上给 agent 开一个新的 git worktree：选仓库、起分支名，顺手把第一句提示词也交给它。
-- 从任何 App 分享一张图，直接进到 agent 的窗格。
-- agent 状态在 herdr 上零配置；在 tmux 上装一行 hooks 即可。
+- Apple 设备端语音识别和可选的本地 Whisper 模型。停止录音后可以审阅、编辑、
+  换语言重新识别或恢复最初结果，再加入草稿。
+- 草稿通过飞机按钮发送到远端；语音审阅和取消只处理本地内容。
+- 实时活动展示连接状态和已上报的任务状态。iOS 挂起 App 时停止更新，返回前台后恢复。
+- 继承 Moshpit 的 agent 通知、图片分享和远程 worktree 工作流。远程推送需要配置
+  中继、APNs 和对应签名能力，详见[推送文档](docs/PUSH.md)。
+- 可选的 iCloud 主机配置与设置同步，并提供凭据同步开关。
 
-**光明正大**
+**数据与主机操作**
 
-- 一次性买断。没有订阅，没有账号，没有功能分层。
-- 不收集任何数据：没有统计，没有追踪。密钥留在 iOS 钥匙串里，流量只去你自己的服务器，外加一台只看得到密文的推送中转服务器。
-- Moshpit 不会悄悄往你的主机装东西，不会背着你开会话，传输降级时会明说，而不是默默切换。
+- 密码和私钥保存在 iOS Keychain；可同步的凭据是否跨设备同步，由 iCloud 设置控制。
+- 录音和识别均在设备上进行；接受或取消语音审阅后释放临时重识别录音。
+- 主机安装和创建会话由用户在 App 中明确操作，各种连接传输均保留 SSH 主机密钥校验。
 
-任何 SSH 服务器都能用。Mosh、tmux、herdr 都是可选的，安装指引内置在 App 里。
+任何 SSH 服务器均可使用。Mosh、tmux、herdr 按需安装，App 内提供安装说明。
 
 ## 从源码构建
 
-需要装有 Xcode 26 的 macOS（App 面向 iOS 18，但要用 iOS 26 SDK 编译）、
-[XcodeGen](https://github.com/yonaskolb/XcodeGen)（`brew install xcodegen`），以及一台
-iOS 18 或更新的 iPhone / iPad 模拟器或真机。
+需要 macOS、Xcode 26 或更高版本、[XcodeGen](https://github.com/yonaskolb/XcodeGen)、
+用于构建内置网络库的 Go 1.27.3，以及 iOS 18 或更高版本的模拟器或设备。
 
 ```sh
-git clone https://github.com/Cluas/moshpit.git
-cd moshpit
-xcodegen generate        # project.yml 是唯一真源，.xcodeproj 由它生成
-open Moshpit.xcodeproj
+git clone https://github.com/Aias00/hermit.git
+cd hermit
+brew install xcodegen
+scripts/build-tailcat.sh # 先安装 Go；此步骤构建固定版本的原生网络库
+xcodegen generate        # project.yml 是工程配置的唯一来源
+open Hermit.xcodeproj
 ```
 
-选 **Moshpit** scheme 和一台模拟器，按 ⌘R。Swift 包（SwiftTerm 的 fork、Citadel、WhisperKit）
-首次构建时自动解析。真机构建要在 `Signing.xcconfig` 里填你的 Team ID，文件里的注释和
-[docs/install-free-account.md](docs/install-free-account.md) 都有步骤，包括免费 Apple ID 的走法。
+选择 **Hermit** scheme 和模拟器，再按 ⌘R。Swift 依赖会在首次构建时解析。
+真机需要在 `Signing.xcconfig` 中配置签名，详见[贡献指南](CONTRIBUTING.md)和
+[个人设备安装说明](docs/install-free-account.md)。
 
-按 CI 的方式跑测试：
+模拟器测试使用 ad hoc 签名，让系统 Keychain 测试保有必要的 entitlement：
 
 ```sh
-xcodebuild test -project Moshpit.xcodeproj -scheme Moshpit \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' CODE_SIGNING_ALLOWED=NO
+xcodebuild test -project Hermit.xcodeproj -scheme Hermit \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \
+  DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= CODE_SIGNING_REQUIRED=YES
 ```
 
-少数几组测试在无签名构建下会跳过（它们需要 App Group 容器），键盘快捷键那组只在 iPad
-模拟器上跑；日志里会逐个写明。
+将 `-destination` 改为本机已安装的模拟器。外部集成测试需要相应 fixture，测试日志会说明跳过的用例。
 
 ## 仓库结构
 
 | 路径 | 内容 |
 |---|---|
-| `Moshpit/` | App 本体：SwiftUI 界面，SSH / Mosh / tmux / herdr 服务，推送配对，语音输入 |
-| `Extensions/` | 三个 App 扩展：`MoshpitIsland/`（实时活动与锁屏小组件，Vibe Island）、`MoshpitPush/`（通知服务扩展，在设备上解开推送）、`MoshpitShare/`（分享扩展，把一张图交给某个 agent 的窗格） |
-| `Packages/MoshpitKit/` | App 和三个扩展共用的本地 Swift package：日志、实时活动载荷、推送信封与配对存储 |
-| `Tests/` | `MoshpitTests/` 单元测试，`MoshpitUITests/` UI 测试 |
-| `push-relay/` | 主机与 APNs 之间的无状态 Go 中转服务器，部署清单在它的 `deploy/` 下 |
-| `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md)、[PUSH.md](docs/PUSH.md)（推送协议全流程）、[PATCHES.md](docs/PATCHES.md)（SwiftTerm fork 改了什么）、设计笔记 |
-| `scripts/` | `host/` 装到开发机上的 shell 脚本，`gen/` 生成器，`verify/` 端到端验证，`capture/` 截图流程，`spikes/` 实验，`release/` 归档打包 |
+| `Hermit/` | App 界面、SSH / Mosh / tmux / herdr 服务、网络接入、同步与语音输入 |
+| `Extensions/` | `HermitIsland/` 小组件和实时活动、`HermitPush/` 加密通知扩展、`HermitShare/` 图片分享扩展 |
+| `Packages/HermitKit/` | App 和扩展共用的库；为兼容已有功能，Swift 模块仍为 `MoshpitKit` |
+| `Tests/` | `HermitTests/` 单元测试、`HermitUITests/` 界面测试 |
+| `push-relay/` | 主机与 APNs 之间的 Go 中继，部署文件在 `deploy/` |
+| `docs/` | [架构](docs/ARCHITECTURE.md)、[推送协议](docs/PUSH.md)、[SwiftTerm 修改](docs/PATCHES.md)和设计、验证记录 |
+| `scripts/` | 主机辅助脚本、生成器、验证 fixture、截图和发布工具 |
 
-App 默认连维护者的中转服务器；[docs/PUSH.md](docs/PUSH.md) 写明了中转服务器能看到什么、看不到什么，以及怎么自己搭一台。
+继承的默认推送中继属于上游 Moshpit；[推送文档](docs/PUSH.md)说明了协议及自行部署的方法。
 
-## 参与贡献
+## 覆盖升级兼容
 
-先读 [CONTRIBUTING.md](CONTRIBUTING.md)（xcodegen 优先的工作流和代码风格），涉及安全问题请先看
-[SECURITY.md](SECURITY.md)。所有人都遵守[行为准则](CODE_OF_CONDUCT.md)。
+更名为 Hermit 不要求改变已安装 App 的身份。既有 bundle、Keychain、App Group、云记录
+和主机协议标识继续沿用，以兼容已保存的主机、密钥、实时活动及远端辅助脚本。
+主 App 的 Swift 模块仍为 `Moshpit`，共享模块仍为 `MoshpitKit`。历史验证记录和产物路径
+保留生成时的原名。
 
-## 社区
+## 参与开发
 
-Moshpit 在 [LINUX DO](https://linux.do) 社区有帖子。有问题或想法，去那里聊和开 issue 一样欢迎。
+请阅读[贡献指南](CONTRIBUTING.md)了解 XcodeGen 工作流和代码约定；安全问题先看
+[SECURITY.md](SECURITY.md)。参与者遵守[行为准则](CODE_OF_CONDUCT.md)。
 
-## 许可证
+## 许可证与上游
 
-Moshpit 是自由软件，以 [GNU 通用公共许可证第 3 版](LICENSE)（GPL-3.0-only）发布。你可以在该许可证的
-条款下构建、修改和再分发。App Store 上的版本由持有版权的维护者发布。第三方组件保留各自的许可证，
-见 [NOTICES.md](NOTICES.md)。
+Hermit 基于 [Moshpit](https://github.com/Cluas/moshpit)，采用
+[GNU General Public License v3.0](LICENSE)（GPL-3.0-only），并保留原有版权及许可证声明。
+第三方组件保留各自许可证，见 [NOTICES.md](NOTICES.md)。

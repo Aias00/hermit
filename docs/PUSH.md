@@ -1,6 +1,6 @@
 # Remote agent notifications (APNs)
 
-How an agent on your own server wakes a phone that is not running Moshpit.
+How an agent on your own server wakes a phone that is not running Hermit.
 
 ## Why this exists
 
@@ -10,7 +10,7 @@ live tmux `-CC` channel, and it posts local notifications and drives the Dynamic
 Island. That path has one hard limit, and it is not a bug we can fix:
 
 > iOS suspends the app seconds after it leaves the screen and kills its sockets
-> shortly after. Nothing in Moshpit is executing to notice the agent asking.
+> shortly after. Nothing in Hermit is executing to notice the agent asking.
 
 So "Claude is blocked on a permission prompt" reaches you only while you are
 already looking at your phone — which is the moment you least need telling. A
@@ -37,7 +37,7 @@ agent hook fires
                                              |- sign JWT (ES256, .p8)
                                              `-- POST /3/device/... -> APNs -> push
                                                                                |
-                                             MoshpitPush (NSE) <----------------'
+                                             HermitPush (NSE) <----------------'
                                                open(envelope, SECRET)
                                                honor PushPrefs (detail, sound)
                                                rewrite title + body
@@ -263,7 +263,7 @@ send token, which buys three things: unpairing one server cannot break the
 others, a compromised host cannot forge notifications appearing to come from a
 different one, and rate limiting is per host.
 
-Nothing is pasted into a shell. `HostInstaller` (`Moshpit/Services/Install/`)
+Nothing is pasted into a shell. `HostInstaller` (`Hermit/Services/Install/`)
 runs everything over the same SSH exec channel image attachment uses —
 `SessionHub.ActiveSession.acquireFileTransferSSH()`: the in-band session when
 there is one, the mosh sidecar otherwise, an on-demand dial for pure mosh from
@@ -288,7 +288,7 @@ cannot be blocked by an agent holding the one that happens to be active.
   * **Agent configs are merged in Swift**, not on the host. The flow this
     replaces carried a jq program plus a python3 fallback plus a heredoc to hold
     them; the host now needs only `cat` and `base64 -d`. A config that will not
-    parse is reported, never overwritten, and the copy from before Moshpit ever
+    parse is reported, never overwritten, and the copy from before Hermit ever
     touched it is kept once as `<config>.moshpit.orig`.
 
 Where the secrets live on the phone: a file in the App Group container with
@@ -351,7 +351,7 @@ guarantee back on the phone.
 
 ## Why there are no buttons
 
-A notification from Moshpit wakes you, names the agent, says what it is asking,
+A notification from Hermit wakes you, names the agent, says what it is asking,
 and opens that pane when tapped. It offers nothing else, and the nothing is the
 design.
 
@@ -365,7 +365,7 @@ that it was hard.
 **Allow was a blind keystroke.** It sent Enter, which accepts whatever option the
 agent had highlighted. Tapping it meant approving an action you had not read, on
 the strength of a one-line title, from an app whose entire value proposition is
-that you *can* read it. Moshpit is a terminal. The correct answer to "an agent
+that you *can* read it. Hermit is a terminal. The correct answer to "an agent
 needs you" is to look at the pane — which is exactly what tapping the
 notification does. A button that lets you skip the looking is not a convenience
 in this product; it is an invitation to rubber-stamp an agent's permission
@@ -394,7 +394,7 @@ That last one is fixed regardless, because it was never only about buttons: the
 notification DELEGATE was registered in the same late `.task`, so a cold launch
 from a tapped notification could reach iOS's callback before anything existed to
 receive it. Everything the system can call into before a view exists now happens
-in `MoshpitApp.init()` — the only point before every reader, which is the same
+in `HermitApp.init()` — the only point before every reader, which is the same
 conclusion `-MOSHPIT_RESET` reached for the same reason.
 
 What the removal took with it: `/v1/respond`, `/v1/await`, the relay's mailbox,
@@ -488,7 +488,7 @@ senders send no duration; absent reads as short, because quieter is the
 recoverable direction.
 
 **One renderer, two deliveries.** Every card — pushed or local — is composed by
-`AgentNotificationCopy` in MoshpitKit, so the same event reads the same however
+`AgentNotificationCopy` in HermitKit, so the same event reads the same however
 it reached the phone. Before, a pushed finish was "✓ claude / mac-mini.lan" and
 its local twin "✓ claude finished / work · 0 · 14: bl", and neither said what
 had finished. Now both read
@@ -504,7 +504,7 @@ Bash: rm -rf build — mac-mini · work
 The place is the connection's name and the session (a digits-only session name
 is dropped — tmux's default `0` read as a broken counter); the window is gone,
 because the body now says WHAT. The extension carries its own strings catalog
-(`Extensions/MoshpitPush/Localizable.xcstrings`, written by
+(`Extensions/HermitPush/Localizable.xcstrings`, written by
 `scripts/gen/gen_xcstrings.py` from the same table as the app's), which is what
 lets the sentence be translated in a process whose `Bundle.main` is not the app.
 Durations are Foundation's own unit formatting and need no catalog. Show detail
@@ -572,11 +572,14 @@ register there is nothing to fill up — no storage exists. The old
 `/v1/register` endpoints answer 410 so an outdated build reads "update the
 app", not "the relay is broken".
 
-## What has to be done by hand at developer.apple.com
+## Upstream provisioning record — 2026-08-24
 
-One visit, four things. Measured on 2026-08-24 by decoding the profiles this Mac
-had cached (`security cms -D`) and by attempting a real device build — so this is
-what IS, not what should be:
+This section records the original Moshpit deployment, not the signing state of
+a current Hermit checkout. Use your own authorized signing configuration for
+new builds. The identifiers below are preserved as historical evidence.
+
+Four items were checked on 2026-08-24 by decoding the profiles that Mac had
+cached (`security cms -D`) and by attempting a real device build:
 
     com.cluas.moshpit          aps-environment: absent   App Group: present
     com.cluas.moshpit.island   aps-environment: absent   App Group: present
@@ -621,7 +624,12 @@ signed-in Xcode account SESSION with which to register the two new App IDs and
 mint their profiles. Doing steps 2 and 3 in the portal (or once in Xcode with the
 account signed in) is what clears it — not adding an account you already have.
 
-## Known gaps
+## Known gaps — upstream history
+
+The notes below record the original Moshpit implementation and its dated
+verification. They retain the original process names and signing state;
+they are not a validation report for a current Hermit build.
+
 
 - ~~The setup sheet has not been driven visually.~~ **Captured 2026-08-24** by
   `MoshpitUITests/HostSetupScreenshotUITest`, which launches straight into each
@@ -749,7 +757,7 @@ account signed in) is what clears it — not adding an account you already have.
   and regenerated the profile, and both the signed binary and the embedded
   profile carry the key:
 
-      codesign -d --entitlements - Moshpit.app
+      codesign -d --entitlements - Hermit.app
         [Key] com.apple.developer.usernotifications.time-sensitive
         [Value] [Bool] true
 - **`aps-environment` breaks free-account device builds.** The Push
@@ -801,18 +809,18 @@ account signed in) is what clears it — not adding an account you already have.
 | JWT is verifiable ES256, token caching, headers, 410 handling | `push-relay/apns/apns_test.go` | `go test ./...` |
 | payload shape, allowlists, throttle, env fallback | `push-relay/relay_test.go` | `go test ./...` |
 | **the real shell sender against the real relay** | `TestShellSenderInterop` | `go test ./...` |
-| the same vector, opened by CryptoKit | `Tests/MoshpitTests/Services/PushSealedBoxTests.swift` | `xcodebuild -scheme MoshpitUnitTests test` |
-| pairing material (the one-liner's tests went with it) | `Tests/MoshpitTests/Services/PushPairingTests.swift` | same |
-| the shell↔Swift drift guard for both host scripts | `Tests/MoshpitTests/Services/HostScriptsTests.swift` | same |
-| install engine: commands, digests, staleness, uninstall | `Tests/MoshpitTests/Services/HostInstallerTests.swift` | same |
-| agent config merge and removal, JSON and TOML | `Tests/MoshpitTests/Services/AgentHookConfigTests.swift` | same |
-| the setup screen's state machine | `Tests/MoshpitTests/Services/HostSetupModelTests.swift` | same |
-| `awaitSelfTest` returns on timeout instead of hanging | `Tests/MoshpitTests/Services/PushServiceTests.swift` | same |
-| extension rendering and userInfo routing | `Tests/MoshpitTests/Services/PushRemoteNotificationTests.swift` | same |
-| the extension's own `didReceive`, against the real App Group store | `Tests/MoshpitTests/Services/PushNotificationServiceTests.swift` | same |
+| the same vector, opened by CryptoKit | `Tests/HermitTests/Services/PushSealedBoxTests.swift` | `xcodebuild -scheme HermitUnitTests test` |
+| pairing material (the one-liner's tests went with it) | `Tests/HermitTests/Services/PushPairingTests.swift` | same |
+| the shell↔Swift drift guard for both host scripts | `Tests/HermitTests/Services/HostScriptsTests.swift` | same |
+| install engine: commands, digests, staleness, uninstall | `Tests/HermitTests/Services/HostInstallerTests.swift` | same |
+| agent config merge and removal, JSON and TOML | `Tests/HermitTests/Services/AgentHookConfigTests.swift` | same |
+| the setup screen's state machine | `Tests/HermitTests/Services/HostSetupModelTests.swift` | same |
+| `awaitSelfTest` returns on timeout instead of hanging | `Tests/HermitTests/Services/PushServiceTests.swift` | same |
+| extension rendering and userInfo routing | `Tests/HermitTests/Services/PushRemoteNotificationTests.swift` | same |
+| the extension's own `didReceive`, against the real App Group store | `Tests/HermitTests/Services/PushNotificationServiceTests.swift` | same |
 | hook -> seal -> relay -> payload, end to end | `scripts/verify/verify-push-e2e.sh` | manual, no credentials needed |
 | the installer's real commands against a real host | `scripts/verify/verify-host-install.sh` | manual, needs passwordless ssh + tmux |
-| **the lock-screen card's HEIGHT** | `Tests/MoshpitTests/Island/LockScreenHeightTests.swift` | `xcodebuild -scheme MoshpitUnitTests test` |
+| **the lock-screen card's HEIGHT** | `Tests/HermitTests/Island/LockScreenHeightTests.swift` | `xcodebuild -scheme HermitUnitTests test` |
 
 iOS clips a Lock Screen Live Activity at 160pt and reports nothing — no warning,
 no log, no callback. The only signal is a photograph of a phone with the card
@@ -833,6 +841,11 @@ from its NAME, so a test with two agents both called "claude" — the realistic 
 two Claude panes — handed `ForEach` two identical ids and measured 220pt for a
 shape that actually renders 152. Real ids are `"<connectionUUID>:<paneId>"` and
 cannot collide. A fixture that can makes every number in the file suspect.
+
+### Upstream verification history
+
+These dated observations retain the original Moshpit names, logs and
+deployment identifiers.
 
 **`xcrun simctl push` does NOT exercise the extension.** Verified on 2026-08-24
 against an iPhone 17 Pro simulator: SpringBoard accepted the notification and

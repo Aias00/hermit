@@ -1,4 +1,4 @@
-// Package sealbox implements Moshpit's push envelope: the format a coding
+// Package sealbox implements Hermit's push envelope: the format a coding
 // agent's hook seals its status into on the dev host, and only the phone can
 // open.
 //

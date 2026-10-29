@@ -102,7 +102,7 @@ enum SSHBannerProbe {
                         try connection.channel.pipeline.syncOperations.addHandler(SSHBannerReceiver(result: result))
                     }.get()
                     try await connection.activate()
-                    try await connection.channel.writeAndFlush(ByteBuffer(string: "SSH-2.0-Moshpit_Cloudflare_P0\r\n")).get()
+                    try await connection.channel.writeAndFlush(ByteBuffer(string: "SSH-2.0-Hermit_Cloudflare_P0\r\n")).get()
                     return try await result.futureResult.get()
                 } onCancel: {
                     connection.channel.close(promise: nil)

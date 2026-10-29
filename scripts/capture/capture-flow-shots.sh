@@ -55,10 +55,10 @@ WRAP_ABS="$(cd "$(dirname "$WRAP")" && pwd)/$(basename "$WRAP")"
 
 echo "▶ Building"
 DERIVED="$(mktemp -d)"
-xcodebuild -project Moshpit.xcodeproj -scheme Moshpit -configuration Debug \
+xcodebuild -project Hermit.xcodeproj -scheme Hermit -configuration Debug \
   -sdk iphonesimulator -destination "platform=iOS Simulator,name=$SIM_NAME" \
   -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO build >/dev/null 2>&1
-APP="$(find "$DERIVED/Build/Products" -name 'Moshpit.app' -type d | head -1)"
+APP="$(find "$DERIVED/Build/Products" -name 'Hermit.app' -type d | head -1)"
 xcrun simctl install "$SIM_UDID" "$APP"
 xcrun simctl status_bar "$SIM_UDID" override --time "9:41" --batteryState charged \
   --batteryLevel 100 --wifiBars 3 --cellularBars 4 --dataNetwork wifi 2>/dev/null || true

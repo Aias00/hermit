@@ -143,7 +143,7 @@ def start(state_path, root):
     root=root.resolve()
     (root/'config/herdr').mkdir(parents=True)
     (root/'bin').mkdir();(root/'nested/subfolder').mkdir(parents=True)
-    write(root/'marker.txt','Moshpit isolated simulator file browser fixture\n')
+    write(root/'marker.txt','Hermit isolated simulator file browser fixture\n')
     write(root/'nested/subfolder/example.txt','Nested file preview fixture\n')
     write(root/'shell', '#!/bin/sh\ncd '+shlex.quote(str(root))+'\nexec /bin/bash --noprofile --norc -i\n',0o700)
     write(root/'config/herdr/config.toml', 'onboarding = false\n[terminal]\ndefault_shell = '+json.dumps(str(root/'shell'))+'\nshell_mode = "non_login"\n[update]\nversion_check = false\nmanifest_check = false\n')

@@ -1,4 +1,4 @@
-# SwiftLint configuration for Moshpit
+# SwiftLint configuration for Hermit
 #
 # This lint config is being retrofitted onto a large, pre-existing SwiftUI /
 # actor-heavy codebase, so the goal is signal over noise: keep the rules that
@@ -6,7 +6,7 @@
 # on day one (line/file/body length, etc.). Tighten over time.
 
 included:
-  - Moshpit
+  - Hermit
   - Packages
   - Extensions
   - Tests
@@ -14,7 +14,7 @@ included:
 excluded:
   - .build
   - build
-  - Moshpit.xcodeproj
+  - Hermit.xcodeproj
   - design-audit
   - scripts
 

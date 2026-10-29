@@ -1,5 +1,8 @@
 # Cloudflare SSH 实施记录
 
+当前项目名为 Hermit，仓库为 [Aias00/hermit](https://github.com/Aias00/hermit)。
+下文的历史验证产物、部署标识和当时使用的仓库名称按原记录保留。
+
 本轮交付是可配置的实验客户端与验证工具。**不代表设计中的 P0/G1/G2、P1/P2 已全部通过真实环境验收。** 真实联调另建了隔离的测试 Tunnel、DNS 与仅允许本人登录的 Access 应用；2026-10-27 又按用户要求部署 Mac mini 常驻 SSH 入口（见下节）。已有 Magpie 等服务及策略未改动。入口部署、真实验证结果与本地 fixture 结果分开记录。
 
 ## 2026-10-27：Mac mini 常驻 SSH 入口
@@ -8,7 +11,7 @@
 `Mac mini SSH` Access 应用及其独立 allow 策略，再发布 DNS。此入口直接连接
 Mac mini 已运行的系统 SSH；测试 fixture 的 `54242` 端口和临时凭据未用于此部署。
 
-手机 Moshpit 新建连接时填写：
+手机 Hermit 新建连接时填写：
 
 | 字段 | 值 |
 |---|---|
@@ -149,7 +152,7 @@ python3 scripts/spikes/cloudflare-ssh/local_fixture.py --help
 
 App 测试通过 `TEST_RUNNER_MOSHPIT_CF_FIXTURE` 注入 fixture JSON 路径；只有测试代码信任临时 CA，生产默认信任不变。覆盖主机指纹、exec stdin（含 128 KiB）、PTY/resize、SFTP、缺少 header、拒绝不可信证书及拒绝 SSH 主机密钥。
 
-模型、登录缓存与恢复测试在 `Tests/MoshpitTests`；`CloudflareConnectionUITest` 在 iPhone/iPad 共用表单执行保存、重启回读、Mosh 互斥和切回直连的无网络流程。
+模型、登录缓存与恢复测试在 `Tests/HermitTests`；`CloudflareConnectionUITest` 在 iPhone/iPad 共用表单执行保存、重启回读、Mosh 互斥和切回直连的无网络流程。
 
 ## 本轮验证结果（2026-10-27）
 
@@ -170,9 +173,9 @@ App 测试通过 `TEST_RUNNER_MOSHPIT_CF_FIXTURE` 注入 fixture JSON 路径；�
 ```sh
 python3 scripts/spikes/cloudflare-ssh/local_fixture.py start --state /tmp/moshpit-cf.json
 TEST_RUNNER_MOSHPIT_CF_FIXTURE=/tmp/moshpit-cf.json xcodebuild test \
-  -project Moshpit.xcodeproj -scheme Moshpit \
+  -project Hermit.xcodeproj -scheme Hermit \
   -destination 'platform=iOS Simulator,name=iPad mini (A17 Pro)' \
-  -only-testing:MoshpitTests -only-testing:MoshpitUITests/CloudflareConnectionUITest \
+  -only-testing:HermitTests -only-testing:HermitUITests/CloudflareConnectionUITest \
   -parallel-testing-enabled NO -testLanguage en -testRegion US \
   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \
   DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= CODE_SIGNING_REQUIRED=YES

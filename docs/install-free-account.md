@@ -1,6 +1,11 @@
-# 本地安装 Moshpit 到 iPhone(免费 Apple 开发者账号)
+# 本地安装 Hermit 到 iPhone(免费 Apple 开发者账号)
 
-免费 Apple ID 足以把 Moshpit 装到你自己的 iPhone——没有推送、没有后台模式,Live Activity
+已有安装升级时，沿用原来的签名团队、主 App 和扩展 Bundle ID。仅因品牌改为 Hermit
+而修改 Bundle ID，会把它变成另一个 App，无法直接使用原有安装的数据与 Keychain。
+本项目的个人安装继续使用 `com.aias.moshpit.personal` 及对应扩展 ID。新用户首次安装
+才需要按自己的开发者账号选择唯一标识。
+
+免费 Apple ID 足以把 Hermit 装到你自己的 iPhone——没有推送、没有后台模式,Live Activity
 只是个 Info.plist 开关。唯一的 entitlement 是一个 App Group(`group.com.cluas.moshpit`,
 主 App 与灵动岛扩展靠它共享 Agent 状态);免费账号签它偶尔会失败,遇到就看下面「常见问题」
 里剥掉扩展只验主 App 的做法。
@@ -13,7 +18,7 @@
 | mosh + SSH + tmux 全功能 | 后台远程推送(我们不用) |
 | 本地通知 + 灵动岛 Live Activity | App 不在同一网络时远程安装 |
 
-**硬限制(记住)**:① App **7 天过期**,过期后图标在但打不开,重新 ⌘R 一次即可续(数据保留)。② 同时最多 **3 个**自签 App。③ 每 7 天最多 10 个 App ID(Moshpit 占 2 个:主 App + 灵动岛扩展)。
+**硬限制(记住)**:① App **7 天过期**,过期后图标在但打不开,重新 ⌘R 一次即可续(数据保留)。② 同时最多 **3 个**自签 App。③ 每 7 天最多 10 个 App ID(Hermit 占 2 个:主 App + 灵动岛扩展)。
 
 ---
 
@@ -26,7 +31,7 @@
    ```bash
    ./scripts/release/team-id.sh
    ```
-   若提示还没有 team:先在 Xcode 里打开 `Moshpit.xcodeproj`,选 **Moshpit** target ▸
+   若提示还没有 team:先在 Xcode 里打开 `Hermit.xcodeproj`,选 **Hermit** target ▸
    Signing & Capabilities ▸ Team 下拉选你的 Personal Team(这一步会触发 Xcode
    创建证书),再跑一次脚本。
 
@@ -66,12 +71,12 @@
 
 ```bash
 # 设备 UDID:xcrun devicectl list devices
-xcodebuild -project Moshpit.xcodeproj -scheme Moshpit -configuration Debug \
+xcodebuild -project Hermit.xcodeproj -scheme Hermit -configuration Debug \
   -destination 'generic/platform=iOS' \
   -derivedDataPath build/Device -allowProvisioningUpdates build
 
 xcrun devicectl device install app --device <UDID> \
-  build/Device/Build/Products/Debug-iphoneos/Moshpit.app
+  build/Device/Build/Products/Debug-iphoneos/Hermit.app
 ```
 
 ---
@@ -85,11 +90,11 @@ xcrun devicectl device install app --device <UDID> \
 
 1. **出包**(未签名 .ipa,含灵动岛扩展):
    ```bash
-   ./scripts/release/build-ipa.sh        # → build/Moshpit.ipa(约 9 MB)
+   ./scripts/release/build-ipa.sh        # → build/Hermit.ipa
    ```
 2. **装 AltStore**:Mac/PC 装 [AltServer](https://altstore.io),手机装 AltStore,
    在 AltStore 里用你的 Apple ID 登录。
-3. **侧载**:把 `build/Moshpit.ipa` 拖进 AltStore(或 `altserver -u <UDID> build/Moshpit.ipa`)。
+3. **侧载**:把 `build/Hermit.ipa` 拖进 AltStore(或 `altserver -u <UDID> build/Hermit.ipa`)。
    AltStore 用你的 Apple ID 重签后安装。
 4. **开自动续签**:AltStore ▸ Settings ▸ 打开 Background Refresh。让 AltServer 在
    电脑常驻,手机与电脑同一 Wi-Fi(并开启设备的 Wi-Fi 同步)即可后台续签。
@@ -97,7 +102,7 @@ xcrun devicectl device install app --device <UDID> \
 **前提与现实**:
 - AltServer 需要在一台电脑上常驻、且手机定期能与它同网可达——后台刷新才会发生;
   完全离线太久仍会过期(打开 App 触发一次前台刷新即可补上)。
-- AltStore 本身占用免费账号 3 个 App 名额里的 1 个(剩 2 个;Moshpit 是其中之一)。
+- AltStore 本身占用免费账号 3 个 App 名额里的 1 个(剩 2 个;Hermit 是其中之一)。
 - 后台刷新不是 100% 可靠(iOS 后台调度 + 设备可达性所限),但比每周手动强得多。
 - **想完全摆脱"电脑常驻"**:用 [SideStore](https://sidestore.io)(AltStore 分支,
   靠设备本地 WireGuard 回环续签,无需电脑在同一网络)。流程同上,出包脚本通用。
@@ -112,20 +117,20 @@ xcrun devicectl device install app --device <UDID> \
 - **"Failed to register bundle identifier"** → `com.cluas.moshpit` 全球唯一被占用了。
   改 `project.yml` 里 `com.cluas.moshpit` → 更独特的(如 `com.<你的标识>.moshpit`),
   连带把 `.island` 后缀的扩展 id 一起改,`xcodegen generate` 后重试。
-- **灵动岛扩展签名报错** → 免费账号偶发。临时验证主 App:在 `project.yml` 的 Moshpit
-  target `dependencies` 里去掉 `MoshpitIsland` 那两行,generate 后只装主 App(会暂时
+- **灵动岛扩展签名报错** → 免费账号偶发。临时验证主 App:在 `project.yml` 的 Hermit
+  target `dependencies` 里去掉 `HermitIsland` 那两行,generate 后只装主 App(会暂时
   失去 Live Activity);确认主 App 能装后再加回来排查。
 - **装上后 7 天打不开** → 正常,重新 ⌘R 续签。
 - **想人不在家也能更新** → 免费账号做不到;升级 $99/年开发者账号后走 TestFlight(90 天)
   或直接上架。
 - **签名报 "Push Notifications capability is not available"** → 免费个人账号签不了
-  推送。把 `project.yml` 里 Moshpit target entitlements 下的 `aps-environment:
+  推送。把 `project.yml` 里 Hermit target entitlements 下的 `aps-environment:
   development` 那一行注释掉,`xcodegen generate` 后重试;同理可以照灵动岛扩展那条把
-  `MoshpitPush` 从 `dependencies` 里去掉。代价是**远程推送整个失效**——agent 在你没
+  `HermitPush` 从 `dependencies` 里去掉。代价是**远程推送整个失效**——agent 在你没
   开着 App 时叫不到你(`docs/PUSH.md` 讲的就是这条链路)。App 开着时的灵动岛、本地
   通知、锁屏 Allow/Deny 都不受影响,因为那条路不经过 APNs。
   注意 `project.yml` 是 Info.plist 和 entitlements 的**唯一源头**:直接改生成出来的
-  `Moshpit.entitlements` 会在下次 generate 时被覆盖回去。
+  `Hermit.entitlements` 会在下次 generate 时被覆盖回去。
 - **签名报 Time Sensitive Notifications 相关的 capability 错误** → 同一个原因,同一个
   做法:把 `project.yml` 里 `com.apple.developer.usernotifications.time-sensitive`
   那一行注释掉再 `xcodegen generate`。这条 entitlement 让"agent 在等你批准"的通知能
@@ -134,4 +139,4 @@ xcrun devicectl device install app --device <UDID> \
   iOS 在没有 entitlement 时静默降级,不报错也不打日志——所以不用改任何代码。
 
   注意这跟 Critical Alerts 不是一回事:后者(能无视静音键)要向 Apple 单独申请审批,
-  Moshpit 没用、也不打算用。
+  Hermit 没用、也不打算用。

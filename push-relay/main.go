@@ -68,9 +68,9 @@ var categories = map[string]string{
 // still renders (as this English), but untranslated.
 const (
 	fallbackAttentionTitle = "An agent needs you"
-	fallbackAttentionBody  = "Open Moshpit to see what it is asking."
+	fallbackAttentionBody  = "Open Hermit to see what it is asking."
 	fallbackDoneTitle      = "An agent finished"
-	fallbackDoneBody       = "Open Moshpit to send the next instruction."
+	fallbackDoneBody       = "Open Hermit to send the next instruction."
 )
 
 // expiries bound how long APNs may keep trying to deliver each kind.
@@ -189,7 +189,7 @@ func (r *relay) routes() http.Handler {
 	// attempt should read as "this flow is gone, update the app", not as a
 	// relay that lost its routes.
 	gone := func(w http.ResponseWriter, _ *http.Request) {
-		httpError(w, http.StatusGone, "this relay is stateless — update Moshpit and re-pair")
+		httpError(w, http.StatusGone, "this relay is stateless — update Hermit and re-pair")
 	}
 	mux.HandleFunc("POST /v1/register", gone)
 	mux.HandleFunc("DELETE /v1/register", gone)
