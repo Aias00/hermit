@@ -185,6 +185,7 @@ final class TmuxSessionController: MultiplexerControlling {
     /// empty dictionary is "not read yet", which the breadcrumb treats as
     /// incomplete rather than as "no agent here".
     private(set) var agentHooksLoaded = false
+    private(set) var agentHooksObservedAt: Date?
 
     /// Invoked on the main actor at the end of each ``pollAgentHooks()`` after
     /// ``agentHooks`` has been rebuilt, so the monitor can re-sync the Vibe
@@ -2899,6 +2900,7 @@ final class TmuxSessionController: MultiplexerControlling {
     func pollAgentHooks() {
         guard snapshot.isAttached else { return }
         sendCommand("list-panes -a -F \(Self.agentHookFormat)") { [weak self] response in
+            guard !response.isError else { return }
             self?.parseAgentHooks(response.lines)
         }
     }
@@ -2913,10 +2915,13 @@ final class TmuxSessionController: MultiplexerControlling {
         var parsed: [String: AgentHook] = [:]
         for line in lines {
             // omittingEmptySubsequences:false keeps empty fields in position;
-            // maxSplits:4 preserves any literal `|` inside a user-set title.
+            // maxSplits:5 preserves any literal `|` inside a user-set title.
             let parts = line.split(separator: "|", maxSplits: 5,
                                    omittingEmptySubsequences: false)
-            guard parts.count == 6, !parts[0].isEmpty else { continue }
+            // Do not replace a good cached snapshot with a partly parsed read,
+            // or certify a garbage/error line as a new empty observation.
+            guard parts.count == 6, parts[0].first == "%", parts[0].count > 1,
+                  parts[0].dropFirst().utf8.allSatisfy({ (48...57).contains($0) }) else { return }
             let paneId = String(parts[0])
             let stateRaw = String(parts[1])
             // Only the three hook-emitted states are valid; anything else
@@ -2937,6 +2942,7 @@ final class TmuxSessionController: MultiplexerControlling {
         }
         agentHooks = parsed
         agentHooksLoaded = true
+        agentHooksObservedAt = Date()
         onAgentHooksUpdated?()
     }
 

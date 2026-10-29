@@ -431,12 +431,35 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 #endif
 
+    private final class DisplayLinkTarget: NSObject {
+        weak var terminal: TerminalView?
+
+        init(terminal: TerminalView) { self.terminal = terminal }
+
+        @objc func step(_ displayLink: CADisplayLink) {
+            guard let terminal else {
+                displayLink.invalidate()
+                return
+            }
+            terminal.step(displaylink: displayLink)
+        }
+    }
+
     func setupDisplayUpdates ()
     {
-        link = CADisplayLink(target: self, selector: #selector(step))
-            
+        // RunLoop retains the display link, which retains its target even
+        // while paused. A weak proxy lets discarded panes release their
+        // scrollback and Metal resources without requiring every host to
+        // remember a separate teardown call.
+        let target = DisplayLinkTarget(terminal: self)
+        link = CADisplayLink(target: target, selector: #selector(DisplayLinkTarget.step(_:)))
         link.add(to: .current, forMode: .default)
         suspendDisplayUpdates()
+    }
+
+    deinit {
+        link?.invalidate()
+        progressReportTimer?.invalidate()
     }
 
     private func setupProgressBar() {

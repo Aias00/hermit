@@ -15,11 +15,16 @@ struct TerminalScreen: View {
     /// (transport pill, breadcrumb, reconnect) picks up the switch immediately.
     @State private var connection: ServerConnection
     let hub: SessionHub
-    private let initialCommand: String?
-    @State private var sentInitialCommand = false
-    @State private var composerText = ""
-    @State private var composerIsSending = false
-    @State private var composerSendError: String?
+    @State private var composerDraft: TerminalComposerDraft
+    private var composerText: String {
+        get { composerDraft.text }
+        nonmutating set { composerDraft.text = newValue }
+    }
+    private var composerIsSending: Bool { composerDraft.isSending }
+    private var composerSendError: String? {
+        get { composerDraft.errorMessage }
+        nonmutating set { composerDraft.errorMessage = newValue }
+    }
     @State private var previewFontSize: Double?
     @State private var displayedTerminalFontSize: Double?
     @AppStorage("moshpit.conversation.manualZoom") private var manualZoom = false
@@ -27,7 +32,6 @@ struct TerminalScreen: View {
     @AppStorage("moshpit.conversation.sidebar.visible") private var showsConversationSidebar = false
     @AppStorage("moshpit.terminal.useMetal") private var useMetalRenderer = true
     @State private var showsExtraKeys = false
-    @AppStorage("moshpit.composer.history.v1") private var composerHistory = Data()
     /// What "leave" means here. On an iPhone the screen is pushed and pops;
     /// on an iPad it is the detail column of a split view, where there is
     /// nothing to pop, so Home supplies the action. nil = `dismiss()`.
@@ -38,11 +42,10 @@ struct TerminalScreen: View {
     let onToggleSidebar: (() -> Void)?
 
     init(connection: ServerConnection, hub: SessionHub,
-         onLeave: (() -> Void)? = nil, onToggleSidebar: (() -> Void)? = nil,
-         initialCommand: String? = nil) {
+         onLeave: (() -> Void)? = nil, onToggleSidebar: (() -> Void)? = nil) {
         self._connection = State(initialValue: connection)
         self.hub = hub
-        self.initialCommand = initialCommand
+        self._composerDraft = State(initialValue: hub.session(for: connection)?.composerDraft ?? TerminalComposerDraft())
         self.onLeave = onLeave
         self.onToggleSidebar = onToggleSidebar
     }
@@ -56,15 +59,19 @@ struct TerminalScreen: View {
     @Environment(ConnectionStoreHolder.self) private var connectionHolder
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @State private var active: SessionHub.ActiveSession?
     @State private var showWindowsSheet = false
     @State private var showSessionsSheet = false
     @State private var showPaneSheet = false
     @State private var showError = false
+    @State private var accessLoginTask: Task<Void, Never>?
     /// Confirmation dialog before switching SSH ⇄ Mosh — a reconnect isn't
     /// something a stray tap should trigger.
     @State private var showProtocolSwitchConfirm = false
+    @State private var showTerminalActions = false
+    @State private var pendingTerminalAction: (() -> Void)?
     @State private var showMoshDiagnostics = false
     /// Whether the user has asked for the keyboard yet in this session.
     ///
@@ -80,6 +87,9 @@ struct TerminalScreen: View {
     /// read.
     @State private var keyboardIntent: KeyboardIntent = .unasked
     @State private var composerFocused = false
+    @State private var dictationReviewOwnsKeyboard = false
+    @State private var focusBeforeSheet: (composer: Bool, keyboard: KeyboardIntent)?
+    @State private var highlightedTerminalLocation: String?
 
     private enum KeyboardIntent {
         /// Screen just opened; nobody has asked either way.
@@ -92,6 +102,10 @@ struct TerminalScreen: View {
     private var focusPolicy: TerminalFocusPolicy {
         // A sheet must never let the pane grab the keyboard back underneath it.
         if anySheetOpen { return .resign }
+        // A dismissing sheet must restore the draft before the terminal can
+        // queue a first-responder request during the same layout pass.
+        if focusBeforeSheet != nil { return .resign }
+        if dictationReviewOwnsKeyboard && dictation != nil && keyboardIntent != .down { return .allow }
         if composerFocused && keyboardIntent != .down { return .allow }
         switch keyboardIntent {
         case .unasked: return .allow
@@ -121,6 +135,7 @@ struct TerminalScreen: View {
     /// Minted on mic tap (not at screen init) so idle terminals never touch
     /// audio plumbing.
     @State private var dictation: VoiceDictationController?
+    @State private var dictationFinishTask: Task<Void, Never>?
     /// Live image-attachment flow; non-nil while its overlay is up. Minted
     /// when the picker returns (not on chip tap) so cancelling the picker
     /// leaves no state behind.
@@ -305,6 +320,26 @@ struct TerminalScreen: View {
         return active?.herdrControl?.snapshot
     }
 
+    /// Follow the renderer's control-plane snapshot; a tab button itself never
+    /// changes this label while Herdr is still waiting for the server to focus it.
+    private var terminalLocationID: String? {
+        guard let snapshot = tmuxSnapshot, let session = snapshot.activeSessionId,
+              let window = snapshot.activeWindowId else { return nil }
+        return "\(session)/\(window)"
+    }
+
+    private var terminalLocationTitle: String {
+        guard let snapshot = tmuxSnapshot,
+              let sessionID = snapshot.activeSessionId,
+              let session = snapshot.sessions[sessionID] else {
+            return "\(connection.username)@\(connection.host)"
+        }
+        guard let windowID = snapshot.activeWindowId,
+              let window = snapshot.windows[windowID] else { return session.name }
+        let windowTitle = window.name == String(window.index) ? window.name : "\(window.index):\(window.name)"
+        return "\(session.name) › \(windowTitle)"
+    }
+
     /// The agent hooks matching ``tmuxSnapshot`` — same concrete-type dance,
     /// same reason. Feeds the breadcrumb's agent segment; empty when no
     /// control plane (or no hooks) so the crumb falls back to command/number.
@@ -331,6 +366,7 @@ struct TerminalScreen: View {
     private var anySheetOpen: Bool {
         showWindowsSheet || showSessionsSheet || showPaneSheet || showCamera
             || quickLookURL != nil || remoteFolder != nil || remoteVideoOpen
+            || photoPickerPresented || filePickerPresented || showTerminalActions
     }
 
     /// Whether the pane behind a modal is pinned to the size it already has.
@@ -351,12 +387,25 @@ struct TerminalScreen: View {
     /// size. Nobody sees the intermediate size either way; the sheet is over
     /// the whole screen.
     private func presentSheet(_ open: @escaping () -> Void) {
+        if focusBeforeSheet == nil {
+            focusBeforeSheet = (composerFocused, keyboardIntent)
+        }
         geometryHoldRelease?.cancel()
         geometryHoldRelease = nil
         geometryHold = true
+        typingCoordinator?.hostContainer?.requestFocus(.resign)
         UIApplication.shared.sendAction(
             #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         open()
+    }
+
+    private func restoreFocusAfterSheet() {
+        if let previous = focusBeforeSheet {
+            keyboardIntent = previous.keyboard
+            composerFocused = previous.composer && previous.keyboard != .down
+            focusBeforeSheet = nil
+        }
+        releaseGeometryHold()
     }
 
     /// Let the pane adopt the container's bounds again, once the sheet is
@@ -419,6 +468,13 @@ struct TerminalScreen: View {
                     withAnimation(.easeOut(duration: 0.2)) { active?.degrade = nil }
                 })
                 .transition(.move(edge: .top).combined(with: .opacity))
+        } else if active?.shellWasReopened == true {
+            HStack {
+                Text("连接已重建，当前是新的 Shell；旧进程状态未知。")
+                    .font(.caption)
+                Button("知道了") { active?.shellWasReopened = false }
+            }
+            .padding(10).background(.orange.opacity(0.15))
         }
     }
 
@@ -567,10 +623,20 @@ struct TerminalScreen: View {
             }
         }
         .onChange(of: anySheetOpen) { _, open in
-            if !open { releaseGeometryHold() }
+            if !open { restoreFocusAfterSheet() }
+        }
+        .onChange(of: terminalLocationID) { previous, current in
+            guard previous != nil, let current else { return }
+            highlightedTerminalLocation = current
+        }
+        .task(id: highlightedTerminalLocation) {
+            guard highlightedTerminalLocation != nil else { return }
+            do { try await Task.sleep(for: .seconds(1.5)) } catch { return }
+            highlightedTerminalLocation = nil
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIResponder.keyboardWillShowNotification)) { _ in
+            guard !anySheetOpen else { return }
             // Tapping the terminal raises the keyboard directly — treat that as
             // "I want to type" so the toggle state can't fight it: with the flag
             // stale, the next snapshot-driven re-render force-resigned the
@@ -590,10 +656,16 @@ struct TerminalScreen: View {
                 previewFontSize = nil
                 nativeViewportVersion = 1
             }
-            if settings.raiseKeyboardOnOpen { keyboardIntent = .up }
+            if settings.raiseKeyboardOnOpen {
+                keyboardIntent = .up
+                composerFocused = true
+            }
             await connectAndAttach()
         }
         .onDisappear {
+            cancelDictation()
+            accessLoginTask?.cancel()
+            accessLoginTask = nil
             // Back to Home keeps the connection alive but stops rendering — hand
             // our phone-grid window pin back so a desktop client sharing those
             // windows isn't stranded at the phone width. Re-pinned in .task on
@@ -662,10 +734,17 @@ struct TerminalScreen: View {
             #if DEBUG
             if connected { seedImageDraftForUITest() }
             #endif
-            guard connected, !sentInitialCommand, let command = initialCommand, !command.isEmpty else { return }
-            sentInitialCommand = true
-            active?.sendPaste(command)
-            active?.sendInput(Data([0x0D]))
+            guard connected, let active, let command = active.consumeInitialCommand() else { return }
+            // Consume before awaiting: an uncertain acknowledgement must never
+            // replay a command when this screen is reopened or re-hosted on iPad.
+            Task { @MainActor in
+                do {
+                    try await active.submitLine(command)
+                } catch {
+                    composerText = command
+                    composerSendError = error.localizedDescription
+                }
+            }
         }
         // The shell is keyboard-like chrome — 30pt chips, one-line crumbs, a
         // fixed-height bar — and, like the system keyboard, it does not grow
@@ -673,14 +752,25 @@ struct TerminalScreen: View {
         // own font has its own setting.
         .dynamicTypeSize(...DynamicTypeSize.xLarge)
         .moshpitCard(isPresented: $showError) {
-            MoshpitNoticeCard(
-                icon: "bolt.slash.fill",
-                title: "Connection Error",
-                message: active?.viewModel.errorMessage ?? ""
-            ) {
-                showError = false
-                active?.viewModel.errorMessage = nil
-                leave()
+            if active?.viewModel.requiresAccessLogin == true {
+                MoshpitModalCard(
+                    icon: "person.badge.key.fill", title: "登录 Cloudflare",
+                    message: Text(active?.viewModel.errorMessage ?? ""),
+                    buttons: [
+                        ModalButton("取消", kind: .secondary) { showError = false; leave() },
+                        ModalButton("登录", kind: .primary, action: authorizeCloudflare),
+                    ]
+                ) { EmptyView() }
+            } else {
+                MoshpitNoticeCard(
+                    icon: "bolt.slash.fill",
+                    title: "Connection Error",
+                    message: active?.viewModel.errorMessage ?? ""
+                ) {
+                    showError = false
+                    active?.viewModel.errorMessage = nil
+                    leave()
+                }
             }
         }
         .moshpitCard(
@@ -787,11 +877,34 @@ struct TerminalScreen: View {
     /// Confirmed via the transport pill's confirmation dialog before
     /// `switchProtocol()` runs — a tap alone no longer reconnects immediately.
     private func switchProtocol() {
-        guard active != nil else { return }
+        // Reconnection replaces the presenting screen. Clear the dialog before
+        // that replacement rather than relying on its later dismissal callback.
+        showProtocolSwitchConfirm = false
+        guard active != nil, connection.transport?.requiresSSH == false else { return }
         connection.connectionProtocol = connection.connectionProtocol == .mosh ? .ssh : .mosh
         connectionHolder.store.update(connection)
         Haptics.select()
         reconnect()
+    }
+
+    private func authorizeCloudflare() {
+        guard accessLoginTask == nil, let session = active else { return }
+        showError = false
+        accessLoginTask = Task { @MainActor in
+            defer { accessLoginTask = nil }
+            do {
+                guard case .cloudflare(let settings) = try connection.validatedTransport() else { return }
+                try await CloudflareAccessAuth.shared.authorize(settings: settings)
+                try Task.checkCancellation()
+                guard active === session, hub.sessions[connection.id] === session,
+                      (try? connection.validatedTransport()) == .cloudflare(settings) else { return }
+                reconnect()
+            } catch {
+                guard !Task.isCancelled, active === session else { return }
+                session.viewModel.fail(error)
+                showError = true
+            }
+        }
     }
 
     /// Tear down and re-run the start flow at full feature — used after the
@@ -804,9 +917,12 @@ struct TerminalScreen: View {
         // .reconnecting onChange never fires for them — collapse the keyboard
         // here for the same reason it collapses there.
         keyboardIntent = .down
+        let opensNewShell = connection.transport == .cloudflareSSH && connection.multiplexer == .none
+            && (wasEverLive || active.shellWasReopened)
         Task {
-            await hub.disconnect(connection.id)
-            let session = hub.prepare(connection)
+            let session = await hub.replaceConnection(connection, force: true)
+            guard hub.sessions[connection.id] === session, !session.isStopping else { return }
+            session.shellWasReopened = opensNewShell
             self.active = session
             await hub.start(session, theme: theme, fontSize: settings.fontSize, fontName: settings.fontName,
                         cursorShape: settings.cursorShape, cursorColorId: effectiveCursorColorId,
@@ -869,12 +985,19 @@ struct TerminalScreen: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {
                     Text(connection.displayName).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                        .accessibilityIdentifier("terminal-host-title")
                     Text(connection.multiplexer == .none ? connection.connectionProtocol.label : connection.multiplexer.label)
                         .font(.system(size: 11, weight: .semibold)).foregroundStyle(.cyan)
                         .padding(.horizontal, 7).padding(.vertical, 3).background(.blue.opacity(0.15), in: Capsule())
                 }
-                Text(tmuxSnapshot?.activeSessionId.flatMap { tmuxSnapshot?.sessions[$0]?.name } ?? "\(connection.username)@\(connection.host)")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                Label(terminalLocationTitle, systemImage: tmuxSnapshot == nil ? "network" : "rectangle.stack")
+                    .font(.system(size: 11, weight: highlightedTerminalLocation == nil ? .regular : .semibold))
+                    .foregroundStyle(highlightedTerminalLocation == nil ? TerminalChrome.foreground.opacity(0.7) : TerminalChrome.selectedTab)
+                    .lineLimit(1).truncationMode(.middle)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(terminalLocationTitle)
+                    .accessibilityIdentifier("terminal-location")
+                    .animation(.easeOut(duration: 0.2), value: highlightedTerminalLocation)
             }.frame(maxWidth: .infinity, alignment: .leading)
             conversationIcon("sidebar.leading", label: showsConversationSidebar ? "收起工作区侧栏" : "展开工作区侧栏", identifier: "conversation-sidebar") {
                 showsConversationSidebar.toggle()
@@ -883,38 +1006,25 @@ struct TerminalScreen: View {
             .accessibilityAddTraits(showsConversationSidebar ? [.isSelected] : [])
             .disabled(tmuxSnapshot == nil)
             conversationIcon("folder", label: "远程文件", identifier: "conversation-files") { active?.openWorkingDirectory() }.disabled(!launchIsConnected)
-            Menu {
-                Button("选择会话", systemImage: "rectangle.stack") { presentSheet { showSessionsSheet = true } }.disabled(tmuxSnapshot == nil)
-                Button("选择窗格", systemImage: "rectangle.split.2x2") { presentSheet { showPaneSheet = true } }.disabled(tmuxSnapshot == nil)
-                if connection.multiplexer == .herdr {
-                    Button("自动适配字号", systemImage: "textformat.size") {
-                        previewFontSize = nil
-                        manualZoom = false
-                        settings.fontSize = 13
-                    }
-                    Button("历史上一页", systemImage: "arrow.up.doc") {
-                        active?.scrollActiveTerminal(lines: 20, herdrSource: .pageKey)
-                    }.disabled(!launchIsConnected)
-                    Button("历史下一页", systemImage: "arrow.down.doc") {
-                        active?.scrollActiveTerminal(lines: -20, herdrSource: .pageKey)
-                    }.disabled(!launchIsConnected)
-                }
-                Button("切换 SSH / Mosh", systemImage: "network") { showProtocolSwitchConfirm = true }
-                Button("放大字体", systemImage: "textformat.size.larger") { adjustTerminalFont(by: 1) }.disabled(effectiveTerminalFontSize >= 32)
-                Button("缩小字体", systemImage: "textformat.size.smaller") { adjustTerminalFont(by: -1) }.disabled(effectiveTerminalFontSize <= 8)
-                Toggle("Metal 渲染", isOn: Binding(
-                    get: { useMetalRenderer },
-                    set: { enabled in
-                        useMetalRenderer = enabled
-                        NotificationCenter.default.post(name: TerminalHostContainer.rendererPreferenceChanged, object: nil)
-                    }))
-                    .accessibilityIdentifier("terminal-metal-renderer")
-                Button("重新连接", systemImage: "arrow.clockwise", action: reconnect)
+            Button {
+                showProtocolSwitchConfirm = false
+                presentSheet { showTerminalActions = true }
             } label: {
                 Image(systemName: "ellipsis.circle").font(.system(size: 19)).frame(width: 34, height: 34)
                     .background(TerminalChrome.control, in: Circle())
-            }.accessibilityLabel("终端菜单").accessibilityIdentifier("conversation-menu")
-                .accessibilityValue(String(format: "%.1f pt", effectiveTerminalFontSize))
+            }
+            .accessibilityLabel("终端菜单").accessibilityIdentifier("conversation-menu")
+            .accessibilityValue(String(format: "%.1f pt", effectiveTerminalFontSize))
+            .popover(isPresented: $showTerminalActions, arrowEdge: .top) {
+                terminalActions
+                    .presentationCompactAdaptation(.popover)
+                    .onDisappear {
+                        showProtocolSwitchConfirm = false
+                        let action = pendingTerminalAction
+                        pendingTerminalAction = nil
+                        action?()
+                    }
+            }
         }.foregroundStyle(Color(red: 0.76, green: 0.82, blue: 0.89))
             .padding(.horizontal, 10).padding(.vertical, 8)
             .background(TerminalChrome.background)
@@ -927,10 +1037,86 @@ struct TerminalScreen: View {
             .adaptivePresentation(isPresented: $showPaneSheet) {
                 if let c = active?.tmuxControl { SelectPaneSheet(controller: c) } else if let h = active?.herdrControl { SelectPaneSheet(controller: h) }
             }
-            .confirmationDialog("切换连接协议？", isPresented: $showProtocolSwitchConfirm) {
-                Button("切换") { switchProtocol() }
-                Button("取消", role: .cancel) {}
-            } message: { Text("当前终端将重新连接。") }
+    }
+
+    /// Keep actions in a hosted popover rather than UIKit's cached UIMenu.
+    /// Repeated session replacement could leave a visible UIMenu row whose
+    /// action was no longer invoked. Confirmation stays in the same surface.
+    private var terminalActions: some View {
+        ScrollView {
+        VStack(alignment: .leading, spacing: 4) {
+            if showProtocolSwitchConfirm {
+                Text("切换连接协议？").font(.headline).padding(.horizontal, 12)
+                Text("当前终端将重新连接。")
+                    .font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 12)
+                terminalAction("切换", icon: "network", action: switchProtocol)
+                terminalAction("取消", icon: "xmark") { }
+            } else {
+                terminalAction("选择会话", icon: "rectangle.stack", enabled: tmuxSnapshot != nil) {
+                    presentSheet { showSessionsSheet = true }
+                }
+                terminalAction("选择窗格", icon: "rectangle.split.2x2", enabled: tmuxSnapshot != nil) {
+                    presentSheet { showPaneSheet = true }
+                }
+                if connection.multiplexer == .herdr {
+                    terminalAction("自动适配字号", icon: "textformat.size") {
+                        previewFontSize = nil
+                        manualZoom = false
+                        settings.fontSize = 13
+                    }
+                    terminalAction("历史上一页", icon: "arrow.up.doc", enabled: launchIsConnected) {
+                        active?.scrollActiveTerminal(lines: 20, herdrSource: .pageKey)
+                    }
+                    terminalAction("历史下一页", icon: "arrow.down.doc", enabled: launchIsConnected) {
+                        active?.scrollActiveTerminal(lines: -20, herdrSource: .pageKey)
+                    }
+                }
+                Button {
+                    Log.input.notice("protocol: requested switch confirmation")
+                    showProtocolSwitchConfirm = true
+                } label: {
+                    terminalActionLabel("切换 SSH / Mosh", icon: "network")
+                }
+                .disabled(connection.transport?.requiresSSH != false)
+                terminalAction("放大字体", icon: "textformat.size.larger", enabled: effectiveTerminalFontSize < 32) {
+                    adjustTerminalFont(by: 1)
+                }
+                terminalAction("缩小字体", icon: "textformat.size.smaller", enabled: effectiveTerminalFontSize > 8) {
+                    adjustTerminalFont(by: -1)
+                }
+                terminalAction("Metal 渲染", icon: useMetalRenderer ? "checkmark.circle.fill" : "circle") {
+                    useMetalRenderer.toggle()
+                    NotificationCenter.default.post(name: TerminalHostContainer.rendererPreferenceChanged, object: nil)
+                }
+                .accessibilityIdentifier("terminal-metal-renderer")
+                .accessibilityValue(useMetalRenderer ? "On" : "Off")
+                terminalAction("重新连接", icon: "arrow.clockwise", action: reconnect)
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(8)
+        }
+        .frame(width: 280, height: showProtocolSwitchConfirm ? 170
+            : (verticalSizeClass == .compact ? 240 : (connection.multiplexer == .herdr ? 520 : 380)))
+        .preferredColorScheme(.dark)
+    }
+
+    private func terminalActionLabel(_ title: String, icon: String) -> some View {
+        Label(LocalizedStringKey(title), systemImage: icon)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .contentShape(Rectangle())
+    }
+
+    private func terminalAction(_ title: String, icon: String, enabled: Bool = true,
+                                action: @escaping () -> Void) -> some View {
+        Button {
+            pendingTerminalAction = action
+            showTerminalActions = false
+        } label: {
+            terminalActionLabel(title, icon: icon)
+        }
+        .disabled(!enabled)
     }
 
     /// Herdr tabs belong to the focused workspace; keep them visible beside the terminal.
@@ -944,14 +1130,19 @@ struct TerminalScreen: View {
                         ForEach(tabs) { tab in
                             Button { active?.herdrControl?.selectWindow(tab.id) } label: {
                                 HStack(spacing: 5) {
+                                    if snapshot.activeWindowId == tab.id {
+                                        Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
+                                    }
                                     Text(tab.name).lineLimit(1)
                                 }
                                 .font(.system(size: 12, weight: snapshot.activeWindowId == tab.id ? .semibold : .regular))
-                                .frame(minWidth: 50).frame(height: 24)
+                                .padding(.horizontal, 9).frame(minWidth: 50).frame(height: 30)
                                 .foregroundStyle(snapshot.activeWindowId == tab.id ? TerminalChrome.background : TerminalChrome.foreground)
-                                .background(snapshot.activeWindowId == tab.id ? TerminalChrome.selectedTab : .clear)
+                                .background(snapshot.activeWindowId == tab.id ? TerminalChrome.selectedTab : .clear,
+                                            in: RoundedRectangle(cornerRadius: 7))
                             }
                             .buttonStyle(.plain).id(tab.id)
+                            .accessibilityLabel(tab.name)
                             .accessibilityIdentifier("herdr-tab-\(tab.id)")
                             .accessibilityAddTraits(snapshot.activeWindowId == tab.id ? [.isSelected] : [])
                         }
@@ -974,11 +1165,19 @@ struct TerminalScreen: View {
         .accessibilityIdentifier("herdr-tabs")
     }
 
-    private func conversationIcon(_ icon: String, label: String, identifier: String, action: @escaping () -> Void) -> some View {
+    private func conversationIcon(_ icon: String, label: String, identifier: String,
+                                  selected: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 18)).frame(width: 34, height: 34)
-                .background(TerminalChrome.control, in: Circle())
+            if selected {
+                Image(systemName: icon).font(.system(size: 18)).frame(width: 34, height: 34)
+                    .foregroundStyle(TerminalChrome.background)
+                    .background(TerminalChrome.selectedTab, in: Circle())
+            } else {
+                Image(systemName: icon).font(.system(size: 18)).frame(width: 34, height: 34)
+                    .background(TerminalChrome.control, in: Circle())
+            }
         }.buttonStyle(.plain).accessibilityLabel(label).accessibilityIdentifier(identifier)
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
     private var legacyTopBar: some View {
@@ -1007,7 +1206,9 @@ struct TerminalScreen: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("terminal-transport-switch")
-            .accessibilityHint(Text("Double tap to switch between SSH and Mosh"))
+            .disabled(connection.transport?.requiresSSH != false)
+            .accessibilityHint(connection.transport?.requiresSSH == true
+                ? Text("This connection supports SSH only.") : Text("Double tap to switch between SSH and Mosh"))
             // Long-press reveals live protocol counters as a screenshottable
             // overlay — a black-screen report (cursor + input work, no
             // content) needs real packet loss/reordering or a specific
@@ -1529,10 +1730,31 @@ struct TerminalScreen: View {
         settings.fontSize = size
     }
     private func activateTerminalKeyboard() {
+        dictationReviewOwnsKeyboard = false
         composerFocused = false
         keyboardIntent = .up
         // Complete SwiftUI's field resignation before acquiring terminal focus.
         typingCoordinator?.hostContainer?.requestFocus(.take)
+    }
+
+    private var terminalKeyboardActive: Bool {
+        // A modal temporarily borrows focus; it does not change the chosen
+        // input destination or make the hand button appear to switch modes.
+        if let previous = focusBeforeSheet {
+            return !previous.composer && previous.keyboard == .up
+        }
+        return !dictationReviewOwnsKeyboard && !composerFocused && keyboardIntent == .up
+    }
+
+    private func toggleInputDestination() {
+        if terminalKeyboardActive {
+            typingCoordinator?.hostContainer?.requestFocus(.allow)
+            disarmStickyCtrlIfNeeded()
+            keyboardIntent = .up
+            composerFocused = true
+        } else {
+            activateTerminalKeyboard()
+        }
     }
 
     private func toggleKeyboard() {
@@ -1620,6 +1842,7 @@ struct TerminalScreen: View {
     private func connectAndAttach() async {
         let session = hub.prepare(connection)
         active = session
+        composerDraft = session.composerDraft
         // Foreground/background transitions re-pin/release for the terminal
         // the user is actually looking at.
         hub.visibleSession = session
@@ -1667,7 +1890,7 @@ struct TerminalScreen: View {
         }
         disarmStickyCtrlIfNeeded()
         if shortcut.kind == .image {
-            photoPickerPresented = true
+            presentSheet { photoPickerPresented = true }
             return
         }
         if shortcut.kind == .files {
@@ -1790,31 +2013,38 @@ struct TerminalScreen: View {
     private var draftComposer: some View {
         HStack(spacing: 6) {
             HStack(spacing: 4) {
-                TerminalComposerView(text: $composerText, isFocused: $composerFocused,
+                TerminalComposerView(text: Binding(get: { composerText }, set: { composerText = $0 }), isFocused: Binding(
+                    get: { composerFocused && !anySheetOpen && focusBeforeSheet == nil },
+                    set: { composerFocused = $0 }),
                     onFocus: {
+                        dictationReviewOwnsKeyboard = false
                         typingCoordinator?.hostContainer?.requestFocus(.allow)
                         disarmStickyCtrlIfNeeded()
                         keyboardIntent = .up
+                    }, onKeyboardDismiss: {
+                        composerFocused = false
+                        keyboardIntent = .down
                     })
                     .frame(maxWidth: .infinity)
                     .accessibilityIdentifier("terminal-composer")
-                    .contextMenu {
-                        ForEach(Array(sentComposerHistory.enumerated()), id: \.offset) { _, text in
-                            Button(String(text.prefix(70))) { composerText = text }
-                        }
-                    }
-                conversationIcon("paperplane.fill", label: "发送到终端", identifier: "conversation-send") { submitComposer() }
+                conversationIcon("paperplane.fill", label: String(localized: "Send + Return"), identifier: "conversation-send") { submitComposer() }
+                    .accessibilityHint("Send the draft to the terminal, then press Return.")
                     .disabled(!launchIsConnected || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         || composerIsSending || imageAttachment != nil || fileUploadTask != nil)
             }
             .padding(.leading, 12).padding(.trailing, 3).padding(.vertical, 3)
             .background(TerminalChrome.control.opacity(0.85), in: RoundedRectangle(cornerRadius: 22))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22)
+                    .stroke(composerFocused ? TerminalChrome.selectedTab.opacity(0.65) : .clear, lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
             Menu {
-                Button("照片图库", systemImage: "photo") { photoPickerPresented = true }
+                Button("照片图库", systemImage: "photo") { presentSheet { photoPickerPresented = true } }
                 if CameraCaptureView.isAvailable {
-                    Button("拍照", systemImage: "camera") { showCamera = true }
+                    Button("拍照", systemImage: "camera") { presentSheet { showCamera = true } }
                 }
-                Button("本地文件（单个最多 20 MB）", systemImage: "doc") { filePickerPresented = true }
+                Button("本地文件（单个最多 20 MB）", systemImage: "doc") { presentSheet { filePickerPresented = true } }
                 Button("服务器文件", systemImage: "folder") { active?.openWorkingDirectory() }
             } label: {
                 Image(systemName: "paperclip").font(.system(size: 19)).frame(width: 34, height: 34)
@@ -1822,41 +2052,47 @@ struct TerminalScreen: View {
             }
             .accessibilityLabel("添加附件").accessibilityIdentifier("conversation-attachments")
             .disabled(!launchIsConnected || fileUploadTask != nil || imageAttachment != nil)
-            conversationIcon("hand.draw", label: "直接使用终端键盘", identifier: "conversation-direct-input") {
-                activateTerminalKeyboard()
-            }.disabled(!launchIsConnected)
-            Menu {
-                if sentComposerHistory.isEmpty { Text("暂无发送历史") }
-                ForEach(Array(sentComposerHistory.enumerated()), id: \.offset) { _, text in
-                    Button(String(text.prefix(70))) { composerText = text }
-                }
-                Button("清空发送历史", role: .destructive) { composerHistory = Data() }
-            } label: {
-                Image(systemName: "text.bubble").font(.system(size: 18)).frame(width: 34, height: 34)
-                    .background(TerminalChrome.control, in: Circle())
-            }.accessibilityLabel("发送历史")
+            conversationIcon(terminalKeyboardActive ? "hand.draw.fill" : "hand.draw",
+                             label: String(localized: "Terminal keyboard"), identifier: "conversation-direct-input",
+                             selected: terminalKeyboardActive, action: toggleInputDestination)
+                .accessibilityValue(terminalKeyboardActive ? Text("Terminal input") : Text("Draft"))
+                .accessibilityHint(terminalKeyboardActive ? Text("Switch back to editing the draft.") : Text("Type directly in the terminal. Your draft is kept."))
+                .disabled(!launchIsConnected)
         }.padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 6)
     }
-    private var sentComposerHistory: [String] {
-        (try? JSONDecoder().decode([String].self, from: composerHistory)) ?? []
+
+    private var inputDestinationHint: some View {
+        HStack(spacing: 6) {
+            Label(terminalKeyboardActive ? String(localized: "Terminal input") : String(localized: "Draft"),
+                  systemImage: terminalKeyboardActive ? "terminal" : "square.and.pencil")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(TerminalChrome.selectedTab)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(terminalKeyboardActive ? Text("Terminal input") : Text("Draft"))
+                .accessibilityIdentifier("conversation-input-mode")
+            Text(terminalKeyboardActive ? String(localized: "Keys go directly to the terminal") : String(localized: "Return: new line · Plane: send"))
+                .font(.system(size: 10))
+                .foregroundStyle(TerminalChrome.foreground.opacity(0.7))
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14).padding(.top, 5)
     }
     private func submitComposer() {
         guard launchIsConnected, !composerIsSending, imageAttachment == nil, fileUploadTask == nil,
               !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let active else { return }
-        let text = composerText
-        composerSendError = nil
-        composerIsSending = true
+        let draft = composerDraft
+        let text = draft.text
+        draft.errorMessage = nil
+        draft.isSending = true
         Task { @MainActor in
-            defer { composerIsSending = false }
+            defer { draft.isSending = false }
             do {
                 try await active.submitLine(text)
-                var history = sentComposerHistory
-                history.removeAll { $0 == text }; history.insert(text, at: 0)
-                if let data = try? JSONEncoder().encode(Array(history.prefix(30))) { composerHistory = data }
-                if composerText == text { composerText = "" }
+                if draft.text == text { draft.text = "" }
             } catch {
-                composerSendError = error.localizedDescription
+                draft.errorMessage = error.localizedDescription
             }
         }
     }
@@ -1885,11 +2121,13 @@ struct TerminalScreen: View {
                             } label: {
                                 HStack(spacing: 6) {
                                     if shortcut.kind == .paste { Image(systemName: "doc.on.clipboard") }
-                                    Text(shortcut.kind == .paste ? "粘贴" : shortcut.chipLabel)
+                                    Text(shortcut.kind == .paste ? String(localized: "Paste only") : shortcut.chipLabel)
                                         .font(.system(size: 14, weight: .medium, design: .monospaced))
                                 }.frame(maxWidth: .infinity).frame(height: 40)
                                     .background(TerminalChrome.control, in: RoundedRectangle(cornerRadius: 10))
-                            }.buttonStyle(.plain).accessibilityLabel(shortcut.kind == .paste ? "粘贴" : shortcut.summary)
+                            }.buttonStyle(.plain)
+                                .accessibilityLabel(shortcut.kind == .paste ? String(localized: "Paste only") : shortcut.summary)
+                                .accessibilityHint(shortcut.kind == .paste ? Text("Paste clipboard text into the terminal without adding Return.") : Text(""))
                         }
                     }
                 }.frame(height: min(200, CGFloat((shortcuts.count + 1) / 2) * 48))
@@ -1925,6 +2163,14 @@ struct TerminalScreen: View {
             Button { sendArrow("right") } label: { Image(systemName: "arrow.right") }
                 .accessibilityLabel("向右").accessibilityIdentifier("conversation-arrow-right")
                 .disabled(!launchIsConnected)
+            Button {
+                disarmStickyCtrlIfNeeded()
+                active?.sendInput(Data([0x0D]))
+            } label: { Image(systemName: "return") }
+                .accessibilityLabel("Remote Return")
+                .accessibilityHint("Press Return in the terminal without sending the draft.")
+                .accessibilityIdentifier("conversation-enter")
+                .disabled(!launchIsConnected || composerIsSending)
             if settings.voiceInputEnabled {
                 Button { toggleDictation() } label: { Image(systemName: dictation == nil ? "mic" : "mic.fill") }.accessibilityLabel("语音输入")
             }
@@ -1941,9 +2187,20 @@ struct TerminalScreen: View {
             if let dictation {
                 DictationOverlayView(
                     controller: dictation,
-                    onCancel: { cancelDictation() },
-                    onInsert: { finishDictation() },
-                    onSend: { finishDictation(submit: true) })
+                    onCancel: { dismissDictationToDraft() },
+                    onInsert: { finishDictation(reviewedText: $0) },
+                    onStop: { stopDictationForReview() },
+                    onRetry: { retryDictation($0) },
+                    onReviewFocus: {
+                        dictationReviewOwnsKeyboard = true
+                        typingCoordinator?.hostContainer?.requestFocus(.allow)
+                        disarmStickyCtrlIfNeeded()
+                        composerFocused = false
+                        keyboardIntent = .up
+                    },
+                    initialRequest: settings.dictationRequest,
+                    isFinishing: dictationFinishTask != nil)
+                    .id(ObjectIdentifier(dictation))
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if let imageAttachment {
@@ -1977,6 +2234,7 @@ struct TerminalScreen: View {
                 Text(sendError).font(.system(size: 12)).foregroundStyle(.orange)
                     .padding(.horizontal, 14).padding(.top, 6)
             }
+            inputDestinationHint
             draftComposer
             conversationKeyBar
         }
@@ -2153,57 +2411,103 @@ struct TerminalScreen: View {
         imageAttachment = nil
     }
 
-    /// Mic key: no session → start one; session live → stop-and-insert (the
-    /// natural "I'm done talking" gesture); session failed/preparing → treat
-    /// the tap as dismissal.
+    /// A second mic tap stops for review; accepting text is a separate action.
     private func toggleDictation() {
         disarmStickyCtrlIfNeeded()
         if let dictation {
             if dictation.isListening {
-                finishDictation()
+                stopDictationForReview()
             } else {
-                cancelDictation()
+                dismissDictationToDraft()
             }
             return
         }
         Haptics.tap()
+        #if DEBUG && targetEnvironment(simulator)
+        Log.voice.info("UI fixture gate: lab=\(connection.displayName == "Isolated-UI-Lab") loopback=\(connection.host == "127.0.0.1") draft=\(ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_VOICE_DRAFT")) failure=\(ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_VOICE_FAILURE"))")
+        if connection.displayName == "Isolated-UI-Lab", connection.host == "127.0.0.1",
+           ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_VOICE_DRAFT") {
+            if ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_VOICE_REVIEW") {
+                let controller = VoiceDictationController.previewForReviewUITest()
+                dictation = controller
+                Task { await controller.start(DictationRequest()) }
+                return
+            }
+            let failure: DictationFailure? = ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_VOICE_FAILURE")
+                ? .finalizationFailed : nil
+            dictation = VoiceDictationController.previewForUITest(text: "simulated voice", failure: failure)
+            return
+        }
+        #endif
         let controller = VoiceDictationController()
         dictation = controller
         Task { await controller.start(settings.dictationRequest) }
     }
 
-    /// Stop the mic, wait for the engine's final words, and type the result
-    /// into the live session. `sendPaste` (not raw bytes) so bracketed-paste
-    /// apps — Claude Code prompts being the whole point — receive multi-line
-    /// dictation as one block instead of executing it line by line.
-    ///
-    /// `submit` appends the Return that actually sends it, so dictating a
-    /// prompt is one tap rather than Insert-then-find-the-Enter-key. It stays a
-    /// separate action from Insert on purpose: the same keystroke that submits
-    /// a Claude Code prompt EXECUTES a shell command, and a mis-heard word is
-    /// exactly what you want the chance to read first. Insert keeps that
-    /// chance; Send is for when you have already read it.
-    private func finishDictation(submit: Bool = false) {
-        guard let dictation else { return }
-        Task {
-            if let text = await dictation.finish() {
-                active?.sendPaste(text)
-                if submit {
-                    // After the paste, not bundled into it: a bracketed-paste
-                    // app treats bytes inside the ESC[200~…ESC[201~ wrapper as
-                    // literal text, so a CR in there would be inserted as a
-                    // newline instead of submitting.
-                    active?.sendInput(Data([0x0D]))
-                }
-                Haptics.success()
-            }
-            self.dictation = nil
+    private func stopDictationForReview() {
+        guard let dictation, dictationFinishTask == nil else { return }
+        dictationFinishTask = Task { @MainActor in
+            await dictation.stopForReview()
+            guard !Task.isCancelled, self.dictation === dictation else { return }
+            dictationFinishTask = nil
         }
     }
 
+    private func retryDictation(_ request: DictationRequest) {
+        guard let dictation, dictationFinishTask == nil else { return }
+        dictationFinishTask = Task { @MainActor in
+            await dictation.retry(request)
+            guard !Task.isCancelled, self.dictation === dictation else { return }
+            dictationFinishTask = nil
+        }
+    }
+
+    /// Voice joins the editable draft. The same paper-plane action sends text,
+    /// attachments and dictation, and preserves them if the transport fails.
+    private func finishDictation(reviewedText: String) {
+        guard let dictation, dictationFinishTask == nil else { return }
+        dictationFinishTask = Task { @MainActor in
+            let text: String?
+            if case .failed = dictation.phase {
+                // A failed final pass keeps the overlay open. Only a second,
+                // explicit user action accepts its possibly incomplete text.
+                text = dictation.takePartialTranscript()
+            } else {
+                text = await dictation.finish()
+            }
+            guard !Task.isCancelled, self.dictation === dictation else { return }
+            if case .failed = dictation.phase {
+                dictationFinishTask = nil
+                return
+            }
+            // Consuming the controller releases the recording. The reviewed
+            // text is the user's choice, including any edits made in the panel.
+            if text != nil || dictation.phase == .idle {
+                composerText = DictationTranscript.join(composerText, reviewedText)
+                dictationReviewOwnsKeyboard = false
+                composerFocused = true
+                keyboardIntent = .up
+                Haptics.success()
+            }
+            self.dictation = nil
+            dictationFinishTask = nil
+        }
+    }
+
+    private func dismissDictationToDraft() {
+        // Both the panel Cancel and the mic toggle return to the local draft.
+        // Cancel queued terminal focus before removing the review panel.
+        typingCoordinator?.hostContainer?.requestFocus(.allow)
+        if keyboardIntent == .up { composerFocused = true }
+        cancelDictation()
+    }
+
     private func cancelDictation() {
+        dictationFinishTask?.cancel()
+        dictationFinishTask = nil
         dictation?.cancel()
         dictation = nil
+        dictationReviewOwnsKeyboard = false
     }
 }
 

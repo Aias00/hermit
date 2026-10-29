@@ -11,6 +11,154 @@ import Testing
 @Suite("Whisper dictation engine")
 struct WhisperDictationEngineTests {
 
+    /// Holds work even after cancellation, like a CoreML operation already
+    /// running. Releasing before entry is also safe for test failure cleanup.
+    actor WorkBarrier {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var released = false
+        private(set) var entered = false
+        private(set) var followingCalls = 0
+
+        func wait() async {
+            entered = true
+            await withCheckedContinuation { continuation in
+                if released { continuation.resume() }
+                else { self.continuation = continuation }
+            }
+        }
+
+        func release() {
+            released = true
+            continuation?.resume()
+            continuation = nil
+        }
+
+        func following() { followingCalls += 1 }
+    }
+
+    actor SuspendedTranscriber: WhisperTranscribing {
+        let barrier = WorkBarrier()
+        private(set) var calls = 0
+        private(set) var cancellationObserved = false
+
+        func warmUp(variant: String) async throws {}
+
+        func transcribe(samples: [Float], language: String?, variant: String) async throws -> String {
+            calls += 1
+            let call = calls
+            if call == 1 {
+                await withTaskCancellationHandler {
+                    await barrier.wait()
+                } onCancel: {
+                    Task { await self.observeCancellation() }
+                }
+            }
+            return call == 1 ? "preview" : "final"
+        }
+
+        private func observeCancellation() { cancellationObserved = true }
+        func release() async { await barrier.release() }
+    }
+
+    private func eventually(_ condition: @Sendable () async -> Bool) async -> Bool {
+        for _ in 0 ..< 500 {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return false
+    }
+
+    @Test("A cancelled queued transcription never enters the model")
+    func gateRemovesCancelledWaiter() async throws {
+        let gate = WhisperTranscriptionGate()
+        let barrier = WorkBarrier()
+        let active = Task {
+            try await gate.withPermit {
+                await barrier.wait()
+                return 1
+            }
+        }
+        #expect(await eventually { await barrier.entered })
+        let queued = Task {
+            try await gate.withPermit {
+                await barrier.following()
+                return 2
+            }
+        }
+        #expect(await eventually { await gate.waitingCount == 1 })
+        queued.cancel()
+        // Removal must not depend on the active operation returning.
+        #expect(await eventually { await gate.waitingCount == 0 })
+        await barrier.release()
+        #expect(try await active.value == 1)
+        await #expect(throws: CancellationError.self) { try await queued.value }
+        #expect(await barrier.followingCalls == 0)
+    }
+
+    @Test("Cancelling active decoding does not let a retry overlap its model use")
+    func gateKeepsCancelledActivePermitUntilReturn() async throws {
+        let gate = WhisperTranscriptionGate()
+        let barrier = WorkBarrier()
+        let active = Task {
+            try await gate.withPermit {
+                await barrier.wait()
+                return 1
+            }
+        }
+        #expect(await eventually { await barrier.entered })
+        active.cancel()
+        let retry = Task {
+            try await gate.withPermit {
+                await barrier.following()
+                return 2
+            }
+        }
+        #expect(await eventually { await gate.waitingCount == 1 })
+        #expect(await barrier.followingCalls == 0)
+        await barrier.release()
+        await #expect(throws: CancellationError.self) { try await active.value }
+        #expect(try await retry.value == 2)
+        #expect(await barrier.followingCalls == 1)
+    }
+
+    @Test("Final decoding waits for a cancelled preview to actually return")
+    func finalWaitsForUncooperativePreview() async throws {
+        let store = SuspendedTranscriber()
+        let engine = WhisperDictationEngine(store: store, variant: "test", language: "zh", label: "test")
+        try await engine.start()
+        engine.append(try buffer(frames: 48_000))
+        #expect(await eventually { await store.calls == 1 })
+        let finish = Task { await engine.finishAudio() }
+        #expect(await eventually { await store.cancellationObserved })
+        #expect(await store.calls == 1)
+        await store.release()
+        await finish.value
+        var updates: [DictationUpdate] = []
+        for try await update in engine.updates { updates.append(update) }
+        #expect(await store.calls == 2)
+        #expect(updates == [DictationUpdate(finalizedText: "final", volatileText: "")])
+    }
+
+    @Test("Cancel drops late audio and an in-flight final result")
+    func cancelDropsLateBuffersAndFinal() async throws {
+        let store = SuspendedTranscriber()
+        let engine = WhisperDictationEngine(store: store, variant: "test", language: "zh", label: "test")
+        try await engine.start()
+        engine.append(try buffer(frames: 16_000))
+        let finish = Task { await engine.finishAudio() }
+        #expect(await eventually { await store.calls == 1 })
+        engine.cancel()
+        for _ in 0 ..< 30 { engine.append(try buffer(frames: 16_000)) }
+        // The duration-derived budget also proves late buffers were not kept.
+        #expect(engine.finalizeTimeout == .seconds(20))
+        await store.release()
+        await finish.value
+        var updates: [DictationUpdate] = []
+        for try await update in engine.updates { updates.append(update) }
+        #expect(updates.isEmpty)
+        #expect(await store.calls == 1)
+    }
+
     /// Records what it was asked to transcribe and replays scripted answers.
     actor ScriptedTranscriber: WhisperTranscribing {
         /// Answers handed out in order; the last one repeats once exhausted.

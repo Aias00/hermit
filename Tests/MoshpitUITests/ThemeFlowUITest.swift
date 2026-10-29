@@ -16,17 +16,12 @@ final class ThemeFlowUITest: XCTestCase {
     /// Settings → Theme, returning the gallery's navigation bar.
     @MainActor
     private func openGallery(_ app: XCUIApplication) -> XCUIElement {
-        app.buttons["主机与设置"].tap()
-        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
 
         let themeRow = app.staticTexts["Theme"]
         // The DISPLAY group sits below the fold on smaller devices.
-        if !themeRow.isHittable {
-            app.swipeUp()
-        }
-        XCTAssertTrue(themeRow.waitForExistence(timeout: 3))
+        XCTAssertTrue(reveal(themeRow, in: app))
         themeRow.tap()
 
         let gallery = app.navigationBars["Theme"]
@@ -43,16 +38,17 @@ final class ThemeFlowUITest: XCTestCase {
         _ = openGallery(app)
 
         // Every built-in is offered, by name.
-        XCTAssertTrue(app.staticTexts["GitHub Dark"].exists)
-        XCTAssertTrue(app.staticTexts["Dracula"].exists)
-        XCTAssertTrue(app.staticTexts["Tokyo Night"].exists)
-        // MY THEMES sits under eight built-ins; the gallery is a lazy Form.
-        XCTAssertTrue(app.reveal(app.staticTexts["No custom themes yet."]),
+        for name in ["GitHub Dark", "Dracula", "Tokyo Night"] {
+            XCTAssertTrue(reveal(app.staticTexts[name], in: app))
+        }
+        // The iPad sheet only materializes the first few of nine built-ins.
+        XCTAssertTrue(reveal(app.staticTexts["No custom themes yet."], in: app),
                       "A fresh install has no custom themes")
 
         // Picking one selects it: back in Settings the row shows the new name.
-        XCTAssertTrue(app.reveal(app.buttons["theme-row-dracula"].firstMatch))
-        app.buttons["theme-row-dracula"].firstMatch.tap()
+        let dracula = app.descendants(matching: .any).matching(identifier: "theme-row-dracula").firstMatch
+        XCTAssertTrue(reveal(dracula, in: app))
+        dracula.tap()
         app.navigationBars["Theme"].buttons.firstMatch.tap()      // back
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Dracula"].waitForExistence(timeout: 3),
@@ -70,19 +66,21 @@ final class ThemeFlowUITest: XCTestCase {
         // Long-press a built-in → Duplicate & Edit (the only route from a
         // read-only built-in to something editable).
         let duplicate = app.buttons["Duplicate & Edit"]
-        pressForMenu(app.buttons["theme-row-nord"].firstMatch, until: duplicate)
+        let nord = app.descendants(matching: .any).matching(identifier: "theme-row-nord").firstMatch
+        XCTAssertTrue(reveal(nord, in: app))
+        pressForMenu(nord, until: duplicate)
         duplicate.tap()
 
         // The editor opens on a copy, pre-named and previewing live.
         XCTAssertTrue(app.navigationBars["Nord Copy"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Background"].exists)
-        XCTAssertTrue(app.reveal(app.staticTexts["Override bright colors"]))
+        XCTAssertTrue(reveal(app.staticTexts["Override bright colors"], in: app))
         XCTAssertFalse(app.staticTexts["Bright Black"].exists,
                        "Bright overrides start collapsed for a theme that has none")
 
         // Rename it so the assertion below can't accidentally match the source.
         let nameField = app.textFields["Theme name"]
-        XCTAssertTrue(app.reveal(nameField))
+        XCTAssertTrue(reveal(nameField, in: app))
         nameField.tap()
         nameField.press(forDuration: 1.2)
         if app.menuItems["Select All"].waitForExistence(timeout: 2) {
@@ -94,7 +92,7 @@ final class ThemeFlowUITest: XCTestCase {
 
         // Saving both stores it and makes it the active theme.
         XCTAssertTrue(app.navigationBars["Theme"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.reveal(app.staticTexts["Test Palette"]))
+        XCTAssertTrue(reveal(app.staticTexts["Test Palette"], in: app))
         XCTAssertFalse(app.staticTexts["No custom themes yet."].exists)
 
         app.navigationBars["Theme"].buttons.firstMatch.tap()
@@ -127,7 +125,7 @@ final class ThemeFlowUITest: XCTestCase {
         app.navigationBars["Import Theme"].buttons["Import"].tap()
 
         XCTAssertTrue(app.navigationBars["Theme"].waitForExistence(timeout: 4))
-        XCTAssertTrue(app.reveal(app.staticTexts["Pasted VS"]),
+        XCTAssertTrue(reveal(app.staticTexts["Pasted VS"], in: app),
                       "An imported theme should appear under MY THEMES and be selected")
     }
 
@@ -140,15 +138,16 @@ final class ThemeFlowUITest: XCTestCase {
         _ = openGallery(app)
 
         // Make a custom theme to delete.
-        pressForMenu(app.buttons["theme-row-monokai"].firstMatch,
-                     until: app.buttons["Duplicate & Edit"])
+        let monokai = app.descendants(matching: .any).matching(identifier: "theme-row-monokai").firstMatch
+        XCTAssertTrue(reveal(monokai, in: app))
+        pressForMenu(monokai, until: app.buttons["Duplicate & Edit"])
         app.buttons["Duplicate & Edit"].tap()
         XCTAssertTrue(app.navigationBars["Monokai Copy"].waitForExistence(timeout: 3))
         app.buttons["theme-editor-save"].tap()
 
         let copyRow = app.staticTexts["Monokai Copy"]
         XCTAssertTrue(app.navigationBars["Theme"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.reveal(copyRow))
+        XCTAssertTrue(reveal(copyRow, in: app))
 
         let deleteButton = app.buttons["Delete"]
         pressForMenu(copyRow, until: deleteButton)
@@ -160,11 +159,42 @@ final class ThemeFlowUITest: XCTestCase {
         XCTAssertTrue(app.staticTexts["Delete Monokai Copy?"].waitForExistence(timeout: 3))
         app.buttons["Delete"].firstMatch.tap()
 
-        XCTAssertTrue(app.reveal(app.staticTexts["No custom themes yet."]))
+        XCTAssertTrue(reveal(app.staticTexts["No custom themes yet."], in: app))
         // Deleting the *selected* theme has to move the selection, or the
         // terminal would silently fall back with no visible reason.
         app.navigationBars["Theme"].buttons.firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["GitHub Dark"].waitForExistence(timeout: 3),
+        XCTAssertTrue(app.staticTexts["Remote Navy"].waitForExistence(timeout: 3),
                       "Selection should fall back to the default theme")
+    }
+
+    @MainActor
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        var towardTop = false
+        for attempt in 0..<24 {
+            let form = app.collectionViews.firstMatch
+            guard form.exists else { return false }
+            var visible = form.frame.intersection(app.frame).insetBy(dx: 10, dy: 10)
+            for bar in app.navigationBars.allElementsBoundByIndex where bar.frame.intersects(visible) {
+                let bottom = visible.maxY
+                visible.origin.y = max(visible.minY, bar.frame.maxY)
+                visible.size.height = max(0, bottom - visible.minY)
+            }
+            if app.keyboards.firstMatch.exists {
+                visible.size.height = max(0, min(visible.maxY, app.keyboards.firstMatch.frame.minY - 54) - visible.minY)
+            }
+            guard visible.height > 80 else { return false }
+            let frame = element.exists ? element.frame : .zero
+            if !frame.isEmpty {
+                if visible.contains(CGPoint(x: frame.midX, y: frame.midY)), element.isHittable { return true }
+                towardTop = frame.midY < visible.midY
+            } else if attempt == 8 || attempt == 16 { towardTop.toggle() }
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let x = visible.minX + 4
+            let from = visible.minY + visible.height * (towardTop ? 0.25 : 0.75)
+            let to = visible.minY + visible.height * (towardTop ? 0.75 : 0.25)
+            origin.withOffset(CGVector(dx: x, dy: from)).press(forDuration: 0.05,
+                thenDragTo: origin.withOffset(CGVector(dx: x, dy: to)))
+        }
+        return false
     }
 }

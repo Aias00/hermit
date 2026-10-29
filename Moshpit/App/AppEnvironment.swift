@@ -61,6 +61,7 @@ extension View {
             .environment(env.connectionHolder)
             .environment(env.keychainHolder)
             .environment(env.router)
+            .environment(CloudSyncService.shared)
             .environment(\.appEnvironment, env)
     }
 

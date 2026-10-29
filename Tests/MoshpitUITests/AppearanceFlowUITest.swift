@@ -10,8 +10,6 @@ final class AppearanceFlowUITest: XCTestCase {
 
     @MainActor
     private func openSettings(_ app: XCUIApplication) {
-        app.buttons["主机与设置"].tap()
-        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
     }

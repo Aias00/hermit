@@ -27,6 +27,9 @@ final class ThemeStore {
     }
 
     /// Read again if the last read could not be trusted; a no-op otherwise.
+    /// Re-read a validated iCloud import and publish the new collection.
+    func reloadAfterCloudSync() { load() }
+
     func reloadIfNeeded() {
         if !isAuthoritative { load() }
     }

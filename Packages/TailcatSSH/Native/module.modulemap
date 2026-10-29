@@ -1,0 +1,5 @@
+module CTailcat {
+  header "tailcat.h"
+  header "moshpit_tailscale.h"
+  export *
+}

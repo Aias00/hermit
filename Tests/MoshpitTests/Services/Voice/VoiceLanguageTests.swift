@@ -143,7 +143,7 @@ struct VoiceLanguageTests {
 
     @Test("Empty language reads as Auto-detect, not as a blank")
     func displayNames() {
-        #expect(WhisperLanguageCatalog.displayName(for: "") == "Auto-detect")
+        #expect(WhisperLanguageCatalog.displayName(for: "") == String(localized: "Auto-detect"))
         #expect(!WhisperLanguageCatalog.displayName(for: "zh").isEmpty)
     }
 }

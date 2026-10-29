@@ -25,6 +25,9 @@ settings:
     # bumping it here by hand is exactly the step that gets forgotten.
     CURRENT_PROJECT_VERSION: 1
     CODE_SIGN_STYLE: Automatic
+    # Register this container under the signing team before a device build.
+    # Personal Team builds deliberately omit all iCloud entitlements.
+    MOSHPIT_ICLOUD_CONTAINER_ID: iCloud.com.aias.moshpit
   configs:
     Debug:
       # Pinned for Debug only — it MUST NOT sit in `base`. An App Store archive
@@ -38,6 +41,10 @@ settings:
       CODE_SIGN_IDENTITY: "Apple Development"
 
 packages:
+  TailcatSSH:
+    path: Packages/TailcatSSH
+  CloudflareSSH:
+    path: Packages/CloudflareSSH
   # The code every process shares (Log, the Live Activity payload and widget
   # snapshot, the share queue, the sealed-push envelope and pairing store).
   # A local package rather than files listed into four targets by path, so
@@ -171,6 +178,10 @@ targets:
     entitlements:
       path: Moshpit/App/Moshpit.entitlements
       properties:
+        com.apple.developer.icloud-container-identifiers:
+          - "$(MOSHPIT_ICLOUD_CONTAINER_ID)"
+        com.apple.developer.icloud-services:
+          - CloudKit
         com.apple.security.application-groups:
           - group.com.cluas.moshpit
         # Remote push, for agent notifications that must arrive when the app is
@@ -258,6 +269,14 @@ targets:
         Release:
           CODE_SIGN_IDENTITY: "Apple Development"
     dependencies:
+      - package: TailcatSSH
+        product: TailcatSSH
+      - package: TailcatSSH
+        product: TailscaleSSH
+      - package: CloudflareSSH
+        product: CloudflareSSH
+      - package: CloudflareSSH
+        product: CloudflareAccess
       - package: MoshpitKit
       - package: SwiftTerm
       - package: Citadel
@@ -488,6 +507,7 @@ targets:
       # is exactly how the overflow was found. Rendering it here turns that into
       # a number.
       - path: Extensions/MoshpitIsland/MoshpitIslandWidget.swift
+      - path: Extensions/MoshpitIsland/ConnectionLiveActivityWidget.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cluas.moshpit.tests

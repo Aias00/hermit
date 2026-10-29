@@ -11,17 +11,35 @@ import Testing
 @Suite("withTimeoutValue contract")
 struct TimeoutValueTests {
 
+    private actor SuspendedOperation {
+        private var continuation: CheckedContinuation<Int, Never>?
+        private var finished = false
+
+        func run() async -> Int {
+            guard !finished else { return 0 }
+            return await withCheckedContinuation { continuation = $0 }
+        }
+
+        func finish() {
+            finished = true
+            continuation?.resume(returning: 0)
+            continuation = nil
+        }
+    }
+
     @Test("An op that hangs AND ignores cancellation cannot hold the caller past the deadline")
     func hangingUncancellableOpReturnsNilOnTime() async {
+        let operation = SuspendedOperation()
         let started = Date()
         let result: Int? = await withTimeoutValue(0.2) {
-            // The half-open-socket shape: never completes, never checks
-            // Task.isCancelled — like an exec bridged off a NIO future.
-            await withCheckedContinuation { (_: CheckedContinuation<Int, Never>) in }
+            // Stay suspended through cancellation, like an exec bridged off
+            // a NIO future. The test releases it only after the deadline wins.
+            await operation.run()
         }
         let elapsed = Date().timeIntervalSince(started)
         #expect(result == nil)
         #expect(elapsed < 2.0, "the deadline arm must win unconditionally; \(elapsed)s means the caller waited on the straggler")
+        await operation.finish()
     }
 
     @Test("A fast op wins and delivers its value")

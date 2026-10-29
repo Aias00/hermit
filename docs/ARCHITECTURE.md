@@ -87,6 +87,15 @@ static library the Swift `Mosh/` code links against.
 
 ## 2. Services overview
 
+Terminal input has two explicit destinations. `TerminalComposerView` edits a
+local multiline draft: keyboard Return inserts a newline, and the paper-plane
+button calls `ActiveSession.submitLine`. Voice results and attachment paths
+join that same draft. The shortcut bar's remote Return sends one CR without
+changing the draft or keyboard focus; it works even with an empty draft or a
+hidden keyboard. Terminal taps still allow direct remote typing. Opening the
+keyboard normally selects the draft, and modal pickers save and restore both
+the previous input target and keyboard visibility.
+
 The interesting logic is in `Services/`. Four files carry most of the weight:
 
 | File | Role |
@@ -417,3 +426,14 @@ control path that does not need the app to reconnect).
   host) → `push-relay/main.go` `handleNotify` → `MoshpitPush/NotificationService`
   → `AgentNotificationHandler`. Run `scripts/verify/verify-push-e2e.sh` to watch the
   whole chain work with no Apple credentials.
+
+
+## Experimental Cloudflare access
+
+See [Cloudflare SSH access (Shell, tmux, and optional Herdr)](design/cloudflare-herdr-access.md)
+for the SSH-over-tunnel architecture, authentication gates, recovery semantics,
+and acceptance criteria. The configurable experimental transport is implemented;
+live login, Keychain reuse, expiry and several SSH operations have been exercised.
+Existing-channel SSH setup waits for actual authentication before opening command
+or terminal channels. Live stability and the official-client comparison remain
+unpassed; see the [implementation and verification record](design/cloudflare-access-implementation.md).

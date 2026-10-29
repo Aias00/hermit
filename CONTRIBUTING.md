@@ -38,6 +38,13 @@ explains itself in its header.
 brew install xcodegen
 ```
 
+The optional Tailcat SSH transport embeds a Go library. Install Go 1.27.3,
+then run `scripts/build-tailcat.sh` before generating the project. The script
+downloads a checksum-verified, pinned upstream revision and builds the device,
+simulator, and macOS slices of `Packages/TailcatSSH/Artifacts/CTailcat.xcframework`.
+The generated binaries are ignored by Git; build instructions and provenance
+live in `Packages/TailcatSSH/Native/`. CI performs this step automatically.
+
 ### Generate, build, and run
 
 ```bash
@@ -47,7 +54,9 @@ xcodegen generate
 # Build for the simulator
 xcodebuild -project Moshpit.xcodeproj -scheme Moshpit \
   -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \
+  DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= CODE_SIGNING_REQUIRED=YES build
 
 # Or open in Xcode and Cmd+R
 open Moshpit.xcodeproj
@@ -61,8 +70,15 @@ targets. Run them locally before opening a PR:
 ```bash
 xcodebuild test -project Moshpit.xcodeproj -scheme Moshpit \
   -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual \
+  DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= CODE_SIGNING_REQUIRED=YES
 ```
+
+These simulator commands use ad hoc signing so real SystemKeychain tests retain
+the app's entitlements. Disabling signing causes `errSecMissingEntitlement`
+(`-34018`). No development certificate, team, or provisioning profile is needed;
+device and release builds use their own signing configuration.
 
 New behavior should come with tests. The hard system boundaries are already
 built for this (see below), so most logic can be exercised without a live
@@ -121,8 +137,8 @@ pinned:
 ```
 /// … `kSecUseDataProtectionKeychain` pins us to the modern data-protection
 /// keychain, which:
-///   - Doesn't require a `keychain-access-groups` entitlement on unsigned
-///     simulator builds (legacy path fails with -34018 there).
+///   - Still requires a signed app on Simulator; ad hoc signing suffices
+///     for the app's private group. Unsigned writes can fail with -34018.
 ```
 
 Both tie a specific line of code to a concrete failure it prevents. Aim for

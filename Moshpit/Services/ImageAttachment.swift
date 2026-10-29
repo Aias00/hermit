@@ -136,8 +136,7 @@ enum ImageAttachmentPipeline {
     ///
     /// The default is a bare path padded with spaces: it reads the same to
     /// every agent, Codex's pasted-image-path detector auto-attaches it
-    /// (quotes break that detector, so quoting happens ONLY when a path
-    /// actually carries a space or quote — our filenames never do), and `@`
+    /// (quotes break that detector, so ordinary paths stay bare), and `@`
     /// typed blind would trigger Claude Code's completion menu. The other
     /// styles exist because two agent families genuinely differ — see
     /// ``ImageInsertStyle``.
@@ -165,7 +164,12 @@ enum ImageAttachmentPipeline {
     }
 
     private static func needsQuoting(_ path: String) -> Bool {
-        path.contains(where: { $0 == " " || $0 == "'" || $0 == "\"" })
+        // Local file attachments retain their original names. A filename can
+        // contain shell operators, substitutions or line breaks; checking only
+        // spaces and quotes let sending an attachment execute its filename.
+        // Keep the agent-friendly bare form only for an inert path alphabet.
+        let safe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-"
+        return path.isEmpty || path.contains { !safe.contains($0) }
     }
 
     private static func quotedIfNeeded(_ path: String) -> String {

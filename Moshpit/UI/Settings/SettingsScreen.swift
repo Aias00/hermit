@@ -46,6 +46,7 @@ struct SettingsScreen: View {
     @State private var showHooksInstall = false
     @State private var showOfflineHostInfo = false
     @State private var showFeedback = false
+    @State private var showTailscale = false
     /// Whether the MIIT filing line is shown; resolved once per appearance from
     /// the App Store storefront (see MainlandStorefront).
     @State private var showsFilingNumber = false
@@ -73,6 +74,19 @@ struct SettingsScreen: View {
 
         NavigationStack {
             Form {
+                FormGroup(title: "SYNC") {
+                    NavigationLink { iCloudSyncView() } label: {
+                        Label("iCloud Sync", systemImage: "icloud")
+                            .foregroundStyle(Ink.primary)
+                    }
+                    .accessibilityIdentifier("settings-icloud-sync")
+                }
+                FormGroup(title: "NETWORK") {
+                    ChevronRow(label: "Tailscale", subtitle: "Sign in and connect to devices in your tailnet") {
+                        showTailscale = true
+                    }
+                    .accessibilityIdentifier("settings-tailscale")
+                }
                 appearanceGroup(settings: $settings)
                 displayGroup(settings: $settings)
                 cursorGroup(settings: $settings)
@@ -118,6 +132,23 @@ struct SettingsScreen: View {
                     ) { showKeys = true }
                 }
 
+                FormGroup(
+                    title: "LIVE ACTIVITY",
+                    footer: "Show connection and reported task status on the Lock Screen and Dynamic Island. Updates pause when iOS suspends Moshpit; open the app to refresh."
+                ) {
+                    ToggleRow(
+                        label: "Live Activity",
+                        subtitle: "Connection and task status at a glance",
+                        identifier: "settings-live-activity",
+                        isOn: $settings.liveActivityEnabled)
+                    ToggleRow(
+                        label: "Show host names",
+                        subtitle: "Display host and workspace names on the Lock Screen",
+                        identifier: "settings-live-activity-host-names",
+                        isOn: $settings.liveActivityShowHostNames)
+                        .disabled(!settings.liveActivityEnabled)
+                }
+
                 if AppSettings.agentNotificationsAvailable {
                 FormGroup(
                     title: "NOTIFICATIONS",
@@ -127,10 +158,6 @@ struct SettingsScreen: View {
                         label: "Notifications",
                         subtitle: "Alert when an agent needs you",
                         isOn: $settings.notificationsEnabled)
-                    ToggleRow(
-                        label: "Live Activity",
-                        subtitle: "Show agent session status in the Dynamic Island",
-                        isOn: $settings.liveActivityEnabled)
                     ToggleRow(
                         label: "Alert sound",
                         subtitle: "Play a sound when the agent needs you",
@@ -183,7 +210,7 @@ struct SettingsScreen: View {
 
                 FormGroup(
                     title: "FEEDBACK",
-                    footer: "Mail goes to support@cluas.eu.org through your own Mail app and leaves only when you tap Send there. Issues are public and sit next to the code; keep security reports to mail."
+                    footer: "Mail goes to rokkki@163.com through your own Mail app and leaves only when you tap Send there. Issues are public and sit next to the code; keep security reports to mail."
                 ) {
                     ChevronRow(label: "Send Feedback",
                                subtitle: "A bug, an idea, a screen that reads wrong") {
@@ -272,6 +299,7 @@ struct SettingsScreen: View {
             OfflineHostInfoView()
         }
         .appSheet(isPresented: $showFeedback) { FeedbackView() }
+        .appSheet(isPresented: $showTailscale) { TailscaleSettingsView() }
     }
 
     /// Build identity for the footer: marketing version + build number from the
@@ -363,6 +391,7 @@ struct SettingsScreen: View {
                 }
                 .contentShape(Rectangle())
             }
+            .accessibilityIdentifier("settings-font-menu")
             ValueRow(label: "Font Size", value: String(localized: "\(Int(settings.wrappedValue.fontSize))pt"))
             VStack(spacing: 10) {
                 Slider(value: settings.fontSize, in: 8...18, step: 1)

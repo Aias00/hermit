@@ -30,7 +30,7 @@ struct SessionDialRecoveryTests {
         session.herdrForegroundRecoveryDeadline = .milliseconds(10)
         session.releaseWindowPinsForBackground()
         session.repinForeground()
-        for _ in 0..<100 {
+        for _ in 0..<250 {
             if script.dials > 0 { break }
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -43,6 +43,8 @@ struct SessionDialRecoveryTests {
         var config = connection()
         config.multiplexer = .herdr
         let session = SessionHub.ActiveSession(connection: config)
+        let frame = SSHSession(connection: config, transport: QuietTransport())
+        session.installForTesting(moshTransport: nil, herdrFrameSession: frame)
         session.viewModel.markConnected()
         session.sendInput(Data([0x0D]))
         #expect(session.herdrNotice != nil)
@@ -174,5 +176,236 @@ struct SessionDialRecoveryTests {
         #expect(dialingSession.viewModel.status == .connected)
         await hub.disconnect(down.id)
         await hub.disconnect(dialing.id)
+    }
+
+    @Test("A later path notification cannot cancel the SSH recovery already underway")
+    func laterPathChangeKeepsRecoveryAlive() async throws {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        hub.isForeground = true
+        hub.pathDebounceDelay = .milliseconds(10)
+        let gate = DialGate()
+        defer { gate.finish(.failure(DialFailed())) }
+        let cancellations = SessionLifecycleTests.Counter()
+        let script = DialScript { _ in throw DialFailed() }
+        hub.makeSession = { SessionHub.ActiveSession(connection: $0, dial: script.dialer) }
+        let configuration = connection()
+        let session = hub.prepare(configuration)
+        await session.start(theme: .githubDark, fontSize: 14)
+        script.behavior = { _ in
+            try await withTaskCancellationHandler {
+                try await gate.wait().get()
+            } onCancel: {
+                cancellations.bump()
+            }
+        }
+
+        hub.networkPathChanged()
+        #expect(try await waitUntil { script.dials == 2 })
+        // The first debounce has fired, but its real SSH handshake has not
+        // finished. New path updates must neither cancel nor replace it.
+        hub.networkPathChanged()
+        hub.networkPathChanged()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(cancellations.count == 0)
+        #expect(script.dials == 2)
+        #expect(session.isDialing)
+
+        gate.finish(.success(SSHSession(connection: configuration, transport: QuietTransport())))
+        #expect(try await waitUntil { session.viewModel.status == .connected })
+        #expect(session.viewModel.connectionFailure == nil)
+        #expect(session.viewModel.errorMessage == nil)
+        hub.isForeground = false
+        await hub.disconnect(configuration.id)
+    }
+
+    @Test("A burst of path notifications is debounced before recovery begins")
+    func pathChangesRemainDebounced() async throws {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        hub.isForeground = true
+        hub.pathDebounceDelay = .milliseconds(100)
+        let script = DialScript { _ in throw DialFailed() }
+        hub.makeSession = { SessionHub.ActiveSession(connection: $0, dial: script.dialer) }
+        let configuration = connection()
+        let session = hub.prepare(configuration)
+        await session.start(theme: .githubDark, fontSize: 14)
+        script.behavior = { SSHSession(connection: $0, transport: QuietTransport()) }
+
+        for _ in 0..<5 { hub.networkPathChanged() }
+        await Task.yield()
+        #expect(script.dials == 1, "A path burst must not bypass the debounce wait")
+        #expect(try await waitUntil { session.viewModel.status == .connected })
+        #expect(script.dials == 2)
+        hub.isForeground = false
+        await hub.disconnect(configuration.id)
+    }
+
+    @Test("Pending path recovery respects background and explicit disconnect", arguments: [false, true])
+    func pendingPathRecoveryStops(disconnect: Bool) async throws {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        hub.isForeground = true
+        hub.pathDebounceDelay = .milliseconds(30)
+        let script = DialScript { _ in throw DialFailed() }
+        hub.makeSession = { SessionHub.ActiveSession(connection: $0, dial: script.dialer) }
+        let configuration = connection()
+        let session = hub.prepare(configuration)
+        await session.start(theme: .githubDark, fontSize: 14)
+        script.behavior = { SSHSession(connection: $0, transport: QuietTransport()) }
+
+        hub.networkPathChanged()
+        if disconnect {
+            await hub.disconnect(configuration.id)
+        } else {
+            hub.setForeground(false)
+            hub.networkPathChanged()
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(script.dials == 1)
+        #expect(session.viewModel.status != .connected)
+        hub.isForeground = false
+        await hub.disconnect(configuration.id)
+    }
+
+    @Test("Disconnect retires a path recovery even when its SSH result arrives late")
+    func disconnectRetiresRunningPathRecovery() async throws {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        hub.isForeground = true
+        hub.pathDebounceDelay = .milliseconds(10)
+        let gate = DialGate()
+        defer { gate.finish(.failure(DialFailed())) }
+        let script = DialScript { _ in throw DialFailed() }
+        hub.makeSession = { SessionHub.ActiveSession(connection: $0, dial: script.dialer) }
+        let configuration = connection()
+        let session = hub.prepare(configuration)
+        await session.start(theme: .githubDark, fontSize: 14)
+        script.behavior = { _ in try await gate.wait().get() }
+        hub.networkPathChanged()
+        #expect(try await waitUntil { script.dials == 2 })
+
+        await hub.disconnect(configuration.id)
+        let lateTransport = QuietTransport()
+        gate.finish(.success(SSHSession(connection: configuration, transport: lateTransport)))
+        #expect(try await waitUntil { lateTransport.shutdowns == 1 })
+        #expect(hub.session(for: configuration) == nil)
+        #expect(session.viewModel.status != .connected)
+        #expect(script.dials == 2)
+        hub.isForeground = false
+    }
+
+    @Test("Path and short foreground changes leave bounded tunnel handshakes in flight",
+          arguments: [ConnectionTransport.cloudflareSSH, .tailcat, .tailscale])
+    func tunnelHandshakeKeepsItsDeadline(transport: ConnectionTransport) async throws {
+        var configuration = connection()
+        configuration.selectTransport(transport)
+        configuration.cloudflareHostname = "terminal.example.com"
+        configuration.tailcatCredentialRef = TailcatCredentials.newReference()
+        configuration.tailcatServerPublicKey = "nodekey:" + String(repeating: "a", count: 64)
+        configuration.tailscaleAccountID = UUID().uuidString.lowercased()
+        let gate = DialGate()
+        defer { gate.finish(.failure(DialFailed())) }
+        let script = DialScript { _ in try await gate.wait().get() }
+        let session = SessionHub.ActiveSession(connection: configuration, dial: script.dialer)
+        session.stalledDialGrace = 0
+        let first = Task { await session.start(theme: .githubDark, fontSize: 14) }
+        #expect(try await waitUntil { script.dials == 1 })
+
+        #expect(!(await session.retryIfDown(stalledDialAfter: 0, reason: "path")))
+        await session.resumeIfNeeded()
+        #expect(script.dials == 1, "A path hint must not abandon a still-bounded handshake")
+        #expect(session.isDialing)
+
+        gate.finish(.success(SSHSession(connection: configuration, transport: QuietTransport())))
+        await first.value
+        #expect(session.viewModel.status == .connected)
+        await session.stop()
+    }
+
+    @Test("Tunnel recovery still replaces an SSH session whose PTY setup is stuck",
+          arguments: [false, true])
+    func stalledTunnelPTYRemainsRecoverable(foreground: Bool) async throws {
+        var configuration = connection()
+        configuration.selectTransport(.cloudflareSSH)
+        configuration.cloudflareHostname = "terminal.example.com"
+        let oldTransport = DelayedPTYTransport()
+        defer { oldTransport.releasePTY() }
+        let oldSSH = SSHSession(connection: configuration, transport: oldTransport)
+        let script = DialScript { _ in oldSSH }
+        let session = SessionHub.ActiveSession(connection: configuration, dial: script.dialer)
+        session.stalledDialGrace = 0
+        let first = Task { await session.start(theme: .githubDark, fontSize: 14) }
+        #expect(try await waitUntil { oldTransport.ptyStarted })
+        #expect(session.isDialing)
+        #expect(!session.viewModel.isAwaitingSSHConnection,
+                "The SSH handshake returned; only PTY setup remains pending")
+
+        let newTransport = QuietTransport()
+        let replacement = SSHSession(connection: configuration, transport: newTransport)
+        script.behavior = { _ in replacement }
+        if foreground {
+            await session.resumeIfNeeded()
+        } else {
+            #expect(await session.retryIfDown(stalledDialAfter: 0, reason: "path"))
+        }
+        #expect(script.dials == 2)
+        #expect(session.viewModel.status == .connected)
+        #expect(session.viewModel.session === replacement)
+
+        // A late PTY acknowledgement belongs to the retired SSH connection.
+        // It must close that transport and never replace the new terminal.
+        oldTransport.releasePTY()
+        await first.value
+        #expect(oldTransport.shutdowns == 1)
+        #expect(newTransport.shutdowns == 0)
+        #expect(session.viewModel.session === replacement)
+        #expect(session.viewModel.status == .connected)
+        #expect(session.viewModel.errorMessage == nil)
+        await session.stop()
+    }
+
+    private final class DelayedPTYTransport: SSHClientTransport, @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiter: CheckedContinuation<Void, Never>?
+        private var released = false
+        private var started = false
+        private var closes = 0
+        var ptyStarted: Bool { lock.withLock { started } }
+        var shutdowns: Int { lock.withLock { closes } }
+
+        func run(_ command: String) async throws -> Data { Data() }
+
+        func openPTY(rows: Int, cols: Int,
+                     onOutput: @escaping @Sendable (Data) -> Void,
+                     onEnd: @escaping @Sendable () -> Void) async throws -> any SSHPTYWriter {
+            await withCheckedContinuation { continuation in
+                let release = lock.withLock {
+                    started = true
+                    guard !released else { return true }
+                    waiter = continuation
+                    return false
+                }
+                if release { continuation.resume() }
+            }
+            return QuietTransport.Writer()
+        }
+
+        func releasePTY() {
+            let pending = lock.withLock {
+                released = true
+                defer { waiter = nil }
+                return waiter
+            }
+            pending?.resume()
+        }
+
+        // Deliberately let the acknowledgement arrive after close, as an
+        // uncancellable library callback can. The test releases it explicitly.
+        func shutdown() async { lock.withLock { closes += 1 } }
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async throws -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
     }
 }

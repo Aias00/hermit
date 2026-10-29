@@ -121,6 +121,7 @@ enum KittyGraphicsPayload {
 
 struct KittyGraphicsImage {
     let payload: KittyGraphicsPayload
+    let contentRevision: UUID
     let byteSize: Int
     var lastAccessTick: UInt64
 }
@@ -139,6 +140,7 @@ final class KittyGraphicsState {
     var placementsByKey: [KittyPlacementKey: KittyPlacementRecord] = [:]
     var totalImageBytes: Int = 0
     var nextImageAccessTick: UInt64 = 1
+    var imageRevision = UUID()
 }
 
 extension Terminal {
@@ -1730,10 +1732,16 @@ extension Terminal {
     private func storeKittyImage(payload: KittyGraphicsPayload, imageId: UInt32, imageNumber: UInt32?) {
         let byteSize = kittyPayloadByteSize(payload)
         let lastAccessTick = nextKittyImageAccessTick()
+        // A reused ID can carry different pixels with the same dimensions,
+        // length and header. Version the payload rather than hashing a prefix
+        // or scanning the entire image during every render.
+        kittyGraphicsState.imageRevision = UUID()
         if let existing = kittyGraphicsState.imagesById[imageId] {
+            updateFullScreen()
             kittyGraphicsState.totalImageBytes = max(0, kittyGraphicsState.totalImageBytes - existing.byteSize)
         }
         kittyGraphicsState.imagesById[imageId] = KittyGraphicsImage(payload: payload,
+                                                                   contentRevision: kittyGraphicsState.imageRevision,
                                                                    byteSize: byteSize,
                                                                    lastAccessTick: lastAccessTick)
         kittyGraphicsState.totalImageBytes += byteSize

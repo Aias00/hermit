@@ -2,7 +2,7 @@ import MessageUI
 import SwiftUI
 import UIKit
 
-/// Settings → Feedback. A note to support@cluas.eu.org, composed in the
+/// Settings → Feedback. A note to rokkki@163.com, composed in the
 /// user's own Mail app: the compose sheet opens pre-filled and the mail
 /// leaves only when they tap Send there. With no Mail account, the same text
 /// goes to whatever handles `mailto:`; failing that, the address is shown to

@@ -34,7 +34,7 @@ struct FeedbackMailTests {
 
     @Test("the recipient is the support address")
     func recipient() {
-        #expect(FeedbackMail.recipient == "support@cluas.eu.org")
+        #expect(FeedbackMail.recipient == "rokkki@163.com")
     }
 
     @Test("the mailto fallback encodes subject and body and appends the log inline")
@@ -43,7 +43,7 @@ struct FeedbackMailTests {
                                 log: "line 1\nline 2", version: "1.0.3 (398)")
         let url = try #require(mail.mailtoURL)
         #expect(url.scheme == "mailto")
-        #expect(url.absoluteString.hasPrefix("mailto:support@cluas.eu.org?"))
+        #expect(url.absoluteString.hasPrefix("mailto:rokkki@163.com?"))
         let items = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
         let subject = items.first { $0.name == "subject" }?.value
         let body = items.first { $0.name == "body" }?.value
@@ -71,6 +71,6 @@ struct FeedbackMailTests {
     func gitHubChannel() {
         let url = FeedbackChannels.newIssueURL
         #expect(url.host() == "github.com")
-        #expect(url.path() == "/Cluas/moshpit/issues/new/choose")
+        #expect(url.path() == "/Aias00/moshpit/issues/new/choose")
     }
 }

@@ -8,6 +8,10 @@
     "Use grayscale font antialiasing on iOS to match UIKit text stroke weight.",
     "Preserve sub-row scroll displacement in Metal row geometry and invalidate cached rows when that displacement changes.",
     "Reuse the UIKit caret for iOS Metal rendering to preserve IME composition, focus and blinking behavior.",
-    "Rasterize native-size fonts with a scaled CGContext to preserve color emoji bitmap-strike metrics."
+    "Rasterize native-size fonts with a scaled CGContext to preserve color emoji bitmap-strike metrics.",
+    "Use a weak CADisplayLink target and invalidate the link at terminal deallocation so discarded panes release their buffers and GPU resources.",
+    "Map CoreText UTF-16 glyph indices to terminal grapheme cells in both renderers; preserve mark offsets and size backgrounds and decorations by cells rather than glyph count.",
+    "Version Kitty image payloads and cached rows/textures, and redraw on same-ID replacement so updates beyond the first 64 bytes remain visible.",
+    "Resize only occupied history rows; avoid scanning or materializing unused scrollback capacity when keyboard geometry changes."
   ]
 }

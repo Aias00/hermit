@@ -51,6 +51,15 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
+      - name: Set up Go for Tailcat
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache-dependency-path: Packages/TailcatSSH/Native/UPSTREAM.json
+
+      - name: Build native Tailcat library
+        run: scripts/build-tailcat.sh
+
       - name: Generate Xcode project
         run: xcodegen generate
 
@@ -77,15 +86,11 @@ jobs:
       # Run the unit + UI test targets (MoshpitTests + MoshpitUITests, both wired
       # into the shared "Moshpit" scheme's test action in project.yml).
       #
-      # CODE_SIGNING_ALLOWED=NO: project.yml sets CODE_SIGN_IDENTITY
-      # "Apple Development" / CODE_SIGN_STYLE Automatic and expects a
-      # DEVELOPMENT_TEAM from Signing.xcconfig. Signing.xcconfig IS committed to
-      # this repo (with an empty DEVELOPMENT_TEAM), so `xcodegen generate` never
-      # fails for lack of it — but a simulator Debug build needs no signing at
-      # all, so we disable it here. If project.yml ever forced signing in a way
-      # that broke the *simulator* destination, that would be fixed in
-      # project.yml (out of scope for this workflow); as configured today the
-      # simulator build+test works with no Signing.xcconfig secret present.
+      # Real SystemKeychain tests need the simulator app's signed entitlements;
+      # unsigned builds fail with errSecMissingEntitlement (-34018). Ad hoc
+      # signing preserves those entitlements without a development certificate,
+      # team, or provisioning profile. These overrides apply only to this
+      # simulator test invocation.
       - name: Build & test
         env:
           # Reaches the test process as MOSHPIT_CI; FeedCostTests widens its
@@ -97,4 +102,9 @@ jobs:
             -scheme Moshpit \
             -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
             -clonedSourcePackagesDirPath "$SPM_CACHE_DIR" \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM= \
+            PROVISIONING_PROFILE_SPECIFIER= \
+            CODE_SIGNING_REQUIRED=YES

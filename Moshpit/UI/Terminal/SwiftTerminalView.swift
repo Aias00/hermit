@@ -767,7 +767,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// any thread — SwiftTerm explicitly documents `feed` as
         /// background-thread safe.
         func feed(data: Data) {
-            lastFedAt = Date()
+            lastFedAt = ProcessInfo.processInfo.systemUptime
             guard let terminalView else {
                 // Buffer until a view attaches so no early output is lost.
                 TmuxSessionController.ccTap("cc-pairing.log",
@@ -1271,7 +1271,8 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// happens in between is nobody's business.
         private var keyboardCover: UIView?
         private var coverRelease: DispatchWorkItem?
-        private var lastFedAt = Date.distantPast
+        private var keyboardCoverDeadline: TimeInterval?
+        private var lastFedAt = -TimeInterval.infinity
 
         /// Quiet this long under the cover and the pane is done repainting.
         private static let coverQuiet: TimeInterval = 0.15
@@ -1293,6 +1294,10 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// cover holds still and cross-fades to the settled screen instead:
         /// no flicker, and no motion that lies about what happened.
         func coverForKeyboard(duration: TimeInterval, options: UIView.AnimationOptions) {
+            // Herdr keeps its current grid until the replacement grid and
+            // screen arrive together. There is no lossy local reflow to mask;
+            // a snapshot here would only freeze otherwise live output.
+            guard remoteGrid == nil, hostContainer?.geometryHeld != true else { return }
             coverRequests += 1
             guard let terminalView, let container = hostContainer else { return }
             if keyboardCover == nil {
@@ -1311,6 +1316,7 @@ struct SwiftTerminalView: UIViewRepresentable {
                 plate.addSubview(snapshot)
                 container.addSubview(plate)
                 keyboardCover = plate
+                keyboardCoverDeadline = ProcessInfo.processInfo.systemUptime + Self.coverCap
             }
             _ = options
             // Start checking when the keyboard lands; the quiet test below is
@@ -1322,19 +1328,22 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// Take the cover down once the pane has been quiet for a beat.
         private func scheduleCoverRelease(after delay: TimeInterval) {
             coverRelease?.cancel()
-            guard keyboardCover != nil else { return }
-            let deadline = Date().addingTimeInterval(Self.coverCap)
+            guard keyboardCover != nil, let deadline = keyboardCoverDeadline else { return }
             let work = DispatchWorkItem { [weak self] in
                 guard let self, self.keyboardCover != nil else { return }
-                let quietFor = Date().timeIntervalSince(self.lastFedAt)
-                if quietFor < Self.coverQuiet, Date() < deadline {
+                let now = ProcessInfo.processInfo.systemUptime
+                let quietFor = now - self.lastFedAt
+                if quietFor < Self.coverQuiet, now < deadline {
                     self.scheduleCoverRelease(after: Self.coverQuiet - quietFor)
                     return
                 }
                 self.releaseKeyboardCover()
             }
             coverRelease = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + max(delay, 0.05), execute: work)
+            // Retries and repeated frame notifications share the deadline set
+            // when this cover appeared. Streaming output must not extend it.
+            let remaining = max(0, deadline - ProcessInfo.processInfo.systemUptime)
+            DispatchQueue.main.asyncAfter(deadline: .now() + min(max(delay, 0.05), remaining), execute: work)
         }
 
         /// Whether a keyboard cover is up right now.
@@ -1349,6 +1358,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         func releaseKeyboardCover() {
             coverRelease?.cancel()
             coverRelease = nil
+            keyboardCoverDeadline = nil
             guard let cover = keyboardCover else { return }
             keyboardCover = nil
             UIView.animate(withDuration: 0.18, animations: { cover.alpha = 0 },
@@ -1508,7 +1518,6 @@ struct SwiftTerminalView: UIViewRepresentable {
                 let curve = (note.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int)
                     .flatMap(UIView.AnimationCurve.init(rawValue:)) ?? .easeInOut
                 let options = UIView.AnimationOptions(rawValue: UInt(curve.rawValue) << 16)
-                self?.lockFrame(for: duration)
                 // Only cover a move that actually changes how much room the
                 // terminal has. Switching input method (globe key) fires this
                 // notification with the SAME frame on both ends — CN and EN
@@ -1524,6 +1533,7 @@ struct SwiftTerminalView: UIViewRepresentable {
                    abs(begin.height - end.height) < 1 {
                     return
                 }
+                self?.lockFrame(for: duration)
                 self?.coverForKeyboard(duration: duration, options: options)
             }
             if let keyboardDidObserver {

@@ -10,11 +10,23 @@ import MoshpitKit
 protocol HerdrCommandRunner: Sendable {
     /// Run `command` remotely and return its combined stdout/stderr.
     func run(_ command: String) async throws -> String
+    func run(_ command: String, standardInput: Data) async throws -> String
+}
+
+extension HerdrCommandRunner {
+    func run(_ command: String, standardInput: Data) async throws -> String {
+        throw SSHExecInputError.unsupportedTransport
+    }
 }
 
 extension SSHSession: HerdrCommandRunner {
     func run(_ command: String) async throws -> String {
         let data = try await executeCommand(command)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    func run(_ command: String, standardInput: Data) async throws -> String {
+        let data = try await executeCommand(command, standardInput: standardInput)
         return String(decoding: data, as: UTF8.self)
     }
 }
@@ -90,6 +102,7 @@ final class HerdrControlClient: MultiplexerControlling {
     private(set) var snapshot = TmuxSnapshot()
     private(set) var agentHooks: [String: AgentHook] = [:]
     private(set) var agentHooksLoaded = false
+    private(set) var agentHooksObservedAt: Date?
     private(set) var isRefreshing = false
 
     /// True once a poll came back with `server_not_running` — the host has
@@ -127,6 +140,23 @@ final class HerdrControlClient: MultiplexerControlling {
     @ObservationIgnored private let runner: HerdrCommandRunner
     @ObservationIgnored private let customPath: String?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    /// Every snapshot uses an SSH exec channel. Merge concurrent timer, push
+    /// and user refresh requests so a slow link cannot accumulate channels or
+    /// apply old focused-pane responses after newer ones.
+    private final class PollBatch {
+        var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func finish() {
+            let pending = waiters
+            waiters.removeAll()
+            for waiter in pending { waiter.resume() }
+        }
+    }
+    @ObservationIgnored private var activePoll: PollBatch?
+    @ObservationIgnored private var pendingPoll: PollBatch?
+    @ObservationIgnored private var snapshotPollTask: Task<Void, Never>?
+    @ObservationIgnored private var pollGeneration = UUID()
+    @ObservationIgnored private var pollsStopped = false
     /// Last decoded payload, to tell "nothing happened" from "we couldn't read".
     @ObservationIgnored private var lastDecoded: HerdrSnapshot.Decoded?
     /// Working directory per pane, from the same poll — the raw material for
@@ -145,13 +175,17 @@ final class HerdrControlClient: MultiplexerControlling {
         self.customPath = customPath
     }
 
-    deinit { pollTask?.cancel() }
+    deinit {
+        pollTask?.cancel()
+        snapshotPollTask?.cancel()
+    }
 
     // MARK: - Lifecycle
 
     /// Read once, then keep reading every ``pollInterval`` until ``stop()``.
     func start() {
         guard pollTask == nil else { return }
+        pollsStopped = false
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.poll()
@@ -162,6 +196,15 @@ final class HerdrControlClient: MultiplexerControlling {
     }
 
     func stop() {
+        pollsStopped = true
+        pollGeneration = UUID()
+        snapshotPollTask?.cancel()
+        snapshotPollTask = nil
+        activePoll?.finish()
+        pendingPoll?.finish()
+        activePoll = nil
+        pendingPoll = nil
+        isRefreshing = false
         inputGeneration = UUID()
         inputTail?.cancel()
         inputTail = nil
@@ -191,9 +234,14 @@ final class HerdrControlClient: MultiplexerControlling {
     /// frame channel losing its attach, say, whose recovery rides on this
     /// poll and shouldn't wait out an idle interval.
     func quicken() {
+        guard !pollsStopped else { return }
+        let generation = pollGeneration
         unchangedPolls = 0
         pollInterval = Self.fastPollInterval
-        Task { [weak self] in await self?.poll() }
+        Task { [weak self] in
+            guard let self, generation == pollGeneration else { return }
+            await poll()
+        }
     }
 
     /// One poll, awaited — the cadence tests need to drive reads deterministically
@@ -204,23 +252,65 @@ final class HerdrControlClient: MultiplexerControlling {
     /// spinner. The timer keeps running underneath; this just doesn't make
     /// them wait for the next tick.
     func refresh() {
+        guard !pollsStopped else { return }
+        let generation = pollGeneration
         Task { [weak self] in
-            guard let self else { return }
+            guard let self, !pollsStopped, generation == pollGeneration else { return }
             // A user asking for fresh state is also a signal they're engaged,
             // so come off the idle cadence.
             unchangedPolls = 0
             pollInterval = Self.fastPollInterval
             isRefreshing = true
             await poll()
-            isRefreshing = false
+            if generation == pollGeneration { isRefreshing = false }
         }
     }
 
     // MARK: - Reading
 
     private func poll() async {
-        guard let result = try? await run("api snapshot")
-        else { return }   // channel hiccup — keep what we have
+        guard !pollsStopped, !Task.isCancelled else { return }
+        await withCheckedContinuation { continuation in
+            if activePoll == nil {
+                let batch = PollBatch()
+                batch.waiters.append(continuation)
+                beginPoll(batch)
+            } else {
+                // Events arriving during a read may describe state newer than
+                // that read. Keep one trailing read, shared by all its callers.
+                if pendingPoll == nil { pendingPoll = PollBatch() }
+                pendingPoll?.waiters.append(continuation)
+            }
+        }
+    }
+
+    private func beginPoll(_ batch: PollBatch) {
+        let generation = pollGeneration
+        activePoll = batch
+        snapshotPollTask = Task { [weak self] in
+            guard let self, !Task.isCancelled, !pollsStopped,
+                  generation == pollGeneration, activePoll === batch else {
+                batch.finish()
+                return
+            }
+            let result = try? await run("api snapshot")
+            // SSH cancellation may finish late. stop/restart invalidates the
+            // entire read, including its focus callback and queued refresh.
+            guard !Task.isCancelled, generation == pollGeneration,
+                  activePoll === batch else { return }
+            if let result { applyPoll(result) }
+            guard generation == pollGeneration, activePoll === batch else { return }
+            activePoll = nil
+            snapshotPollTask = nil
+            batch.finish()
+            if let pending = pendingPoll {
+                pendingPoll = nil
+                beginPoll(pending)
+            }
+        }
+    }
+
+    private func applyPoll(_ result: CommandResult) {
         let output = result.output
         lastSuccessfulPoll = Date()   // the channel answered — see the property
         if let decoded = HerdrSnapshot.decode(output) {
@@ -239,6 +329,7 @@ final class HerdrControlClient: MultiplexerControlling {
                 pollInterval = Self.fastPollInterval
             }
             lastDecoded = decoded
+            if !result.failed { agentHooksObservedAt = Date() }
             apply(decoded)
             // A tab/workspace switch (or the initial attach) lands here with
             // the target's own focused pane finally named — zoom it now.
@@ -270,6 +361,9 @@ final class HerdrControlClient: MultiplexerControlling {
             snapshot = empty
             agentHooks = [:]
             agentHooksLoaded = true
+            // A known stopped server is a fresh empty observation. An arbitrary
+            // failed command is not proof that the previous task state changed.
+            if HerdrSnapshot.isServerNotRunning(output) { agentHooksObservedAt = Date() }
         }
         // Anything else (shell noise, a truncated read) is "no new
         // information" — keep the last good tree rather than blanking it.
@@ -568,97 +662,208 @@ final class HerdrControlClient: MultiplexerControlling {
         }
     }
 
-    /// `send` without the trailing snapshot poll — for keystroke-rate traffic
-    /// (arrow keys), where a poll per keypress is churn with nothing to learn:
-    /// a cursor move changes no tree state the sheets care about.
     @ObservationIgnored private var inputTail: Task<Void, Error>?
     @ObservationIgnored private var inputGeneration = UUID()
     private(set) var inputError: String?
 
-    /// Registered synchronously, before any task can run: keyboard text,
-    /// semantic keys and composer submits share the same acknowledged FIFO.
-    private func enqueueInput(_ command: @escaping @MainActor () throws -> String,
-                              timeout: Double = 12) -> Task<Void, Error> {
+    /// Byte payloads stay on the terminal's stdin, including when they contain
+    /// passwords. Shell command arguments are visible in remote process lists.
+    @ObservationIgnored var rawInputWriter: (@MainActor (Data, String) async throws -> Void)?
+    @ObservationIgnored var rawSubmitWriter: (@MainActor (String, String) async throws -> Void)?
+
+    private func enqueueInput(_ operation: @escaping @MainActor () async throws -> Void) -> Task<Void, Error> {
         let previous = inputTail
         let generation = inputGeneration
         let task = Task { @MainActor [weak self] in
-            try await previous?.value
-            try Task.checkCancellation()
-            guard let self, self.inputGeneration == generation else { throw SubmissionError.unconfirmed }
-            let subcommand = try command()
-            let accepted = await withTimeoutValue(timeout) { @MainActor in
-                let result = try await self.run(subcommand)
+            do {
+                try await previous?.value
+                try Task.checkCancellation()
+                guard let self, self.inputGeneration == generation else { throw SubmissionError.unconfirmed }
+                try await operation()
+                if self.inputGeneration == generation { self.inputError = nil }
+            } catch {
+                // Drop the already-queued tail (especially Enter after missing
+                // text), but give the NEXT explicit user action a fresh queue.
+                if let self, self.inputGeneration == generation {
+                    self.inputGeneration = UUID()
+                    self.inputTail = nil
+                    self.pendingText = nil
+                    self.inputError = error.localizedDescription
+                }
+                throw error
+            }
+        }
+        inputTail = task
+        return task
+    }
+
+    private final class PendingText {
+        let pane: String
+        var data: Data
+        var started = false
+        init(pane: String, data: Data) { self.pane = pane; self.data = data }
+    }
+    @ObservationIgnored private var pendingText: PendingText?
+
+    func sendBytes(_ data: Data, paneId: String) {
+        guard !data.isEmpty else { return }
+        if let pendingText, !pendingText.started, pendingText.pane == paneId {
+            pendingText.data.append(data)
+            return
+        }
+        let pending = PendingText(pane: paneId, data: data)
+        pendingText = pending
+        _ = enqueueInput { [weak self] in
+            guard let self else { throw SubmissionError.unconfirmed }
+            pending.started = true
+            if let rawInputWriter {
+                try await rawInputWriter(pending.data, pending.pane)
+            } else {
+                guard let text = String(data: pending.data, encoding: .utf8) else {
+                    throw SubmissionError.rejected
+                }
+                try await sendPrivateInput(method: "pane.send_text", pane: pending.pane, text: text)
+            }
+        }
+    }
+
+    func sendKey(_ key: String, paneId: String) {
+        pendingText = nil
+        _ = enqueueInput { [weak self] in
+            guard let self else { throw SubmissionError.unconfirmed }
+            let accepted = await withTimeoutValue(12) { @MainActor in
+                let result = try await self.run("pane send-keys \(HerdrLaunch.quote(paneId)) \(HerdrLaunch.quote(key))")
                 guard let code = result.exitCode else { throw SubmissionError.unconfirmed }
                 return code == 0
             }
             guard let accepted else { throw SubmissionError.unconfirmed }
             guard accepted else { throw SubmissionError.rejected }
         }
-        inputTail = task
-        Task { @MainActor [weak self] in
-            do { try await task.value }
-            catch { self?.inputError = error.localizedDescription }
-        }
-        return task
-    }
-
-    private final class PendingText {
-        let pane: String
-        var text: String
-        var started = false
-        init(pane: String, text: String) { self.pane = pane; self.text = text }
-    }
-    @ObservationIgnored private var pendingText: PendingText?
-
-    func sendBytes(_ data: Data, paneId: String) {
-        guard !data.isEmpty else { return }
-        if data == Data([0]) { sendKey("ctrl+space", paneId: paneId); return }
-        guard let text = String(data: data, encoding: .utf8) else {
-            inputError = "暂不支持该按键编码，未发送。"
-            return
-        }
-        if text.contains("\0") {
-            let parts = text.components(separatedBy: "\0")
-            for (index, part) in parts.enumerated() {
-                if !part.isEmpty { sendBytes(Data(part.utf8), paneId: paneId) }
-                if index < parts.count - 1 { sendKey("ctrl+space", paneId: paneId) }
-            }
-            return
-        }
-        if let pendingText, !pendingText.started, pendingText.pane == paneId {
-            pendingText.text += text
-            return
-        }
-        let pending = PendingText(pane: paneId, text: text)
-        pendingText = pending
-        _ = enqueueInput {
-            pending.started = true
-            return "pane send-text \(HerdrLaunch.quote(pending.pane)) \(HerdrLaunch.quote(pending.text))"
-        }
-    }
-
-    func sendKey(_ key: String, paneId: String) {
-        pendingText = nil // Semantic keys are ordering barriers.
-        _ = enqueueInput { "pane send-keys \(HerdrLaunch.quote(paneId)) \(HerdrLaunch.quote(key))" }
     }
 
     func flushInput() async throws { try await inputTail?.value }
 
-    enum SubmissionError: LocalizedError {
-        case rejected, unconfirmed
+    enum SubmissionError: LocalizedError, Equatable {
+        case rejected, unconfirmed, pasteUnavailable
         var errorDescription: String? {
             switch self {
             case .rejected: return "远端未接受发送，草稿已保留。"
             case .unconfirmed: return "发送结果未确认，草稿已保留。请先检查远端是否收到，避免重复发送。"
+            case .pasteUnavailable: return "当前 herdr 无法安全提交草稿，内容已保留。请升级远端 herdr 并确认 python3 可用。"
             }
         }
     }
 
-    /// One server operation pastes TEXT and encodes Enter against the real
-    /// pane modes. It neither depends on a rendering attach nor races two writes.
+    /// Raw submission is valid only when a real terminal stream supplied the
+    /// pane's paste mode. Repaint-only streams must pass nil, not false.
+    nonisolated static func rawSubmitPayload(_ text: String, bracketedPasteMode: Bool?) throws -> Data {
+        guard let bracketedPasteMode else { throw SubmissionError.pasteUnavailable }
+        var payload = Data(text.utf8)
+        if bracketedPasteMode {
+            payload = Data("\u{1b}[200~".utf8) + payload + Data("\u{1b}[201~".utf8)
+        }
+        return payload + Data([0x0d])
+    }
+
+    private enum PrivateInputError: Error { case unavailable }
+    @ObservationIgnored private var privateInputSocket: String?
+    @ObservationIgnored private var privateInputUnavailable = false
+
+    private func resolvePrivateInputSocket(timeout: Double) async throws -> String {
+        guard !privateInputUnavailable else { throw PrivateInputError.unavailable }
+        if let privateInputSocket { return privateInputSocket }
+        let result = await withTimeoutValue(timeout) { @MainActor in
+            try await self.run("status server --json")
+        }
+        guard let result, result.exitCode == 0,
+              let object = HerdrSnapshot.firstJSONObject(in: result.output),
+              let socket = object["socket"] as? String,
+              socket.hasPrefix("/"), !socket.contains("\0") else {
+            // No input has been sent yet. Old CLIs without endpoint discovery
+            // safely keep using the already-attached terminal's stdin.
+            privateInputUnavailable = true
+            throw PrivateInputError.unavailable
+        }
+        privateInputSocket = socket
+        return socket
+    }
+
+    /// A fixed bridge command receives a single JSON request through SSH stdin.
+    /// Neither the command line nor a spawned child process contains the input.
+    static func privateInputCommand(socketPath: String) -> String {
+        let script = """
+        import socket,sys
+        request=sys.stdin.buffer.readline()
+        s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        s.settimeout(10)
+        s.connect(sys.argv[1])
+        s.sendall(request)
+        response=s.makefile("rb").readline()
+        if not response: raise RuntimeError("missing herdr reply")
+        sys.stdout.buffer.write(response)
+        """
+        return "if command -v python3 >/dev/null 2>&1; then python3 -c "
+            + HerdrLaunch.quote(script) + " " + HerdrLaunch.quote(socketPath)
+            + "; else printf 'MOSHPIT_PRIVATE_INPUT_UNAVAILABLE\\n'; fi"
+    }
+
+    private func sendPrivateInput(method: String, pane: String, text: String,
+                                  keys: [String] = [], timeout: Double = 12) async throws {
+        let socket = try await resolvePrivateInputSocket(timeout: timeout)
+        let command = Self.privateInputCommand(socketPath: socket)
+        var params: [String: Any] = ["pane_id": pane, "text": text]
+        if !keys.isEmpty { params["keys"] = keys }
+        let id = UUID().uuidString
+        let payload = try JSONSerialization.data(withJSONObject: ["id": id, "method": method, "params": params]) + Data([10])
+        let response = await withTimeoutValue(timeout) { [runner] in
+            try await runner.run(command, standardInput: payload)
+        }
+        guard let response else { throw SubmissionError.unconfirmed }
+        if response.trimmingCharacters(in: .whitespacesAndNewlines) == "MOSHPIT_PRIVATE_INPUT_UNAVAILABLE" {
+            privateInputUnavailable = true
+            throw PrivateInputError.unavailable
+        }
+        guard let object = HerdrSnapshot.firstJSONObject(in: response) else {
+            throw SubmissionError.unconfirmed
+        }
+        if let error = object["error"] as? [String: Any] {
+            let code = error["code"] as? String
+            let message = error["message"] as? String ?? ""
+            // Older servers reject a missing method during enum decoding and
+            // call it invalid_request. Only that exact method rejection proves
+            // no input ran; other invalid requests must not trigger a resend.
+            let unknownMethod = code == "invalid_request" && message.hasPrefix(
+                "invalid request: unknown variant `\(method)`, expected ")
+            let responseID = object["id"] as? String
+            if (responseID == id || responseID == ""), code == "unknown_method" || unknownMethod {
+                privateInputUnavailable = true
+                throw PrivateInputError.unavailable
+            }
+            guard responseID == id else { throw SubmissionError.unconfirmed }
+            throw SubmissionError.rejected
+        }
+        guard object["id"] as? String == id, object["result"] != nil else { throw SubmissionError.unconfirmed }
+    }
+
     func submitLine(_ text: String, paneId: String, timeout: Double = 12) async throws {
         pendingText = nil
-        let task = enqueueInput({ "pane run \(HerdrLaunch.quote(paneId)) \(HerdrLaunch.quote(text))" }, timeout: timeout)
+        let task = enqueueInput { [weak self] in
+            guard let self else { throw SubmissionError.unconfirmed }
+            do {
+                try await sendPrivateInput(method: "pane.send_input", pane: paneId,
+                                           text: text, keys: ["enter"], timeout: timeout)
+            } catch PrivateInputError.unavailable {
+                // This response proves that NOTHING was sent. An unknown or
+                // timed-out result must never fall back and duplicate input.
+                // Only a transport with the pane's real terminal modes can
+                // provide this fallback. Repaint frames do not carry paste
+                // mode: guessing here turns a paste into a burst of keys and
+                // Codex can absorb the appended Enter into the draft. Nor is
+                // pane.send_text a substitute: Herdr treats it as raw bytes.
+                guard let rawSubmitWriter else { throw SubmissionError.pasteUnavailable }
+                try await rawSubmitWriter(text, paneId)
+            }
+        }
         try await task.value
         quicken()
     }

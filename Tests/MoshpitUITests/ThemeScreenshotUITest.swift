@@ -23,8 +23,6 @@ final class ThemeScreenshotUITest: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
-        app.buttons["主机与设置"].tap()
-        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         let themeRow = app.staticTexts["Theme"]
@@ -68,8 +66,6 @@ final class ThemeScreenshotUITest: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
-        app.buttons["主机与设置"].tap()
-        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         attach(app, "10-settings-appearance-rows")

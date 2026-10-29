@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/jedisct1/swift-sodium",
+  "tag": "0.11.0",
+  "commit": "cfd195c76882aa9b997560ca7cb95d72fbf5db00",
+  "archive_sha256": "38c50953ca1f0526f9e3d97f2cfef7c35a145c772b2b75a9250114270adfebe2",
+  "changes": "Unmodified release source and binary XCFramework; GitHub workflow files omitted. Vendored to avoid fetching binary history during every clean build."
+}

@@ -26,12 +26,14 @@ final class SSHKeyFlowUITest: XCTestCase {
         app.launchArguments += ["-MOSHPIT_RESET", "-MOSHPIT_AUTOCARE_OFF"]
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["home-add"].waitForExistence(timeout: 5))
 
         // Add Connection → SSH Key → key picker → generate.
         app.buttons["home-add"].tap()
         XCTAssertTrue(app.navigationBars["新建 Host"].waitForExistence(timeout: 3))
-        app.buttons["SSH Key"].firstMatch.tap()
+        let keyAuthentication = app.buttons["SSH Key"].firstMatch
+        XCTAssertTrue(app.reveal(keyAuthentication))
+        keyAuthentication.tap()
         let pickerRow = app.buttons["key-picker-row"].firstMatch
         XCTAssertTrue(app.reveal(pickerRow))
         pickerRow.tap()
@@ -76,8 +78,6 @@ final class SSHKeyFlowUITest: XCTestCase {
         app.navigationBars["新建 Host"].buttons["Cancel"].tap()
 
         // Settings → SSH Keys → long-press → Delete Key → confirm card.
-        app.buttons["主机与设置"].tap()
-        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         let keysRow = app.staticTexts["SSH Keys"].firstMatch

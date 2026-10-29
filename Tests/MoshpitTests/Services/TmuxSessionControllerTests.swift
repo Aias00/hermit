@@ -3046,6 +3046,7 @@ struct TmuxReconnectHandoffTests {
     func agentHooksHandoff() async throws {
         let never = TmuxSessionController(sshSession: MockTmuxTransport())
         #expect(never.agentHooksLoaded == false)
+        #expect(never.agentHooksObservedAt == nil)
         #expect(never.takeAgentHooks() == nil,
                 "a controller that never read the stamps has nothing to hand over — an empty inheritance would read as 'no agents'")
 
@@ -3059,15 +3060,57 @@ struct TmuxReconnectHandoffTests {
         transport.pushText("%begin 9 9 0\n%5|working|claude|1758000000|2.1.269|\n%end 9 9 0\n")
         #expect(await waitUntil { controller.agentHooksLoaded })
         #expect(controller.agentHooks["%5"]?.agent == "claude")
+        #expect(controller.agentHooksObservedAt != nil)
 
         let handed = try #require(controller.takeAgentHooks())
         let replacement = TmuxSessionController(sshSession: MockTmuxTransport())
         replacement.inheritAgentHooks(handed)
         #expect(replacement.agentHooksLoaded == true)
+        #expect(replacement.agentHooksObservedAt == nil,
+                "cached hooks must not pretend the new controller has observed the remote state")
         #expect(replacement.agentHooks["%5"]?.state == "working")
         // Its own reading wins over a late inheritance.
         replacement.inheritAgentHooks([:])
         #expect(replacement.agentHooks["%5"] != nil)
+    }
+
+    @Test("Only complete successful hook replies renew the remote observation time")
+    func hookObservationRejectsFailedAndMalformedReplies() async throws {
+        let (controller, transport) = await makeAttachedController()
+        _ = await waitUntil { await transport.recordedCommands().count >= 3 }
+        for n in 1...3 { transport.pushText("%begin \(n) \(n) 0\n%end \(n) \(n) 0\n") }
+        var observations: [Date] = []
+        controller.onAgentHooksUpdated = {
+            if let date = controller.agentHooksObservedAt { observations.append(date) }
+        }
+        let valid = "%5|working|codex|1758000000|node|a title with | pipes"
+        controller.pollAgentHooks()
+        #expect(await waitUntil { await transport.recordedCommands().count >= 4 })
+        transport.pushText("%begin 4 4 0\n\(valid)\n%end 4 4 0\n")
+        #expect(await waitUntil { observations.count == 1 })
+        let initial = try #require(controller.agentHooksObservedAt)
+
+        // Replies are FIFO: the final valid reply is also a processing barrier
+        // proving all rejected reads were handled before we check callbacks.
+        for _ in 0..<5 { controller.pollAgentHooks() }
+        #expect(await waitUntil { await transport.recordedCommands().count >= 9 })
+        transport.pushText("%begin 5 5 0\n\(valid)\n%error 5 5 0\n")
+        transport.pushText("%begin 6 6 0\nshell garbage\n%end 6 6 0\n")
+        transport.pushText("%begin 7 7 0\n\(valid)\ntruncated|reply\n%end 7 7 0\n")
+        transport.pushText("%begin 8 8 0\ninvalid|working|codex||node|\n%end 8 8 0\n")
+        transport.pushText("%begin 9 9 0\n\(valid)\n%end 9 9 0\n")
+        #expect(await waitUntil { observations.count >= 2 })
+        #expect(observations.count == 2)
+        #expect(try #require(controller.agentHooksObservedAt) > initial)
+        #expect(controller.agentHooks["%5"]?.title == "a title with | pipes")
+
+        controller.pollAgentHooks()
+        #expect(await waitUntil { await transport.recordedCommands().count >= 10 })
+        transport.pushText("%begin 10 10 0\n%end 10 10 0\n")
+        #expect(await waitUntil { observations.count == 3 })
+        #expect(controller.agentHooks.isEmpty, "a successful empty reply is a verified empty snapshot")
+        await controller.detach()
+        transport.finish()
     }
 
     /// The monitor polls the stamps every 2s — and not at all with the island

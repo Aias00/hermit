@@ -1,0 +1,285 @@
+[
+  {
+    "module": "Go runtime and standard library",
+    "version": "go1.27.3",
+    "notices": [
+      "LICENSE",
+      "libexec/PATENTS"
+    ]
+  },
+  {
+    "module": "filippo.io/edwards25519",
+    "version": "v1.2.0",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/anmitsu/go-shlex",
+    "version": "v0.0.0-20200514113438-38f4b401e2be",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/coder/websocket",
+    "version": "v1.8.15",
+    "notices": [
+      "LICENSE.txt"
+    ]
+  },
+  {
+    "module": "github.com/creack/pty",
+    "version": "v1.1.24",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/fxamacker/cbor/v2",
+    "version": "v2.9.3",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/gaissmai/bart",
+    "version": "v0.29.0",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/go-json-experiment/json",
+    "version": "v0.0.0-20260820222146-c27c302e5fc3",
+    "notices": [
+      "AUTHORS",
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/golang/groupcache",
+    "version": "v0.0.0-20241129210726-2c02b8208cf8",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/google/btree",
+    "version": "v1.1.3",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/hdevalence/ed25519consensus",
+    "version": "v0.2.0",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/huin/goupnp",
+    "version": "v1.3.0",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/klauspost/compress",
+    "version": "v1.20.0",
+    "notices": [
+      "LICENSE",
+      "internal/snapref/LICENSE",
+      "zstd/internal/xxhash/LICENSE.txt"
+    ]
+  },
+  {
+    "module": "github.com/kr/fs",
+    "version": "v0.1.0",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/mitchellh/go-ps",
+    "version": "v1.0.0",
+    "notices": [
+      "LICENSE.md"
+    ]
+  },
+  {
+    "module": "github.com/pires/go-proxyproto",
+    "version": "v0.15.0",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/pkg/sftp",
+    "version": "v1.13.11",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/tailscale/certstore",
+    "version": "v0.1.1-0.20260409135935-3638fb84b77d",
+    "notices": [
+      "LICENSE.md"
+    ]
+  },
+  {
+    "module": "github.com/tailscale/gliderssh",
+    "version": "v0.3.4-0.20260716005906-1a0f895faf28",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/tailscale/hujson",
+    "version": "v0.0.0-20260727124030-b80ff77dac4f",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/tailscale/peercred",
+    "version": "v0.0.0-20250107143737-35a0c7bd7edc",
+    "notices": [
+      "AUTHORS",
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/tailscale/tailcat",
+    "version": "52fbad323e9d352f1febb623e0975368e9a8cbdd",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/tailscale/web-client-prebuilt",
+    "version": "v0.0.0-20260917222731-e0ed2d0d0fea",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/tailscale/wireguard-go",
+    "version": "v0.0.0-20260924224943-0a83b87f7908",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/u-root/u-root",
+    "version": "v0.16.0",
+    "notices": [
+      "AUTHORS",
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "github.com/x448/float16",
+    "version": "v0.8.4",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "go4.org/mem",
+    "version": "v0.0.0-20240501181205-ae6ca9944745",
+    "notices": [
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "go4.org/netipx",
+    "version": "v0.0.0-20260823151212-3075585bcbeb",
+    "notices": [
+      "AUTHORS",
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "golang.org/x/crypto",
+    "version": "v0.57.0",
+    "notices": [
+      "LICENSE",
+      "PATENTS"
+    ]
+  },
+  {
+    "module": "golang.org/x/exp",
+    "version": "v0.0.0-20260908205506-85c1c2202aba",
+    "notices": [
+      "LICENSE",
+      "PATENTS"
+    ]
+  },
+  {
+    "module": "golang.org/x/net",
+    "version": "v0.59.0",
+    "notices": [
+      "LICENSE",
+      "PATENTS"
+    ]
+  },
+  {
+    "module": "golang.org/x/sync",
+    "version": "v0.23.0",
+    "notices": [
+      "LICENSE",
+      "PATENTS"
+    ]
+  },
+  {
+    "module": "golang.org/x/sys",
+    "version": "v0.48.0",
+    "notices": [
+      "LICENSE",
+      "PATENTS"
+    ]
+  },
+  {
+    "module": "golang.org/x/term",
+    "version": "v0.46.0",
+    "notices": [
+      "LICENSE",
+      "PATENTS"
+    ]
+  },
+  {
+    "module": "golang.org/x/text",
+    "version": "v0.42.0",
+    "notices": [
+      "LICENSE",
+      "PATENTS"
+    ]
+  },
+  {
+    "module": "golang.org/x/time",
+    "version": "v0.16.0",
+    "notices": [
+      "LICENSE",
+      "PATENTS"
+    ]
+  },
+  {
+    "module": "gvisor.dev/gvisor",
+    "version": "v0.0.0-20260915211658-a6f909f08a72",
+    "notices": [
+      "AUTHORS",
+      "LICENSE"
+    ]
+  },
+  {
+    "module": "tailscale.com",
+    "version": "v1.103.0-pre.0.20260929142145-a0e471a35b8f",
+    "notices": [
+      "LICENSE",
+      "PATENTS"
+    ]
+  }
+]

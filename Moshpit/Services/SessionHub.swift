@@ -117,6 +117,36 @@ final class SessionHub {
     @MainActor
     final class ActiveSession: Identifiable {
         let connection: ServerConnection
+        var composerDraft = TerminalComposerDraft()
+        /// Launch actions belong to the session, so cached navigation
+        /// destinations and iPad re-hosting cannot lose or replay the command.
+        var pendingInitialCommand: String?
+        var shellWasReopened = false
+        @ObservationIgnored private var tunnelBackoff = CloudflareReconnectBackoff()
+        @ObservationIgnored private var tunnelRetryTask: Task<Void, Never>?
+        /// Rendering startup can fail repeatedly while SSH authentication works.
+        /// Keep its retry budget independent of a successful transport dial.
+        @ObservationIgnored private var herdrFrameRecoveryBackoff = CloudflareReconnectBackoff()
+        @ObservationIgnored private var herdrFrameRecoveryTask: Task<Void, Never>?
+
+        /// User-space tunnels need bounded retries after suspension or
+        /// path loss. Direct SSH and Mosh keep their existing recovery policy.
+        private var usesTunnelTransport: Bool {
+            connection.transport == .cloudflareSSH || connection.transport == .tailcat
+                || connection.transport == .tailscale
+        }
+
+        private var canAutomaticallyReconnect: Bool {
+            viewModel.allowsAutomaticRetry && herdrFrameRecoveryBackoff.permitsAttempt()
+                && (!usesTunnelTransport || tunnelBackoff.permitsAttempt())
+        }
+
+        func consumeInitialCommand() -> String? {
+            guard viewModel.connState == .live, !isStopping,
+                  let command = pendingInitialCommand, !command.isEmpty else { return nil }
+            pendingInitialCommand = nil
+            return command
+        }
         let viewModel: TerminalViewModel
         /// Set when the connection runs in tmux control mode.
         private(set) var tmuxController: TmuxSessionController?
@@ -460,9 +490,12 @@ final class SessionHub {
                                moshHadFirstContact hadContact: Bool = false,
                                armFirstFrame: Bool = false,
                                herdrFrameSession: SSHSession? = nil,
-                               pendingHerdrCloses: Int = 0) {
+                               pendingHerdrCloses: Int = 0,
+                               moshSwitchInFlight: Bool = false,
+                               herdrWriteBarrier: Task<Void, Never>? = nil) {
             self.moshTransport = transport
             self.herdrFrameSSH = herdrFrameSession
+            if let herdrWriteBarrier { self.herdrWriteChain = herdrWriteBarrier }
             self.herdrExpectedCloses = pendingHerdrCloses
             self.sidecarSSH = ssh
             self.herdrControl = control
@@ -471,9 +504,10 @@ final class SessionHub {
                 self.tmuxController = tmuxController
                 if armFirstFrame { armFirstFrameWait(for: tmuxController) }
             }
-            if let control { controlPlaneWired(control) }
+            if let control { configureHerdrInput(control); controlPlaneWired(control) }
             self.moshServerPid = pid
             self.moshHadFirstContact = hadContact
+            if moshSwitchInFlight { beginMoshSwitchCover() }
             if transport != nil { viewModel.markConnected() }
         }
 
@@ -567,15 +601,19 @@ final class SessionHub {
             tmuxController?.releaseWindowPins()
             moshControl?.releaseWindowPins()
             herdrFrameSuspended = true
+            herdrAcceptsFrames = false
+            herdrTargetGeneration = UUID()
             herdrForegroundRecovery?.cancel()
             herdrForegroundRecovery = nil
             herdrRetargetTask?.cancel()
-            herdrBootFallbackTask?.cancel()
+            herdrFirstFrameTask?.cancel()
             signalHerdrReleaseAck()
             if herdrFrameTarget != nil {
-                herdrExpectedCloses += 1
                 herdrFrameTarget = nil
-                writeFrameCommand(HerdrFrameCommand.release)
+                if herdrChannelBooted, !herdrReaderReady {
+                    herdrExpectedCloses += 1
+                    writeFrameCommand(HerdrFrameCommand.release, mode: .release)
+                }
             }
         }
 
@@ -611,7 +649,12 @@ final class SessionHub {
             let generation = herdrFrameGeneration
             herdrForegroundRecovery = Task { [weak self] in
                 guard let self else { return }
-                await awaitHerdrReleaseAck(timeout: herdrForegroundRecoveryDeadline)
+                // Background release may still be queued behind an earlier
+                // write. Its response budget begins only once that write drains.
+                await herdrWriteChain?.value
+                guard !Task.isCancelled, !herdrFrameSuspended,
+                      herdrFrameGeneration == generation else { return }
+                let readerReady = await awaitHerdrReleaseAck(timeout: herdrForegroundRecoveryDeadline)
                 // A probe already in flight must finish before reconnect(),
                 // whose reentrancy guard would otherwise silently discard this recovery.
                 while (isResuming || isReconnecting), !Task.isCancelled,
@@ -623,9 +666,8 @@ final class SessionHub {
                     if herdrFrameGeneration == generation { herdrForegroundRecovery = nil }
                     return
                 }
-                let lostAck = herdrExpectedCloses > 0
                 herdrForegroundRecovery = nil
-                if lostAck { await forceResume() }
+                if !readerReady { await recoverHerdrFrameChannel(reason: "herdr-reader-resume-timeout") }
                 else { herdrControl?.quicken() }
             }
         }
@@ -705,6 +747,7 @@ final class SessionHub {
         /// teardown are ones that never got a reply at all — exactly the
         /// case the reap exists for.
         @ObservationIgnored private var moshHadFirstContact = false
+        @ObservationIgnored private var moshSessionGeneration = UUID()
 
         /// Bounds the wait started by `beginAttachTimeout`. Stored (not
         /// fire-and-forget) so `stop()` can cancel it — a stalled watcher
@@ -770,8 +813,13 @@ final class SessionHub {
         private(set) var herdrRemoteGrid: (cols: Int, rows: Int)?
         @ObservationIgnored private var herdrFrameSuspended = false
         @ObservationIgnored private var herdrForegroundRecovery: Task<Void, Never>?
-        @ObservationIgnored var herdrForegroundRecoveryDeadline: Duration = .milliseconds(1500)
+        @ObservationIgnored var herdrForegroundRecoveryDeadline: Duration = .seconds(30)
         @ObservationIgnored private var herdrFrameGeneration = UUID()
+        @ObservationIgnored private var herdrTargetGeneration = UUID()
+        /// Only the wrapper marker after the CLI exits grants ownership of stdin.
+        @ObservationIgnored private var herdrReaderReady = false
+        /// False while releasing/switching: old frames cannot paint the new target.
+        @ObservationIgnored private var herdrAcceptsFrames = false
         /// The channel carrying frames — the session's own PTY, so retargeting
         /// costs a command, not a connection.
         @ObservationIgnored private var herdrFrameSSH: SSHSession?
@@ -826,10 +874,8 @@ final class SessionHub {
         /// attach IS the boot line (it carries its own target), so this also
         /// answers "has anything been asked of this channel yet".
         @ObservationIgnored private var herdrChannelBooted = false
-        /// Whether the retarget loop announced itself. False means either
-        /// "not yet" or "this host's shell couldn't take the boot shape", and
-        /// switches fall back to the one-shot start line either way — correct
-        /// in both cases, just slower in the second.
+        /// Whether the wrapper announced its startup. This does not imply
+        /// that its reader owns stdin; only `herdrReaderReady` proves that.
         @ObservationIgnored private var herdrLoopReady = false
         /// When the current attach was asked for, and whether anything has
         /// been painted since. Together they make the poller's repeated
@@ -840,19 +886,17 @@ final class SessionHub {
         /// Measured switch cost: the retarget's first byte out to the new
         /// pane's first full frame in. The veil's safety cap scales off it.
         @ObservationIgnored private var herdrLastSwitch: TimeInterval = 0
-        /// Resumed when the release we sent comes back as `terminal.closed` —
-        /// the moment the old attach has let go of stdin and the next target
-        /// can be written. Replaces a fixed sleep with the actual event.
-        @ObservationIgnored private var herdrReleaseAck: CheckedContinuation<Void, Never>?
-        /// Watches for a boot that produced neither the loop marker nor a
-        /// frame, and falls back to the one-shot line.
-        @ObservationIgnored private var herdrBootFallbackTask: Task<Void, Never>?
-        /// How long an asked-for attach may stay unpainted before the next
-        /// focus report is allowed to re-drive it.
-        private static let herdrAttachTimeout: TimeInterval = 3
-        /// How long to wait for the retarget loop to announce itself before
-        /// assuming this host can't run it.
-        private static let herdrLoopProbe: Duration = .milliseconds(2500)
+        /// Resumed by the wrapper's reader-ready marker, cancellation or the
+        /// deadline. Callers must inspect the returned ownership proof.
+        @ObservationIgnored private var herdrReleaseWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
+        /// A silent boot has unknown stdin ownership; recovery opens a fresh
+        /// channel instead of typing another shell command into that stream.
+        @ObservationIgnored private var herdrFirstFrameTask: Task<Void, Never>?
+        /// Response budgets start after the associated write completes. Slow
+        /// shell startup and relayed links get the same scale as SSH auth.
+        @ObservationIgnored var herdrFirstFrameTimeout: Duration = .seconds(30)
+        @ObservationIgnored var herdrReleaseTimeout: Duration = .seconds(30)
+        @ObservationIgnored var herdrWriteTimeout: Duration = .seconds(30)
         /// Home, erase display, erase scrollback. Fed to the emulator the
         /// moment a switch starts, so the buffer stops holding the pane we
         /// are leaving. The veil hides the swap either way — this is about
@@ -979,7 +1023,7 @@ final class SessionHub {
             // application-mode sequence) then never fire — the "no up/down
             // history under herdr" report. One choke point catches both the
             // D-pad and a hardware keyboard's arrows.
-            if connection.multiplexer == .herdr, connection.connectionProtocol == .ssh,
+            if herdrFrameSSH != nil,
                (herdrFrameTarget == nil || !herdrFramePainted || herdrFrameSuspended) {
                 // Never write terminal input into the shell's retarget reader.
                 herdrNotice = "终端画面正在恢复，请稍后输入。"
@@ -1394,6 +1438,9 @@ final class SessionHub {
         func start(theme: TerminalTheme, fontSize: Double, fontName: String = "system",
                    cursorShape: CursorShape = .block, cursorColorId: String = "teal",
                    cursorBlink: Bool = true, automatic: Bool = false) async {
+            if automatic && !canAutomaticallyReconnect { return }
+            do { _ = try connection.validatedTransport() }
+            catch { viewModel.fail(error); return }
             // Idempotent for live sessions: re-entering the Terminal screen
             // while connecting/connected must not re-run the bootstrap (the
             // mosh path would exec a second mosh-server). Dead sessions
@@ -1406,10 +1453,29 @@ final class SessionHub {
             case .idle:
                 break
             }
+            // A manual attempt can reuse this ActiveSession without stop().
+            // Its success must not be torn down by an earlier retry timer.
+            tunnelRetryTask?.cancel()
+            tunnelRetryTask = nil
+            herdrFrameRecoveryTask?.cancel()
+            herdrFrameRecoveryTask = nil
+            if !automatic {
+                tunnelBackoff = CloudflareReconnectBackoff()
+                herdrFrameRecoveryBackoff = CloudflareReconnectBackoff()
+            }
             viewModel.beginAttempt(automatic: automatic)
             dialBegan = Date()
             startGeneration += 1
             let attempt = startGeneration
+            defer {
+                if usesTunnelTransport, attempt == startGeneration {
+                    if case .connected = viewModel.status {
+                        tunnelBackoff.succeeded()
+                    } else if case .failed = viewModel.status, viewModel.allowsAutomaticRetry, !isStopping {
+                        scheduleTunnelRetry()
+                    }
+                }
+            }
             // A tmux attempt has nothing to show until its controller reveals a
             // frame; declare that up front so the cover doesn't drop in the gap
             // between the transport coming up and the controller existing.
@@ -1483,7 +1549,9 @@ final class SessionHub {
             // lifetime; a stale "has tmux" still fails safe (the attach
             // doesn't confirm and the empty state offers Install/Create).
             let caps: HostCapabilities
-            if let known = HostCapabilityCache.shared.capabilities(for: connection.id) {
+            if usesTunnelTransport {
+                caps = await probeCapabilities(over: session)
+            } else if let known = HostCapabilityCache.shared.capabilities(for: connection.id) {
                 capabilities = known
                 caps = known
                 let id = connection.id
@@ -1590,11 +1658,78 @@ final class SessionHub {
             }
         }
 
+        private func configureHerdrInput(_ client: HerdrControlClient) {
+            client.rawInputWriter = { [weak self] bytes, pane in
+                guard let self else { throw SSHError.sessionClosed }
+                try await self.writeHerdrTerminalInput(bytes, pane: pane)
+            }
+            client.rawSubmitWriter = { [weak self] text, pane in
+                guard let self else { throw SSHError.sessionClosed }
+                // Repaint frames don't carry the remote pane's bracketed-paste
+                // mode. Guessing from our local emulator turns a paste+Return
+                // into a typing burst in Codex (or executes multiline shell
+                // input). Only the server's semantic input API can submit it.
+                let pasteMode = self.herdrFrameSSH == nil ? self.activeTerminal?.bracketedPasteMode : nil
+                let payload = try HerdrControlClient.rawSubmitPayload(text, bracketedPasteMode: pasteMode)
+                try await self.writeHerdrTerminalInput(payload, pane: pane)
+            }
+        }
+
+        private func writeHerdrTerminalInput(_ bytes: Data, pane: String) async throws {
+            guard viewModel.connState == .live, herdrControl?.snapshot.activePaneId == pane else {
+                throw SSHError.sessionClosed
+            }
+            if let ssh = herdrFrameSSH {
+                guard herdrFrameTarget == pane, herdrFramePainted, herdrAcceptsFrames,
+                      !herdrReaderReady, !herdrFrameSuspended else {
+                    throw SSHError.ptyNotReady
+                }
+                let generation = herdrFrameGeneration
+                let targetGeneration = herdrTargetGeneration
+                let previous = herdrWriteChain
+                let operation = Task { @MainActor [weak self] in
+                    await previous?.value
+                    try Task.checkCancellation()
+                    guard let self, self.herdrFrameGeneration == generation,
+                          self.herdrTargetGeneration == targetGeneration,
+                          self.herdrFrameTarget == pane, self.herdrFramePainted,
+                          self.herdrAcceptsFrames, !self.herdrReaderReady,
+                          !self.herdrFrameSuspended else {
+                        throw SSHError.sessionClosed
+                    }
+                    try await self.writeHerdrFrameData(
+                        Data((HerdrFrameCommand.input(bytes) + "\n").utf8), over: ssh, generation: generation)
+                }
+                herdrWriteChain = Task { _ = try? await operation.value }
+                try await operation.value
+            } else if let transport = moshTransport {
+                // The snapshot moves optimistically; the raw renderer still
+                // belongs to the old pane until its switch veil clears.
+                guard moshSwitchCoverTask == nil else { throw SSHError.ptyNotReady }
+                let previous = moshWriteChain
+                let operation = Task { @MainActor [weak self] in
+                    await previous?.value
+                    try Task.checkCancellation()
+                    guard let self, self.moshTransport === transport,
+                          self.moshSwitchCoverTask == nil, self.viewModel.connState == .live,
+                          self.herdrControl?.snapshot.activePaneId == pane else {
+                        throw SSHError.sessionClosed
+                    }
+                    try await transport.sendAcknowledged(bytes)
+                }
+                moshWriteChain = Task { _ = try? await operation.value }
+                try await operation.value
+            } else {
+                throw SSHError.ptyNotReady
+            }
+        }
+
         /// Start (or restart) herdr's snapshot poller over `ssh`. Safe to call
         /// again — a live client is left alone rather than doubled up.
         func startHerdrControlPlane(over ssh: SSHSession) {
             guard herdrControl == nil else { return }
             let client = HerdrControlClient(runner: ssh, customPath: connection.herdrPath)
+            configureHerdrInput(client)
             // Follow the server's focus. The frame channel renders exactly one
             // pane, so "which pane" is whatever herdr says is focused —
             // whether that came from our own sheet, a keystroke inside the
@@ -1668,6 +1803,9 @@ final class SessionHub {
             herdrFrameSSH = session
             herdrFrameSuspended = false
             herdrFrameGeneration = UUID()
+            herdrTargetGeneration = UUID()
+            herdrReaderReady = false
+            herdrAcceptsFrames = false
             let generation = herdrFrameGeneration
             // A fresh PTY, so a fresh reader loop: whatever the previous
             // channel had booted died with it.
@@ -1698,6 +1836,9 @@ final class SessionHub {
                     for frame in parser.consume(chunk) {
                         switch frame {
                         case .screen(_, let cols, let rows, let full, let bytes):
+                            guard self?.herdrAcceptsFrames == true,
+                                  self?.herdrFrameSuspended == false else { continue }
+                            let targetGeneration = self?.herdrTargetGeneration
                             if cols > 0, rows > 0,
                                self?.herdrRemoteGrid?.cols != cols || self?.herdrRemoteGrid?.rows != rows {
                                 self?.herdrRemoteGrid = (cols, rows)
@@ -1709,13 +1850,21 @@ final class SessionHub {
                             // home — so both kinds just get fed.
                             coordinator.feed(data: bytes)
                             await MainActor.run {
-                                guard let self, self.herdrFrameGeneration == generation else { return }
+                                guard let self, self.herdrFrameGeneration == generation,
+                                      self.herdrTargetGeneration == targetGeneration,
+                                      self.herdrAcceptsFrames, !self.herdrFrameSuspended else { return }
                                 // Painting again means we hold the channel, so
                                 // any contention warning is stale.
                                 if self.herdrNotice != nil { self.herdrNotice = nil }
                                 if self.herdrNoticeAction != nil { self.herdrNoticeAction = nil }
                                 let firstPaint = !self.herdrFramePainted
                                 self.herdrFramePainted = true
+                                if firstPaint {
+                                    Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: first-frame received")
+                                    self.herdrFirstFrameTask?.cancel()
+                                    self.herdrFirstFrameTask = nil
+                                    self.herdrFrameRecoveryBackoff.succeeded()
+                                }
                                 if firstPaint, let viewport = coordinator.localViewportGrid,
                                    viewport.cols != cols || viewport.rows != rows {
                                     self.writeFrameCommand(HerdrFrameCommand.resize(cols: viewport.cols, rows: viewport.rows))
@@ -1736,27 +1885,49 @@ final class SessionHub {
                             await MainActor.run {
                                 guard let self, self.herdrFrameGeneration == generation else { return }
                                 self.herdrLoopReady = true
-                                self.herdrBootFallbackTask?.cancel()
-                                self.herdrBootFallbackTask = nil
+                                Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: loop-ready received")
+                                // Startup has not succeeded until a screen
+                                // frame arrives; the wrapper alone is not enough.
                             }
+                        case .readerReady:
+                            guard let self, self.herdrFrameGeneration == generation else { continue }
+                            let unexpectedExit = herdrAcceptsFrames && herdrExpectedCloses == 0
+                                && herdrReleaseWaiters.isEmpty && herdrFrameTarget != nil
+                            Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: reader-ready received")
+                            herdrLoopReady = true
+                            herdrReaderReady = true
+                            herdrAcceptsFrames = false
+                            herdrFramePainted = false
+                            herdrExpectedCloses = 0
+                            herdrFirstFrameTask?.cancel()
+                            herdrFirstFrameTask = nil
+                            signalHerdrReleaseAck()
+                            if unexpectedExit, !herdrFrameSuspended {
+                                // EOF and a missing executable can return to
+                                // the wrapper without terminal.closed/fault.
+                                // Do not leave a claimed target with no timer.
+                                await recoverHerdrFrameChannel(reason: "herdr-control-exited")
+                            } else if !herdrFrameSuspended { herdrControl?.quicken() }
+                        case .inputIgnored(let message):
+                            // A rejected line does not exit herdr's stdin loop.
+                            // Preserve the attachment; clearing it would cause
+                            // a bare retarget to be sent to that same JSON reader.
+                            self?.herdrNotice = message
                         case .closed:
                             await MainActor.run {
                                 guard let self, self.herdrFrameGeneration == generation else { return }
+                                self.herdrAcceptsFrames = false
+                                self.herdrFramePainted = false
                                 if self.herdrExpectedCloses > 0 {
-                                    // Our own release during a retarget — the
-                                    // new target is already set, leave it be.
-                                    self.herdrExpectedCloses -= 1
-                                    // …and this is the moment the retarget was
-                                    // waiting for: the old attach has let go of
-                                    // stdin, so the next target can be written
-                                    // without being swallowed by it.
-                                    self.signalHerdrReleaseAck()
-                                    if !self.herdrFrameSuspended { self.herdrControl?.quicken() }
+                                    // The CLI flushes terminal.closed before it
+                                    // exits. Its stdin thread may still consume
+                                    // input; wait for the wrapper's readerReady.
                                 } else {
                                     // Somebody else took the pane, or it went
                                     // away. Either way stop claiming to render
                                     // it; the poller re-asserts the target.
                                     self.herdrFrameTarget = nil
+                                    self.herdrTargetGeneration = UUID()
                                     self.noteHerdrEviction()
                                     // Re-attaching rides the control poll, so
                                     // don't let it wait out an idle interval.
@@ -1789,10 +1960,10 @@ final class SessionHub {
                                     self.herdrNotice = message
                                 }
                                 self.herdrFrameTarget = nil
-                                // A refusal ends the swap too — don't leave a
-                                // retarget parked on a release that has just
-                                // been overtaken by events.
-                                self.signalHerdrReleaseAck()
+                                self.herdrTargetGeneration = UUID()
+                                self.herdrAcceptsFrames = false
+                                // A diagnostic is not an ownership ACK. The
+                                // wrapper will signal after the CLI exits.
                                 self.herdrRetryAfter = Date()
                                     .addingTimeInterval(Self.herdrContentionBackoff)
                                 if self.herdrAwaitingFullFrame {
@@ -1831,12 +2002,10 @@ final class SessionHub {
         /// Measured against a real herdr 0.8.0 over a local PTY: 545ms per
         /// switch, of which ~500ms was ceremony.
         ///
-        /// Both halves are gone. The settle is now the `terminal.closed` the
-        /// release itself produces (the actual event, not a guess at it), and
-        /// the asking is one word into the boot line's reader loop
-        /// (`HerdrFrameCommand.boot`) instead of a command at a prompt. Same
-        /// measurement: 40ms. What's left is the two round trips the protocol
-        /// genuinely costs.
+        /// The wrapper's reader_ready marker now confirms that the old process
+        /// actually exited. terminal.closed is emitted before exit and cannot
+        /// authorize a new write. A tagged target line then goes to the reader
+        /// loop without re-entering the user's interactive shell prompt.
         ///
         /// Called on every poll, not just on a focus change — see
         /// `HerdrControlClient.onFocusedPaneChanged`. The equality guard makes
@@ -1850,24 +2019,23 @@ final class SessionHub {
                 herdrRetryAfter = nil
             }
             guard herdrFrameSSH != nil else { return }
-            if paneId == herdrFrameTarget {
-                // Normally free: we're already rendering it. It stops being
-                // free when the attach we asked for never painted anything —
-                // a target line the shell ate, a boot the host couldn't run —
-                // because then nothing else will ever ask again. Past the
-                // timeout, the poller's repeat IS the recovery.
-                guard !herdrFramePainted,
-                      let askedAt = herdrAttachAskedAt,
-                      Date().timeIntervalSince(askedAt) > Self.herdrAttachTimeout
-                else { return }
-            }
+            // Repeated snapshots are not evidence that a pending attach
+            // failed. Its single first-frame deadline owns recovery, including
+            // the interval before the boot/retarget write reaches the wire.
+            guard paneId != herdrFrameTarget else { return }
             guard herdrControl?.snapshot.panes[paneId] != nil else { return }
             let preservedGrid = coordinator.localViewportGrid ?? Self.estimateGrid(fontSize: lastFontSize)
             herdrRemoteGrid = preservedGrid
             coordinator.remoteGrid = preservedGrid
             let hadTarget = herdrFrameTarget != nil
+            herdrFirstFrameTask?.cancel()
+            herdrFirstFrameTask = nil
+            herdrTargetGeneration = UUID()
+            let targetGeneration = herdrTargetGeneration
+            let channelGeneration = herdrFrameGeneration
             herdrFrameTarget = paneId
             herdrFramePainted = false
+            herdrAcceptsFrames = false
             herdrAttachAskedAt = Date()
             // Cover the pane we're leaving for the length of the swap. The
             // release, the reattach and herdr's repaint are all round trips,
@@ -1900,44 +2068,36 @@ final class SessionHub {
             // cancellation alone never resumes a continuation.
             signalHerdrReleaseAck()
             herdrRetargetTask = Task { [weak self] in
-                guard let self else { return }
-                if hadTarget {
-                    herdrExpectedCloses += 1
-                    writeFrameCommand(HerdrFrameCommand.release)
-                    // Whoever reads stdin next — the reader loop or the login
-                    // shell — only gets to read it once the attach that owns
-                    // it has exited. Anything written before that is consumed
-                    // by the dying client and lost (verified: pipelining the
-                    // next target with the release drops it every time). The
-                    // close IS that moment; the timeout is only for a channel
-                    // that has stopped answering at all.
-                    await awaitHerdrReleaseAck(timeout: .milliseconds(1500))
-                    guard !Task.isCancelled else { return }
-                    if !herdrLoopReady {
-                        // The one-shot line is typed at an interactive prompt,
-                        // which is not ready the instant the client exits —
-                        // this is the settle that shape was verified with.
-                        try? await Task.sleep(for: .milliseconds(400))
-                        guard !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled,
+                      herdrFrameGeneration == channelGeneration,
+                      herdrTargetGeneration == targetGeneration else { return }
+                if herdrChannelBooted && !herdrReaderReady {
+                    if hadTarget {
+                        herdrExpectedCloses += 1
+                        let release = writeFrameCommand(HerdrFrameCommand.release, mode: .release)
+                        await release?.value
+                        guard !Task.isCancelled, herdrFrameGeneration == channelGeneration,
+                              herdrTargetGeneration == targetGeneration else { return }
+                    }
+                    let readerReady = await awaitHerdrReleaseAck(timeout: herdrReleaseTimeout)
+                    guard !Task.isCancelled, herdrFrameGeneration == channelGeneration,
+                          herdrTargetGeneration == targetGeneration else { return }
+                    guard readerReady else {
+                        // Disown this task before recovery cancels the old
+                        // channel's work; never continue writing on timeout.
+                        herdrRetargetTask = nil
+                        await recoverHerdrFrameChannel(reason: "herdr-reader-release-timeout")
+                        return
                     }
                 }
-                // No parser reset needed: a truncated line from the old target
-                // fails to parse and is dropped, and the new target opens with
-                // a full repaint — so at worst one dead line is skipped.
                 let grid = preservedGrid
-                if herdrLoopReady {
+                if herdrReaderReady {
                     writeFrameCommand(HerdrFrameCommand.retarget(
-                        target: paneId, cols: grid.cols, rows: grid.rows))
+                        target: paneId, cols: grid.cols, rows: grid.rows), mode: .retarget)
                 } else if !herdrChannelBooted {
-                    herdrChannelBooted = true
                     writeFrameCommand(HerdrFrameCommand.boot(
                         target: paneId, cols: grid.cols, rows: grid.rows,
-                        customPath: connection.herdrPath))
-                    armHerdrBootFallback()
-                } else {
-                    writeFrameCommand(HerdrFrameCommand.start(
-                        target: paneId, cols: grid.cols, rows: grid.rows,
-                        customPath: connection.herdrPath))
+                        customPath: connection.herdrPath), mode: .boot)
                 }
             }
         }
@@ -1953,59 +2113,170 @@ final class SessionHub {
             min(max(0.8, herdrLastSwitch * 2 + 0.4), 6.0)
         }
 
-        /// Wait for the release we just wrote to come back as
-        /// `terminal.closed`. Returns immediately if there is nothing to wait
-        /// for, and gives up after `timeout` so a wedged channel can't park a
-        /// switch forever.
-        private func awaitHerdrReleaseAck(timeout: Duration) async {
-            guard herdrExpectedCloses > 0 else { return }
+        /// Wait for the wrapper to regain stdin after the CLI exits. A
+        /// timeout/cancellation wakes the waiter but never grants ownership.
+        private func awaitHerdrReleaseAck(timeout: Duration) async -> Bool {
+            if herdrReaderReady { return true }
+            let id = UUID()
             let deadline = Task { [weak self] in
-                try? await Task.sleep(for: timeout)
-                guard !Task.isCancelled else { return }
-                self?.signalHerdrReleaseAck()
+                do { try await Task.sleep(for: timeout) }
+                catch { return }
+                self?.finishHerdrReleaseWaiter(id, ready: false)
             }
             defer { deadline.cancel() }
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                herdrReleaseAck = continuation
+            return await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    if Task.isCancelled { continuation.resume(returning: false) }
+                    else { herdrReleaseWaiters[id] = continuation }
+                }
+            } onCancel: {
+                Task { @MainActor [weak self] in
+                    self?.finishHerdrReleaseWaiter(id, ready: false)
+                }
             }
         }
 
-        /// Wake whatever switch is waiting on the release ack. Idempotent, and
-        /// safe to call from every path that ends a swap — a continuation that
-        /// is never resumed hangs its task for good.
+        private func finishHerdrReleaseWaiter(_ id: UUID, ready: Bool) {
+            herdrReleaseWaiters.removeValue(forKey: id)?.resume(returning: ready)
+        }
+
+        /// A foreground recovery and a pane switch may both wait. Wake every
+        /// waiter; one timeout/cancellation must not steal another's ACK.
         private func signalHerdrReleaseAck() {
-            herdrReleaseAck?.resume()
-            herdrReleaseAck = nil
+            let waiters = Array(herdrReleaseWaiters.values)
+            herdrReleaseWaiters.removeAll()
+            for continuation in waiters { continuation.resume(returning: herdrReaderReady) }
         }
 
-        /// Boot wrote the reader loop; if neither its marker nor a frame shows
-        /// up, this host's login shell couldn't take that shape. Fall back to
-        /// the one-shot start line — the channel then behaves exactly as it
-        /// did before the loop existed, switches just cost a prompt again.
-        private func armHerdrBootFallback() {
-            herdrBootFallbackTask?.cancel()
-            herdrBootFallbackTask = Task { [weak self] in
-                try? await Task.sleep(for: Self.herdrLoopProbe)
-                guard let self, !Task.isCancelled,
-                      !herdrLoopReady, !herdrFramePainted,
-                      let target = herdrFrameTarget else { return }
-                Log.ssh.error("herdr retarget loop never answered — one-shot attach")
-                guard let grid = herdrRemoteGrid else { return }
-                writeFrameCommand(HerdrFrameCommand.start(
-                    target: target, cols: grid.cols, rows: grid.rows,
-                    customPath: connection.herdrPath))
+        /// A single deadline covers startup through the first actual screen.
+        /// Called after boot/retarget write completion, and only if a frame has
+        /// not already arrived while that write was completing.
+        private func armHerdrFirstFrameDeadline() {
+            herdrFirstFrameTask?.cancel()
+            let generation = herdrFrameGeneration
+            let targetGeneration = herdrTargetGeneration
+            herdrFirstFrameTask = Task { [weak self] in
+                guard let self else { return }
+                do { try await Task.sleep(for: herdrFirstFrameTimeout) }
+                catch { return }
+                guard !Task.isCancelled, herdrFrameGeneration == generation,
+                      herdrTargetGeneration == targetGeneration,
+                      herdrAcceptsFrames, !herdrFramePainted else { return }
+                herdrFirstFrameTask = nil
+                await recoverHerdrFrameChannel(reason: herdrLoopReady
+                    ? "herdr-first-frame-timeout" : "herdr-startup-no-ready-timeout")
             }
         }
 
-        /// Write one protocol line into the frame channel, chained so writes
-        /// can't reorder (see `herdrWriteChain`).
-        private func writeFrameCommand(_ line: String) {
-            guard let ssh = herdrFrameSSH else { return }
+        private func recoverHerdrFrameChannel(reason: String) async {
+            // Invalidate queued commands and old downstream frames immediately,
+            // before any reconnect backoff or transport shutdown can suspend.
+            herdrFrameGeneration = UUID()
+            herdrTargetGeneration = UUID()
+            herdrFrameTarget = nil
+            herdrFramePainted = false
+            herdrAcceptsFrames = false
+            herdrReaderReady = false
+            herdrFrameSuspended = true
+            herdrExpectedCloses = 0
+            herdrRetargetTask?.cancel()
+            herdrRetargetTask = nil
+            signalHerdrReleaseAck()
+            let generation = herdrFrameGeneration
+            // A foreground probe or an earlier reconnect can still own the
+            // transition. Do not let its reentrancy guard silently drop the
+            // recovery after this old channel has been invalidated.
+            while (isResuming || isReconnecting), !Task.isCancelled,
+                  !isStopping, herdrFrameGeneration == generation {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            guard !Task.isCancelled, !isStopping,
+                  herdrFrameGeneration == generation else { return }
+            if usesTunnelTransport {
+                await connectionDropped(reason: reason)
+                return
+            }
+            guard viewModel.allowsAutomaticRetry else { return }
+            viewModel.markReconnecting()
+            let delay = herdrFrameRecoveryBackoff.failed()
+            Log.ssh.notice("health: dropped (\(reason, privacy: .public)) — retrying after backoff")
+            herdrFrameRecoveryTask?.cancel()
+            herdrFrameRecoveryTask = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(delay)) }
+                catch { return }
+                guard let self, !Task.isCancelled, !isStopping,
+                      herdrFrameGeneration == generation, canAutomaticallyReconnect else { return }
+                // stop() cancels stored timers; disown this fired timer first.
+                herdrFrameRecoveryTask = nil
+                await reconnect()
+            }
+        }
+
+        private enum HerdrFrameWriteMode { case control, release, boot, retarget }
+
+        /// Recheck both channel and target after earlier writes finish. A queued
+        /// resize/input from the old pane must never reach a new stdin owner.
+        @discardableResult
+        private func writeFrameCommand(_ line: String, mode: HerdrFrameWriteMode = .control) -> Task<Void, Never>? {
+            guard let ssh = herdrFrameSSH else { return nil }
+            let generation = herdrFrameGeneration
+            let targetGeneration = herdrTargetGeneration
             let previous = herdrWriteChain
-            herdrWriteChain = Task {
+            herdrWriteChain = Task { @MainActor [weak self] in
                 await previous?.value
-                try? await ssh.write(Data((line + "\n").utf8))
+                guard let self, !Task.isCancelled,
+                      herdrFrameGeneration == generation,
+                      herdrTargetGeneration == targetGeneration,
+                      herdrFrameSSH === ssh else { return }
+                switch mode {
+                case .control:
+                    guard herdrAcceptsFrames, herdrFramePainted,
+                          !herdrReaderReady, !herdrFrameSuspended else { return }
+                case .release:
+                    guard herdrChannelBooted, !herdrReaderReady else { return }
+                case .boot, .retarget:
+                    guard !herdrFrameSuspended else { return }
+                    if mode == .retarget { guard herdrReaderReady else { return } }
+                    herdrReaderReady = false
+                    herdrAcceptsFrames = true
+                    // A queued boot may be invalidated by a newer focus.
+                    // Only a write that reaches this point owns the channel.
+                    if mode == .boot { herdrChannelBooted = true }
+                }
+                do { try await writeHerdrFrameData(Data((line + "\n").utf8), over: ssh, generation: generation) }
+                catch {
+                    guard herdrFrameGeneration == generation,
+                          herdrTargetGeneration == targetGeneration else { return }
+                    await recoverHerdrFrameChannel(reason: "herdr-frame-write-failed")
+                    return
+                }
+                guard herdrFrameGeneration == generation,
+                      herdrTargetGeneration == targetGeneration,
+                      !herdrFrameSuspended else { return }
+                if mode == .boot { Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: boot written") }
+                if mode == .retarget { Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: target written") }
+                if mode == .release { Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: release written") }
+                if (mode == .boot || mode == .retarget), herdrAcceptsFrames, !herdrFramePainted {
+                    armHerdrFirstFrameDeadline()
+                }
             }
+            return herdrWriteChain
+        }
+
+        /// Bound an actual write independently of the peer's response budget.
+        /// Once bytes have started writing, a target change cannot disown this
+        /// watchdog: that old write still blocks the shared channel's queue.
+        private func writeHerdrFrameData(_ data: Data, over ssh: SSHSession, generation: UUID) async throws {
+            let deadline = Task { @MainActor [weak self] in
+                guard let self else { return }
+                do { try await Task.sleep(for: herdrWriteTimeout) }
+                catch { return }
+                guard !Task.isCancelled, herdrFrameGeneration == generation,
+                      herdrFrameSSH === ssh else { return }
+                await recoverHerdrFrameChannel(reason: "herdr-frame-write-timeout")
+            }
+            defer { deadline.cancel() }
+            try await ssh.write(data)
         }
 
         /// mosh+herdr: open a lightweight SSH connection just for the control
@@ -2143,14 +2414,14 @@ final class SessionHub {
             }
             try? await ssh.write(Data((HerdrPushBoot.bootLine() + "\r").utf8))
             if await driver.activate() {
-                Log.ssh.notice("push: active — herdr events over a persistent channel")
+                Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) push: active — herdr events over a persistent channel")
                 herdrPush = driver
                 // The poll steps back to being a safety net now.
                 herdrControl?.pushActive = true
                 // Fold the subscribe's bootstrap replay into one fresh read.
                 herdrControl?.quicken()
             } else {
-                Log.ssh.notice("push: unavailable — staying on the poll")
+                Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) push: unavailable — staying on the poll")
                 herdrPushPump?.cancel()
                 herdrPushPump = nil
                 herdrPushSSH = nil
@@ -2167,6 +2438,17 @@ final class SessionHub {
         /// never *upgrades* a known-degraded one back to "all present".
         @discardableResult
         func probeCapabilities(over ssh: SSHSession) async -> HostCapabilities {
+            if usesTunnelTransport {
+                // A partial probe is session-scoped, never cached as if tools
+                // belonging to other modes had been checked and were absent.
+                if let output = try? await ssh.executeCommand(HostCapabilities.probeCommand(for: connection.multiplexer)),
+                   let text = String(data: output, encoding: .utf8) {
+                    let fresh = HostCapabilities.parse(text)
+                    capabilities = fresh
+                    return fresh
+                }
+                return capabilities ?? .unknown
+            }
             let cache = HostCapabilityCache.shared
             if let cached = cache.capabilities(for: connection.id) {
                 capabilities = cached
@@ -2259,6 +2541,7 @@ final class SessionHub {
                 // reapable: nothing between here and `stop()` reads this flag.
                 moshServerPid = creds.serverPid
                 moshHadFirstContact = false
+                moshSessionGeneration = UUID()
                 // mosh+herdr renderer probe, while the bootstrap channel is
                 // still open (zero extra connections): does this herdr know
                 // `terminal attach`? That raw single-pane stream — no
@@ -2315,25 +2598,9 @@ final class SessionHub {
                             self?.moshHadFirstContact = true
                         }
                     }
-                    transport.onReturnPathDead = { [weak self] in
-                        self?.moshReturnPathDead = true
-                        // This fires only when ZERO datagrams ever arrived —
-                        // the server we just spawned will wait forever for a
-                        // first contact that isn't coming. Reap it over a
-                        // short exec connection, or every dead-UDP attempt
-                        // leaves a zombie (7 on one host, 2026-08-19). A
-                        // mid-session stall never reaches here (sawAnyDatagram
-                        // gates it), so a resumable session is never killed.
-                        if let pid = creds.serverPid {
-                            self?.moshServerPid = nil   // handled; stop()'s fallback need not repeat it
-                            Task { [weak self] in
-                                guard let self else { return }
-                                if let ssh = try? await self.sidecarConnect(self.connection) {
-                                    _ = try? await ssh.executeCommand("kill \(pid) 2>/dev/null")
-                                    await ssh.close()
-                                }
-                            }
-                        }
+                    transport.onReturnPathDead = { [weak self, weak transport] in
+                        guard let self, let transport else { return }
+                        Task { await self.handleMoshReturnPathDead(transport, serverPid: creds.serverPid) }
                     }
                 }
 
@@ -2798,6 +3065,26 @@ final class SessionHub {
             }
         }
 
+        /// The liveness monitor also reports established sessions whose UDP path
+        /// stalled. Only a bootstrap that never received a packet may be reaped.
+        func handleMoshReturnPathDead(_ transport: MoshTransport, serverPid: Int?) async {
+            guard moshTransport === transport else { return }
+            moshReturnPathDead = true
+            let generation = moshSessionGeneration
+            guard let pid = serverPid, moshServerPid == pid, !moshHadFirstContact,
+                  await transport.currentDiagnostics.datagramsReceived == 0 else { return }
+            guard let ssh = try? await sidecarConnect(connection) else { return }
+            // Dialing SSH can outlive a roam, a reconnect, or teardown. A late
+            // cleanup must never kill the now-healthy or replacement session.
+            let contacted = await transport.currentDiagnostics.datagramsReceived > 0
+            guard !contacted, !moshHadFirstContact, !isStopping,
+                  moshSessionGeneration == generation, moshTransport === transport,
+                  moshServerPid == pid else { await ssh.close(); return }
+            moshServerPid = nil
+            _ = try? await ssh.executeCommand("kill \(pid) 2>/dev/null")
+            await ssh.close()
+        }
+
         /// Tear the transport down.
         ///
         /// `forReconnect` says the caller is about to `start()` again on a
@@ -2811,6 +3098,11 @@ final class SessionHub {
         /// with it (``inheritedPinLedger``); the replacement re-pins the same
         /// window on attach and settles the rest on the real disconnect.
         func stop(forReconnect: Bool = false) async {
+            herdrFrameRecoveryTask?.cancel()
+            herdrFrameRecoveryTask = nil
+            tunnelRetryTask?.cancel()
+            tunnelRetryTask = nil
+            moshSessionGeneration = UUID()
             let stopBegan = Date()
             defer { Log.ssh.debug("resume: stop(forReconnect: \(forReconnect, privacy: .public)) took \(Int(Date().timeIntervalSince(stopBegan) * 1000), privacy: .public)ms") }
             if forReconnect {
@@ -2839,21 +3131,21 @@ final class SessionHub {
             herdrSidecarTask = nil
             herdrRetargetTask?.cancel()
             herdrRetargetTask = nil
-            herdrBootFallbackTask?.cancel()
-            herdrBootFallbackTask = nil
+            herdrFirstFrameTask?.cancel()
+            herdrFirstFrameTask = nil
             signalHerdrReleaseAck()   // never strand a switch on a dead channel
-            if herdrFrameTarget != nil {
-                // Hand the attach back: herdr's direct attach is exclusive per
-                // terminal, so leaving it claimed would make the next connect
-                // rely on `--takeover` to evict a client that no longer exists.
-                // Awaited through the write chain so it actually reaches the
-                // wire before the channel closes.
-                writeFrameCommand(HerdrFrameCommand.release)
-                await herdrWriteChain?.value
+            if herdrFrameTarget != nil, !forReconnect {
+                // Courtesy release is bounded. A dead write must not prevent
+                // closing the parent transport, which releases pending writes.
+                let release = writeFrameCommand(HerdrFrameCommand.release, mode: .release)
+                _ = await withTimeoutValue(1) { await release?.value; return true }
             }
             herdrFrameTarget = nil
             herdrFrameSSH = nil
             herdrFrameGeneration = UUID()
+            herdrTargetGeneration = UUID()
+            herdrReaderReady = false
+            herdrAcceptsFrames = false
             herdrForegroundRecovery?.cancel()
             herdrForegroundRecovery = nil
             herdrWriteChain = nil
@@ -3074,8 +3366,8 @@ final class SessionHub {
         /// several death detectors fired, and that is unanswerable after the
         /// fact unless each one says so at the time.
         func connectionDropped(reason: String = "unspecified") async {
-            guard !isStopping else { return }
-            Log.ssh.notice("health: dropped (\(reason, privacy: .public)) — reconnecting")
+            guard !isStopping, canAutomaticallyReconnect else { return }
+            Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) health: dropped (\(reason, privacy: .public)) — reconnecting")
             viewModel.markReconnecting()
             await reconnect()
         }
@@ -3084,7 +3376,7 @@ final class SessionHub {
         /// app is foreground). Doubles as NAT-warmth (the probe is real
         /// traffic) and fast death detection, and retries a stalled reconnect.
         func keepAlive() async {
-            guard !isStopping, !isReconnecting else { return }
+            guard !isStopping, !isReconnecting, canAutomaticallyReconnect else { return }
             // mosh owns its own UDP resume/roam; don't probe its closed bootstrap.
             if moshTransport != nil { await resumeIfNeeded(); return }
             switch viewModel.status {
@@ -3099,7 +3391,7 @@ final class SessionHub {
                 case .alive:
                     probeTimeouts = 0
                 case .failed:
-                    Log.ssh.notice("health: probe failed — reconnecting")
+                    Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) health: probe failed — reconnecting")
                     probeTimeouts = 0
                     viewModel.markReconnecting()
                     await reconnect()
@@ -3110,10 +3402,10 @@ final class SessionHub {
                         // session and ask again on the next tick; a genuinely
                         // dead socket errors rather than going quiet, and that
                         // path above still reconnects immediately.
-                        Log.ssh.notice("health: probe timed out (1) — holding")
+                        Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) health: probe timed out (1) — holding")
                         return
                     }
-                    Log.ssh.notice("health: probe timed out twice — reconnecting")
+                    Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) health: probe timed out twice — reconnecting")
                     probeTimeouts = 0
                     viewModel.markReconnecting()
                     await reconnect()
@@ -3133,8 +3425,21 @@ final class SessionHub {
         /// `TerminalViewModel.beginAttempt`): a transport that dropped on its
         /// own is redialed as automatic, while a redial of a connect the user
         /// asked for keeps its right to a modal if it fails too.
-        func reconnect(automatic: Bool = true) async {
+        func reconnect(automatic: Bool = true, afterBackoff: Bool = false) async {
             guard !isStopping, !isReconnecting, !isResuming else { return }
+            if automatic && !canAutomaticallyReconnect { return }
+            // A server that accepts SSH and immediately drops it must not
+            // bypass backoff merely because the last dial briefly succeeded.
+            if automatic, !afterBackoff, usesTunnelTransport,
+               viewModel.session != nil {
+                viewModel.markReconnecting()
+                scheduleTunnelRetry()
+                return
+            }
+            if usesTunnelTransport, connection.multiplexer == .none,
+               viewModel.session != nil || shellWasReopened {
+                shellWasReopened = true
+            }
             isReconnecting = true
             defer { isReconnecting = false }
             await stop(forReconnect: true)
@@ -3148,7 +3453,7 @@ final class SessionHub {
         /// on a half-open socket) probe and just reconnect. mosh keeps its own
         /// UDP resume path.
         func forceResume() async {
-            guard !isStopping else { return }
+            guard !isStopping, canAutomaticallyReconnect else { return }
             Log.ssh.debug("resume: forceResume begin")
             if let transport = moshTransport {
                 // A REAL suspension (>20s background). The UDP flow may be a
@@ -3178,7 +3483,7 @@ final class SessionHub {
         /// plus the periodic keepalive tick can both call this for the same
         /// session.
         func resumeIfNeeded(probeTimeout: Double? = nil) async {
-            guard !isStopping, !isReconnecting, !isResuming else { return }
+            guard !isStopping, !isReconnecting, !isResuming, canAutomaticallyReconnect else { return }
             if herdrFrameSSH != nil, herdrExpectedCloses > 0, !herdrFrameSuspended {
                 // The render recovery owns this transition; don't race it with
                 // an SSH probe that would gate-block its reconnect.
@@ -3248,6 +3553,15 @@ final class SessionHub {
             // lies (home shows "connected" but -CC can't attach). Actively
             // round-trip a trivial command with a short timeout instead.
             if await isTransportAlive(timeout: probeTimeout) { return }
+            if usesTunnelTransport, connection.multiplexer == .none {
+                shellWasReopened = true
+            }
+
+            if usesTunnelTransport {
+                viewModel.markReconnecting()
+                scheduleTunnelRetry()
+                return
+            }
 
             // Dead transport: tear down without touching the UI layer, then
             // run the exact same start flow (tmux `new -A` reuses the session).
@@ -3347,11 +3661,20 @@ final class SessionHub {
         /// caller skips its probe.
         @discardableResult
         func retryIfDown(stalledDialAfter: TimeInterval, reason: String) async -> Bool {
-            guard !isStopping, !isReconnecting, !isResuming else { return false }
+            guard !isStopping, !isReconnecting, !isResuming, canAutomaticallyReconnect else { return false }
             if isDialing {
+                // A path notification is not evidence that an in-flight
+                // user-space tunnel failed. Its dial and SSH authentication
+                // already have deadlines; restarting at 1–2s can repeatedly
+                // abandon a healthy cellular handshake or Access validation.
+                // Only protect the SSH dial: opening the PTY afterwards has
+                // no overall deadline and must remain eligible for recovery.
+                // Down sessions still retry below, and long suspensions use
+                // forceResume() to replace potentially stale transports.
+                guard !(usesTunnelTransport && viewModel.isAwaitingSSHConnection) else { return false }
                 let age = dialBegan.map { Date().timeIntervalSince($0) } ?? .infinity
                 guard age >= stalledDialAfter else { return false }
-                Log.ssh.notice("resume: redial (\(reason, privacy: .public)) after \(Int(age), privacy: .public)s dialing")
+                Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) resume: redial (\(reason, privacy: .public)) after \(Int(age), privacy: .public)s dialing")
                 // The same attempt on a fresh socket — see `reconnect(automatic:)`.
                 await reconnect(automatic: viewModel.isAutoReconnectInFlight)
                 return true
@@ -3361,7 +3684,7 @@ final class SessionHub {
             guard moshTransport == nil else { return false }
             switch viewModel.status {
             case .failed, .disconnected:
-                Log.ssh.notice("resume: retry (\(reason, privacy: .public)) of a down session")
+                Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) resume: retry (\(reason, privacy: .public)) of a down session")
                 viewModel.markReconnecting()
                 await reconnect()
                 return true
@@ -3377,6 +3700,22 @@ final class SessionHub {
         /// enough for a 500–700ms RTT path's three round trips plus one
         /// retransmit (see `isTransportAlive`'s arithmetic).
         @ObservationIgnored var foregroundProbeTimeout: Double = 4
+
+        private func scheduleTunnelRetry() {
+            tunnelRetryTask?.cancel()
+            let delay = tunnelBackoff.failed()
+            let generation = startGeneration
+            tunnelRetryTask = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(delay)) }
+                catch { return }
+                guard !Task.isCancelled, let self, generation == self.startGeneration,
+                      !self.isStopping, self.canAutomaticallyReconnect else { return }
+                // stop() cancels the stored task. Disown this already-fired
+                // timer before entering reconnect so it cannot cancel itself.
+                self.tunnelRetryTask = nil
+                await self.reconnect(afterBackoff: true)
+            }
+        }
 
         func isTransportAlive(timeout: Double? = nil) async -> Bool {
             await probeTransport(timeout: timeout) == .alive
@@ -3424,19 +3763,29 @@ final class SessionHub {
     }
 
     private(set) var sessions: [UUID: ActiveSession] = [:]
+    /// Reconfiguration and explicit disconnect share one queue per connection.
+    /// A disconnect registered after a replacement must also retire the session
+    /// that replacement has not created yet.
+    @ObservationIgnored private var connectionOperations: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var connectionOperationTokens: [UUID: UUID] = [:]
+    @ObservationIgnored private var pendingDisconnects: Set<UUID> = []
 
     @ObservationIgnored private let metrics: SessionMetricsRegistry
     @ObservationIgnored private var keepAliveTimer: Timer?
     @ObservationIgnored private var lastBackgroundedAt: Date?
     /// Foreground per `setForeground` — the path watch only acts while true.
-    @ObservationIgnored private var isForeground = false
+    /// Tests set this directly to exercise path recovery without starting a
+    /// system path monitor or resuming a real Tailscale account.
+    @ObservationIgnored var isForeground = false
     /// Started on the first foreground and never stopped: iOS suspends us in
     /// the background anyway, and whatever changed while we were away is
     /// delivered as one update on resume — which is exactly the case this
     /// exists for (the user left to turn Tailscale on and came back).
     @ObservationIgnored private var pathWatch: NetworkPathWatch?
-    /// Coalesces the burst a tunnel coming up produces into one kick.
+    /// Only owns the debounce wait, never an already-started recovery. A new
+    /// path notification must not cancel the SSH handshake the last one began.
     @ObservationIgnored private var pathKick: Task<Void, Never>?
+    @ObservationIgnored var pathDebounceDelay: Duration = .milliseconds(400)
     /// A dial has to be at least this old for a path change to restart it. The
     /// watch reports a change a beat after it happened, so a younger dial most
     /// likely began after the change and is already on the new path.
@@ -3484,12 +3833,17 @@ final class SessionHub {
             // only re-lists the window as a pin the teardown must then undo.
             if !force { visibleSession?.repinForeground() }
             else { visibleSession?.resumeHerdrFrames() }
-            Task { await resumeAll(force: force) }
+            // Rebuild an embedded node before its SSH/Herdr sessions recover.
+            // Other transports must not wait for Tailscale's control plane.
+            let tailscaleReady = Task { await TailscaleAccount.shared.resume(forceRebuild: force) }
+            Task { await resumeAll(force: force, tailscaleReady: tailscaleReady) }
             guard keepAliveTimer == nil else { return }
             keepAliveTimer = Timer.scheduledTimer(withTimeInterval: keepAliveInterval, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in await self?.keepAliveAll() }
             }
         } else {
+            pathKick?.cancel()
+            pathKick = nil
             lastBackgroundedAt = Date()
             keepAliveTimer?.invalidate()
             keepAliveTimer = nil
@@ -3549,9 +3903,15 @@ final class SessionHub {
     func networkPathChanged() {
         guard isForeground else { return }
         pathKick?.cancel()
+        let delay = pathDebounceDelay
         pathKick = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled, let self else { return }
+            do { try await Task.sleep(for: delay) }
+            catch { return }
+            guard !Task.isCancelled, let self, self.isForeground else { return }
+            // Release ownership before the first recovery suspension point.
+            // Otherwise another path callback cancels this TaskGroup's dial,
+            // and its CancellationError can stop automatic recovery entirely.
+            self.pathKick = nil
             await self.kickSessionsAfterPathChange()
         }
     }
@@ -3563,6 +3923,7 @@ final class SessionHub {
         await withTaskGroup(of: Void.self) { group in
             for session in sessions.values {
                 group.addTask { @MainActor in
+                    Log.ssh.debug("\(session.viewModel.diagnosticSessionLabel, privacy: .public) resume: network path changed")
                     if await session.retryIfDown(stalledDialAfter: redialAfter, reason: "path") { return }
                     await session.keepAlive()
                 }
@@ -3586,6 +3947,55 @@ final class SessionHub {
 
     func session(for connection: ServerConnection) -> ActiveSession? {
         sessions[connection.id]
+    }
+
+    /// Ensure a saved/editable connection uses its current transport settings.
+    /// Metadata changes alone must not interrupt a working terminal.
+    @discardableResult
+    func replaceConnection(_ connection: ServerConnection, force: Bool = false) async -> ActiveSession {
+        let previous = connectionOperations[connection.id]
+        let token = UUID()
+        let task = Task { @MainActor in
+            await previous?.value
+            // A reconnect/reconfiguration is still the same saved connection.
+            // Carry its in-memory draft through replacement, including a send
+            // already waiting for acknowledgement. Explicit disconnect removes it.
+            let draft = self.sessions[connection.id]?.composerDraft
+            if let existing = self.sessions[connection.id],
+               force || !Self.sameSessionConfiguration(existing.connection, connection) {
+                // Already inside the queue: using public disconnect here would
+                // enqueue behind this very operation and deadlock.
+                await self.disconnectCurrent(connection.id)
+                HostCapabilityCache.shared.invalidate(connection.id)
+            }
+            // Creation belongs to the same ordered operation as teardown:
+            // an older caller must not resume later and reinstall stale config.
+            let session = self.prepare(connection)
+            if let draft { session.composerDraft = draft }
+            return session
+        }
+        connectionOperations[connection.id] = Task { _ = await task.value }
+        connectionOperationTokens[connection.id] = token
+        pendingDisconnects.remove(connection.id)
+        let active = await task.value
+        finishConnectionOperation(connection.id, token: token)
+        return active
+    }
+
+    private func finishConnectionOperation(_ id: UUID, token: UUID) {
+        guard connectionOperationTokens[id] == token else { return }
+        connectionOperations[id] = nil
+        connectionOperationTokens[id] = nil
+        pendingDisconnects.remove(id)
+    }
+
+    private static func sameSessionConfiguration(_ lhs: ServerConnection, _ rhs: ServerConnection) -> Bool {
+        var lhs = lhs
+        var rhs = rhs
+        lhs.name = ""; rhs.name = ""
+        lhs.lastConnectedAt = nil; rhs.lastConnectedAt = nil
+        lhs.createdAt = rhs.createdAt
+        return lhs == rhs
     }
 
     /// Synchronously create + register the session WITHOUT starting the
@@ -3641,8 +4051,14 @@ final class SessionHub {
     func start(_ active: ActiveSession, theme: TerminalTheme, fontSize: Double, fontName: String = "system",
                cursorShape: CursorShape = .block, cursorColorId: String = "teal",
                cursorBlink: Bool = true) async {
+        guard sessions[active.connection.id] === active, !active.isStopping,
+              !pendingDisconnects.contains(active.connection.id) else { return }
         await active.start(theme: theme, fontSize: fontSize, fontName: fontName,
                             cursorShape: cursorShape, cursorColorId: cursorColorId, cursorBlink: cursorBlink)
+
+        // start may have suspended while a newer replace/disconnect completed.
+        guard sessions[active.connection.id] === active, !active.isStopping,
+              !pendingDisconnects.contains(active.connection.id) else { return }
 
         var m = metrics.metrics[active.connection.id] ?? SessionMetrics()
         if case .connected = active.viewModel.status {
@@ -3685,10 +4101,11 @@ final class SessionHub {
     /// actor, exactly as before. Concurrent secret reads are safe now:
     /// `SSHService.resolveSecret` coalesces per-connection, so this can't fan
     /// one foreground-return into a stack of Face ID prompts.
-    func resumeAll(force: Bool = false) async {
+    func resumeAll(force: Bool = false, tailscaleReady: Task<Void, Never>? = nil) async {
         await withTaskGroup(of: Void.self) { group in
             for session in sessions.values {
                 group.addTask { @MainActor in
+                    if session.connection.transport == .tailscale { await tailscaleReady?.value }
                     if force {
                         await session.forceResume()
                     } else {
@@ -3716,11 +4133,33 @@ final class SessionHub {
     }
 
     func disconnect(_ connectionId: UUID) async {
+        let previous = connectionOperations[connectionId]
+        let token = UUID()
+        // Stop accepting input immediately, even when an earlier operation is
+        // still returning the old transport to the host.
+        sessions[connectionId]?.isStopping = true
+        let task = Task { @MainActor in
+            await previous?.value
+            await self.disconnectCurrent(connectionId)
+        }
+        connectionOperations[connectionId] = task
+        connectionOperationTokens[connectionId] = token
+        pendingDisconnects.insert(connectionId)
+        await task.value
+        finishConnectionOperation(connectionId, token: token)
+    }
+
+    private func disconnectCurrent(_ connectionId: UUID) async {
         guard let active = sessions[connectionId] else { return }
-        active.isStopping = true   // suppress keepalive/auto-reconnect during teardown
+        active.isStopping = true
         await active.stop()
+        // Synchronous prepare() can register a newer object during stop's
+        // network awaits. The old teardown owns only the object it captured.
+        guard sessions[connectionId] === active else { return }
         await SSHService.shared.clearCachedSecret(for: connectionId)
+        guard sessions[connectionId] === active else { return }
         sessions[connectionId] = nil
+        if visibleSession === active { visibleSession = nil }
         var m = metrics.metrics[connectionId] ?? SessionMetrics()
         m.state = .saved
         m.connectedAt = nil

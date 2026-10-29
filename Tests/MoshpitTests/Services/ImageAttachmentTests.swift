@@ -165,6 +165,28 @@ struct ImageAttachmentTests {
         #expect(text == #" '/a/it'\''s.jpg' "#)
     }
 
+    @Test("Uploaded filenames cannot become shell commands or expansions", arguments: [
+        "/uploads/report;printf${IFS}INJECTED;#.txt",
+        "/uploads/$(touch injected).txt",
+        "/uploads/`whoami`.txt",
+        "/uploads/a&b.txt",
+        "/uploads/a|b.txt",
+        "/uploads/a>out.txt",
+        "/uploads/a\nb.txt",
+        "/uploads/a\tb.txt",
+        "/uploads/*.txt",
+        "/uploads/[ab].txt",
+        "/uploads/{a,b}.txt",
+        "/uploads/a!b.txt",
+        "/uploads/a\\b.txt"
+    ])
+    func insertTextConfinesShellSyntax(path: String) {
+        let quoted = "'" + path + "'"
+        #expect(ImageAttachmentPipeline.insertText(forRemotePaths: [path]) == " " + quoted + " ")
+        #expect(ImageAttachmentPipeline.insertText(forRemotePaths: [path], style: .atMention) == " " + quoted + " ")
+        #expect(ImageAttachmentPipeline.insertText(forRemotePaths: [path], style: .aiderAdd) == "/add " + quoted)
+    }
+
     @Test("Multiple paths join with spaces; none yields empty")
     func insertTextJoins() {
         let text = ImageAttachmentPipeline.insertText(forRemotePaths: ["/a/1.jpg", "/a/2.png"])

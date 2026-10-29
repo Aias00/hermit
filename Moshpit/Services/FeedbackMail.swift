@@ -9,7 +9,7 @@ import Foundation
 /// out only when they tap Send there — which is what keeps the App Store
 /// privacy label at "Data Not Collected".
 struct FeedbackMail: Equatable {
-    static let recipient = "support@cluas.eu.org"
+    static let recipient = "rokkki@163.com"
 
     /// Device and build facts a bug report is useless without. Kept as a
     /// struct so a test can pass fixed values instead of reading the device.
@@ -84,10 +84,8 @@ struct FeedbackMail: Equatable {
     }
 }
 
-/// Where feedback goes besides mail. The public channel is GitHub Issues on
-/// the app's own repository — the site's Support page already sends people
-/// there, and Settings should agree with it. `/new/choose` opens the template
-/// chooser, so a bug report and a feature request each start in shape.
+/// The public feedback channel for this build. `/new/choose` opens the
+/// repository's template chooser for bug reports and feature requests.
 enum FeedbackChannels {
-    static let newIssueURL = URL(string: "https://github.com/Cluas/moshpit/issues/new/choose")!
+    static let newIssueURL = URL(string: "https://github.com/Aias00/moshpit/issues/new/choose")!
 }

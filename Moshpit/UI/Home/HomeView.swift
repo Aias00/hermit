@@ -1,8 +1,7 @@
 import MoshpitKit
 import SwiftUI
 
-/// Home command board. Saved hosts stay scannable offline; live hosts expand
-/// into the tmux SESSIONS tree without changing the underlying SessionHub flow.
+/// Saved hosts with shared navigation and connection lifecycle for phone and iPad.
 struct HomeView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(ThemeStore.self) private var themes
@@ -26,14 +25,15 @@ struct HomeView: View {
     #endif
     @State private var editingConnection: ServerConnection?
     @State private var deletingConnection: ServerConnection?
+    @State private var deletionError: String?
     /// Cards whose disconnect teardown is in flight — drives the per-card
     /// spinner and guards against double-taps during the ~2s channel flush.
     @State private var disconnectingIds: Set<UUID> = []
     @State private var path: [UUID] = []
-    @State private var selectedTab = 0
-    @State private var launchConnection: ServerConnection?
-    @State private var launchCommand = ""
-    @State private var showLaunchTerminal = false
+    @State private var hostSearchText = ""
+    @State private var homeHardwareKeyOwner = UUID()
+    @State private var openingRequest = UUID()
+    @State private var openingConnectionId: UUID?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var splitIsPortrait = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -110,6 +110,29 @@ struct HomeView: View {
         showAddConnection = true
     }
 
+    private var homeShortcutsEnabled: Bool {
+        path.isEmpty && !showSettings && !showAddConnection && editingConnection == nil
+            && deletingConnection == nil && !showConnectError && deletionError == nil
+            && cardModal == nil && promptingSession == nil
+    }
+
+    private func updateHomeHardwareKeys() {
+        guard homeShortcutsEnabled else {
+            HardwareKeys.shared.uninstallHome(owner: homeHardwareKeyOwner)
+            return
+        }
+        HardwareKeys.shared.installHome(owner: homeHardwareKeyOwner, [
+            .init(title: "Settings", key: ",") {
+                guard homeShortcutsEnabled else { return }
+                showSettings = true
+            },
+            .init(title: "Add Host", key: "n") {
+                guard homeShortcutsEnabled else { return }
+                handleAdd()
+            },
+        ])
+    }
+
     /// Start (or resume) a connection in-place. Binds the session to `connecting`
     /// BEFORE start() so the host-key TOFU prompt — which fires mid-handshake
     /// through `viewModel.hostKeyPrompt` — has an observer and can be answered;
@@ -142,6 +165,9 @@ struct HomeView: View {
     var body: some View {
         layout
         .preferredColorScheme(.dark)
+        .onAppear { updateHomeHardwareKeys() }
+        .onChange(of: homeShortcutsEnabled) { _, _ in updateHomeHardwareKeys() }
+        .onDisappear { HardwareKeys.shared.uninstallHome(owner: homeHardwareKeyOwner) }
         .onChange(of: router.paneRequest) { _, request in
             guard let request, store.connections.contains(where: { $0.id == request.connectionId })
             else { return }
@@ -176,6 +202,11 @@ struct HomeView: View {
         .onChange(of: erroredSession?.viewModel.errorMessage) { _, message in
             showConnectError = message?.isEmpty == false
         }
+        .moshpitCard(isPresented: Binding(
+            get: { deletionError != nil }, set: { if !$0 { deletionError = nil } }
+        )) {
+            MoshpitNoticeCard(title: "Could not delete", message: deletionError ?? "") { deletionError = nil }
+        }
         .moshpitCard(item: $cardModal) { modal in
             cardModalView(modal)
         }
@@ -191,10 +222,10 @@ struct HomeView: View {
             SettingsScreen(liveSession: liveSessionForHooks)
         }
         .appSheet(isPresented: $showAddConnection) {
-            AddConnectionView(store: store, keychain: keychain, onConnect: { open($0.id) })
+            AddConnectionView(store: store, keychain: keychain, onConnect: { open($0.id, forceReconnect: true) })
         }
         .appSheet(item: $editingConnection) { connection in
-            AddConnectionView(store: store, keychain: keychain, existing: connection, onConnect: { open($0.id) })
+            AddConnectionView(store: store, keychain: keychain, existing: connection, onConnect: { open($0.id, forceReconnect: true) })
         }
         .confirmationDialog(
             "Delete \(deletingConnection?.displayName ?? String(localized: "connection"))?",
@@ -214,16 +245,27 @@ struct HomeView: View {
     /// connection. Keychain cleanup keeps deleted servers from leaving secrets
     /// behind.
     private func delete(_ connection: ServerConnection) {
+        cancelOpening(connection.id)
+        if path.last == connection.id { leaveTerminal() }
+        disconnectingIds.insert(connection.id)
         Task {
             monitor.untrack(connectionId: connection.id)
             await hub.disconnect(connection.id)
+            do {
+                try await store.deleteSecurely(id: connection.id)
+            } catch {
+                deletionError = error.localizedDescription
+                disconnectingIds.remove(connection.id)
+                deletingConnection = nil
+                return
+            }
             // Only drop connection-owned secrets. When the ref points at a
             // managed SSH key (sshKeyId set), the blob belongs to the key —
             // deleting it here would break every other connection using it.
             if let ref = connection.keychainRef, connection.sshKeyId == nil {
                 try? await keychain.delete(forRef: ref)
             }
-            store.delete(id: connection.id)
+            disconnectingIds.remove(connection.id)
             deletingConnection = nil
         }
     }
@@ -275,13 +317,8 @@ struct HomeView: View {
     private var stackLayout: some View {
         NavigationStack(path: $path) {
             homeList
-            .navigationDestination(isPresented: $showLaunchTerminal) {
-                if let connection = launchConnection {
-                    TerminalScreen(connection: connection, hub: hub, initialCommand: launchCommand)
-                }
-            }
             .navigationDestination(for: UUID.self) { id in
-                if let connection = store.connections.first(where: { $0.id == id }) ?? hub.sessions[id]?.connection {
+                if let connection = connection(for: id), let session = hub.sessions[id] {
                     // No pane target passed here — TerminalScreen reads the
                     // deep-link pane straight from `router.paneRequest` itself
                     // (see its own `.onChange`), which also lets it react to a
@@ -295,6 +332,7 @@ struct HomeView: View {
                     // SwiftUI has no way to veto that gesture, so the terminal
                     // keeps the standard push.
                     TerminalScreen(connection: connection, hub: hub)
+                        .id(ObjectIdentifier(session))
                 }
             }
         }
@@ -312,13 +350,13 @@ struct HomeView: View {
                 .navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 480)
         } detail: {
             if let id = path.last,
-               let connection = store.connections.first(where: { $0.id == id }) {
+               let connection = connection(for: id), let session = hub.sessions[id] {
                 TerminalScreen(connection: connection, hub: hub,
                                onLeave: { leaveTerminal() },
                                onToggleSidebar: { toggleSidebar() })
                     // A different host is a different screen: without this the
                     // struct is reused and keeps the first host's state.
-                    .id(id)
+                    .id(ObjectIdentifier(session))
             } else {
                 ContentUnavailableView {
                     Label("No Terminal Open", systemImage: "terminal")
@@ -336,41 +374,57 @@ struct HomeView: View {
     /// The connection list with its title and toolbar — the root of the
     /// stack on a phone, the sidebar on an iPad.
     private var homeList: some View {
-        LaunchpadView(connections: store.connections, hub: hub, tab: $selectedTab,
+        LaunchpadView(connections: store.connections, hub: hub, searchText: $hostSearchText,
             onAdd: handleAdd,
             onEdit: { editingConnection = $0 },
             onOpen: { open($0) },
             onDelete: { deletingConnection = $0 },
-            onSettings: { showSettings = true },
-            onRun: { host, name, command in
-                var copy = host
-                copy.id = UUID()
-                copy.name = name + " · " + host.displayName
-                copy.multiplexer = .none
-                copy.connectionProtocol = .ssh
-                launchConnection = copy
-                launchCommand = command
-                showLaunchTerminal = true
-            })
+            onDisconnect: disconnect,
+            disconnectingIds: disconnectingIds,
+            onSettings: { showSettings = true })
+    }
+
+    private func connection(for id: UUID) -> ServerConnection? {
+        store.connections.first(where: { $0.id == id }) ?? hub.sessions[id]?.connection
     }
 
     /// Show a connection's terminal: a push on the phone, the detail column
     /// on the iPad. Reassigning `path` to its current value is a no-op for
     /// NavigationStack, so the check is only for clarity.
-    private func open(_ id: UUID) {
-        if path != [id] { path = [id] }
-        // In portrait the sidebar overlays the terminal; get out of its way.
-        if usesSplitLayout && splitIsPortrait { columnVisibility = .detailOnly }
+    private func open(_ id: UUID, forceReconnect: Bool = false) {
+        guard !disconnectingIds.contains(id), let target = connection(for: id) else { return }
+        let request = UUID()
+        openingRequest = request
+        openingConnectionId = id
+        Task { @MainActor in
+            // An edited address must never label a terminal that still writes
+            // to the old host. "Test" also retries changed Keychain credentials.
+            let session = await hub.replaceConnection(target, force: forceReconnect)
+            guard openingRequest == request else { return }
+            openingConnectionId = nil
+            guard connection(for: id) != nil, hub.sessions[id] === session,
+                  !session.isStopping else { return }
+            if path != [id] { path = [id] }
+            if usesSplitLayout && splitIsPortrait { columnVisibility = .detailOnly }
+        }
     }
 
     /// Back/⌘W from the detail: drop the terminal and bring the list back —
     /// in portrait the sidebar was tucked away on open, and a placeholder
     /// with no way to the hosts is not "home".
     private func leaveTerminal() {
+        openingRequest = UUID()
+        openingConnectionId = nil
         withAnimation {
             path = []
             columnVisibility = .all
         }
+    }
+
+    private func cancelOpening(_ id: UUID) {
+        guard openingConnectionId == id else { return }
+        openingRequest = UUID()
+        openingConnectionId = nil
     }
 
     private func toggleSidebar() {
@@ -490,6 +544,8 @@ struct HomeView: View {
     private func disconnect(_ connection: ServerConnection) {
         guard !disconnectingIds.contains(connection.id) else { return }
         disconnectingIds.insert(connection.id)
+        cancelOpening(connection.id)
+        if path.last == connection.id { leaveTerminal() }
         Haptics.tap()
         Task {
             monitor.untrack(connectionId: connection.id)

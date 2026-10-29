@@ -271,6 +271,13 @@ final class AppSettings {
         set { withMutation(keyPath: \.liveActivityEnabled) { defaults.set(newValue, forKey: "moshpit.settings.liveActivity") } }
     }
 
+    /// Show meaningful host/workspace aliases by default. An explicitly saved
+    /// privacy choice remains in force; raw terminal content is never included.
+    var liveActivityShowHostNames: Bool {
+        get { access(keyPath: \.liveActivityShowHostNames); return get("moshpit.settings.liveActivityHostNames", true) }
+        set { withMutation(keyPath: \.liveActivityShowHostNames) { defaults.set(newValue, forKey: "moshpit.settings.liveActivityHostNames") } }
+    }
+
     /// Play a sound with the "agent needs you" alert. When off, attention
     /// notifications are silent.
     var attentionSoundEnabled: Bool {

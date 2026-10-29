@@ -117,14 +117,6 @@ struct DrawData {
     var cursorGlyphVerticesColor: [GlyphVertex]
 }
 
-struct KittyImageSignature: Hashable {
-    let kind: UInt8
-    let width: Int
-    let height: Int
-    let byteCount: Int
-    let headHash: UInt32
-}
-
 struct ClipRect {
     let minX: Float
     let minY: Float
@@ -157,6 +149,7 @@ struct KittyCacheStamp: Hashable {
     let placementsCount: Int
     let nextImageId: UInt32
     let nextPlacementId: UInt32
+    let imageRevision: UUID
 }
 
 struct CacheSignature: Hashable {
@@ -200,7 +193,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
     private var glyphCache: [GlyphKey: GlyphEntry] = [:]
     private var customGlyphCache: [CustomGlyphKey: CustomGlyphEntry] = [:]
     private let imageTextureCache = NSMapTable<AnyObject, MTLTexture>(keyOptions: .weakMemory, valueOptions: .strongMemory)
-    private var kittyTextureCache: [UInt32: (signature: KittyImageSignature, texture: MTLTexture)] = [:]
+    private var kittyTextureCache: [UInt32: (revision: UUID, texture: MTLTexture)] = [:]
     private var rowCache: [Int: RowCacheEntry] = [:]
     private var cacheBufferingMode: MetalBufferingMode?
     private var cacheSignature: CacheSignature?
@@ -595,7 +588,8 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
         let kittyStamp = KittyCacheStamp(imagesCount: kittyState.imagesById.count,
                                          placementsCount: kittyState.placementsByKey.count,
                                          nextImageId: kittyState.nextImageId,
-                                         nextPlacementId: kittyState.nextPlacementId)
+                                         nextPlacementId: kittyState.nextPlacementId,
+                                         imageRevision: kittyState.imageRevision)
         let signature = CacheSignature(scale: Double(scale),
                                        cellWidth: Double(cellWidth),
                                        cellHeight: Double(cellHeight),
@@ -1017,15 +1011,15 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
         }
 
         for shaped in shapedSegments {
-            var processedGlyphs = 0
+            var processedCells = 0
             for run in shaped.runs {
                 let runGlyphsCount = run.shaperRun.glyphCount
                 if runGlyphsCount == 0 {
                     continue
                 }
                 let runAttributes = run.attributes
-                let startColumn = shaped.segment.column + (processedGlyphs * shaped.segment.columnWidth)
-                let endColumn = startColumn + (runGlyphsCount * shaped.segment.columnWidth)
+                let startColumn = shaped.segment.column + (processedCells * shaped.segment.columnWidth)
+                let endColumn = startColumn + (run.shaperRun.cellCount * shaped.segment.columnWidth)
                 var backgroundColor: TTColor?
                 if runAttributes.keys.contains(.selectionBackgroundColor) {
                     backgroundColor = runAttributes[.selectionBackgroundColor] as? TTColor
@@ -1053,7 +1047,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                         }
                     }
                 }
-                processedGlyphs += runGlyphsCount
+                processedCells += run.shaperRun.cellCount
             }
         }
 
@@ -1150,7 +1144,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
         }
 
         for shaped in shapedSegments {
-            var processedGlyphs = 0
+            var processedCells = 0
             for run in shaped.runs {
                 let runGlyphsCount = run.shaperRun.glyphCount
                 if runGlyphsCount == 0 {
@@ -1159,21 +1153,19 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                 let runAttributes = run.attributes
                 let runFont = runAttributes[.font] as? TTFont ?? terminalView.fontSet.normal
                 let ctFont = runFont as CTFont
-                let startColumn = shaped.segment.column + (processedGlyphs * shaped.segment.columnWidth)
+                let startColumn = shaped.segment.column + (processedCells * shaped.segment.columnWidth)
                 let baseX = lineOrigin.x + (cellWidth * CGFloat(startColumn))
-                // CoreGraphics places each glyph on the terminal grid. Natural
-                // CoreText advances drift from its rounded cell width, most
-                // visibly with CJK fallback fonts and small font sizes.
+                // Match the terminal's rounded grid, preserving CoreText's
+                // offsets only within a grapheme (combining marks may have
+                // several glyphs, but still occupy one terminal character).
                 let glyphAdvance = cellWidth * CGFloat(shaped.segment.columnWidth)
 
                 let textColor = runAttributes[.foregroundColor] as? TTColor ?? terminalView.nativeForegroundColor
                 let textColorSIMD = colorToSIMD(textColor)
 
-                var glyphIndex = 0
                 for glyphRun in run.shaperRun.glyphRuns {
                     for i in 0..<glyphRun.glyphs.count {
-                        let columnIndex = glyphIndex
-                        glyphIndex += 1
+                        let columnIndex = glyphRun.cells[i]
                         let glyph = glyphRun.glyphs[i]
                         guard let entry = glyphEntry(for: glyphRun.font, glyph: glyph, scale: scale) else {
                             continue
@@ -1182,7 +1174,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                             continue
                         }
                         let ctPos = glyphRun.positions[i]
-                        let basePos = CGPoint(x: baseX + CGFloat(columnIndex) * glyphAdvance,
+                        let basePos = CGPoint(x: baseX + CGFloat(columnIndex) * glyphAdvance + ctPos.x,
                                               y: lineOrigin.y + yOffset + ctPos.y)
                         let pxX = basePos.x * scale + entry.bearing.x
                         let pxY = basePos.y * scale + entry.bearing.y
@@ -1228,9 +1220,9 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                     let thickness = underlineThickness * scale
                     let segmentStyle: UnderlineStyle = underlineStyle == .double ? .single : underlineStyle
 
-                    for (index, ctPos) in run.shaperRun.positions.enumerated() {
-                        let basePos = CGPoint(x: baseX + CGFloat(index) * glyphAdvance,
-                                              y: lineOrigin.y + yOffset + ctPos.y)
+                    for column in 0..<(run.shaperRun.cellCount * shaped.segment.columnWidth) {
+                        let basePos = CGPoint(x: baseX + CGFloat(column) * cellWidth,
+                                              y: lineOrigin.y + yOffset)
                         let x0 = basePos.x * scale
                         let x1 = (basePos.x + decorationCellWidth) * scale
                         let yCenter = (basePos.y + underlinePosition) * scale
@@ -1279,9 +1271,9 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                     let strikeThickness = max(round(scale * CTFontGetUnderlineThickness(ctFont)) / scale, 0.5)
                     let strikePosition = (CTFontGetXHeight(ctFont) + strikeThickness) * 0.5
 
-                    for (index, ctPos) in run.shaperRun.positions.enumerated() {
-                        let basePos = CGPoint(x: baseX + CGFloat(index) * glyphAdvance,
-                                              y: lineOrigin.y + yOffset + ctPos.y)
+                    for column in 0..<(run.shaperRun.cellCount * shaped.segment.columnWidth) {
+                        let basePos = CGPoint(x: baseX + CGFloat(column) * cellWidth,
+                                              y: lineOrigin.y + yOffset)
                         let x0 = basePos.x * scale
                         let x1 = (basePos.x + decorationCellWidth) * scale
                         let yCenter = (basePos.y + strikePosition) * scale
@@ -1314,7 +1306,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                     }
                 }
 
-                processedGlyphs += runGlyphsCount
+                processedCells += run.shaperRun.cellCount
             }
         }
 
@@ -1734,12 +1726,13 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
     private struct ShaperGlyphRun {
         let font: CTFont
         let glyphs: [CGGlyph]
+        let cells: [Int]
         let positions: [CGPoint]
     }
 
     private struct ShaperRun {
         let glyphRuns: [ShaperGlyphRun]
-        let positions: [CGPoint]
+        let cellCount: Int
         let glyphCount: Int
     }
 
@@ -1779,8 +1772,9 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                 return nil
             }
 
+            let layout = TerminalGlyphLayout(text: text, line: line)
             var glyphRuns: [ShaperGlyphRun] = []
-            var positions: [CGPoint] = []
+            var glyphCount = 0
 
             for run in runs {
                 let count = CTRunGetGlyphCount(run)
@@ -1798,15 +1792,16 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
                     CTRunGetGlyphs(run, CFRange(), bufferPointer.baseAddress!)
                     countOut = count
                 }
-                var runPositions = [CGPoint](repeating: .zero, count: count)
-                CTRunGetPositions(run, CFRange(), &runPositions)
-                glyphRuns.append(ShaperGlyphRun(font: runFont, glyphs: glyphs, positions: runPositions))
-                positions.append(contentsOf: runPositions)
+                let positions = layout.positions(in: run)
+                glyphRuns.append(ShaperGlyphRun(font: runFont, glyphs: glyphs,
+                                               cells: positions.map(\.cell),
+                                               positions: positions.map(\.offset)))
+                glyphCount += count
             }
 
             let result = ShaperRun(glyphRuns: glyphRuns,
-                                   positions: positions,
-                                   glyphCount: positions.count)
+                                   cellCount: layout.cellCount,
+                                   glyphCount: glyphCount)
             insert(key: key, run: result)
             return result
         }
@@ -2259,8 +2254,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
               let kittyImage = terminalView.terminal.kittyGraphicsState.imagesById[imageId] else {
             return nil
         }
-        let signature = kittySignature(for: kittyImage.payload)
-        if let cached = kittyTextureCache[imageId], cached.signature == signature {
+        if let cached = kittyTextureCache[imageId], cached.revision == kittyImage.contentRevision {
             return cached.texture
         }
         let texture: MTLTexture?
@@ -2271,7 +2265,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
             texture = textureFromRGBA(bytes: bytes, width: width, height: height)
         }
         if let texture {
-            kittyTextureCache[imageId] = (signature, texture)
+            kittyTextureCache[imageId] = (kittyImage.contentRevision, texture)
         } else {
 #if DEBUG
             if !kittyTextureFailures.contains(imageId) {
@@ -2281,30 +2275,6 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
 #endif
         }
         return texture
-    }
-
-    private func kittySignature(for payload: KittyGraphicsPayload) -> KittyImageSignature {
-        switch payload {
-        case .png(let data):
-            let headHash = hashBytes(data, limit: 64)
-            return KittyImageSignature(kind: 1, width: 0, height: 0, byteCount: data.count, headHash: headHash)
-        case .rgba(let bytes, let width, let height):
-            let headHash = hashBytes(Data(bytes), limit: 64)
-            return KittyImageSignature(kind: 2, width: width, height: height, byteCount: bytes.count, headHash: headHash)
-        }
-    }
-
-    private func hashBytes(_ data: Data, limit: Int) -> UInt32 {
-        let count = min(limit, data.count)
-        if count == 0 {
-            return 0
-        }
-        var hash: UInt32 = 2166136261
-        for byte in data.prefix(count) {
-            hash ^= UInt32(byte)
-            hash &*= 16777619
-        }
-        return hash
     }
 
     private func textureFromRGBA(bytes: [UInt8], width: Int, height: Int) -> MTLTexture? {

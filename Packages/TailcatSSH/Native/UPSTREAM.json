@@ -1,0 +1,20 @@
+{
+  "repository": "https://github.com/tailscale/tailcat",
+  "revision": "52fbad323e9d352f1febb623e0975368e9a8cbdd",
+  "committed_at": "2026-10-07T20:18:07Z",
+  "source_archive": "https://codeload.github.com/tailscale/tailcat/tar.gz/52fbad323e9d352f1febb623e0975368e9a8cbdd",
+  "source_archive_sha256": "7b936da24a60e1619a5f8ee4859c8e5cdaadca0231e66edb9a7ff6f1214c8943",
+  "license": "BSD-3-Clause",
+  "abi_version": 1,
+  "go_toolchain": "go1.27.3",
+  "build_script": "scripts/build-tailcat.sh",
+  "patches": [
+    "Overlay/: Moshpit encrypted tsnet state store, lifecycle/C ABI, and tests",
+    "stage-overlay.py: add tailscaleNode shutdown to the existing capi registry",
+    "OverlayDependencies/tsnet/moshpit_peer_dial.go: userspace-only peer TCP dial, no system-network fallback",
+    "stage-overlay.py: opt-in tsnet explicit enrollment; ignore ambient CLI auth keys and forced-login environment"
+  ],
+  "embedded_tailscale_revision": "v1.103.0-pre.0.20260929142145-a0e471a35b8f",
+  "tailscale_abi_version": 1,
+  "build_tags": "Native/build-tags.txt"
+}

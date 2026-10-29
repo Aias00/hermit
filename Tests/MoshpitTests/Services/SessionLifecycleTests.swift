@@ -30,6 +30,8 @@ struct SessionLifecycleTests {
         private let lock = NSLock()
         private var _commands: [String] = []
         private var behavior: Behavior
+        private var pending: [CheckedContinuation<Data, Never>] = []
+        private var isShutdown = false
 
         init(_ behavior: Behavior = .reply("")) { self.behavior = behavior }
 
@@ -43,7 +45,14 @@ struct SessionLifecycleTests {
             case .fail:
                 throw SSHError.sessionClosed
             case .hangIgnoringCancellation:
-                return await withCheckedContinuation { (_: CheckedContinuation<Data, Never>) in }
+                return await withCheckedContinuation { continuation in
+                    let closed = lock.withLock {
+                        guard !isShutdown else { return true }
+                        pending.append(continuation)
+                        return false
+                    }
+                    if closed { continuation.resume(returning: Data()) }
+                }
             }
         }
 
@@ -63,7 +72,17 @@ struct SessionLifecycleTests {
             writer
         }
 
-        func shutdown() async {}
+        func shutdown() async {
+            // Ignore task cancellation during the probe, but release every
+            // suspended fake exec when its test transport is torn down.
+            let waiters = lock.withLock {
+                isShutdown = true
+                let saved = pending
+                pending.removeAll()
+                return saved
+            }
+            for waiter in waiters { waiter.resume(returning: Data()) }
+        }
     }
 
     /// A UDP channel that connects and then stays silent — enough for an
@@ -171,6 +190,7 @@ struct SessionLifecycleTests {
         #expect(await bounded { await session.resumeIfNeeded() },
                 "a second resume must run — a wedged guard blocks it forever")
         #expect(connects.count == 2)
+        await session.stop(forReconnect: true)
     }
 
     @Test("A dead sidecar (probe errors) is rebuilt through the connector")
@@ -219,8 +239,9 @@ struct SessionLifecycleTests {
         }
         #expect(await SessionHub.ActiveSession.probe(session(.reply("")), timeout: 0.2) == .alive)
         #expect(await SessionHub.ActiveSession.probe(session(.fail), timeout: 0.2) == .failed)
-        #expect(await SessionHub.ActiveSession.probe(session(.hangIgnoringCancellation),
-                                                     timeout: 0.2) == .timedOut)
+        let silent = session(.hangIgnoringCancellation)
+        #expect(await SessionHub.ActiveSession.probe(silent, timeout: 0.2) == .timedOut)
+        await silent.close()
     }
 
     /// Traffic is better evidence than a probe, and free. A connection that
@@ -334,6 +355,7 @@ struct SessionLifecycleTests {
         #expect(Date().timeIntervalSince(began) < 2,
                 "a hung sidecar must be given up on at the foreground deadline, not the periodic one")
         _ = await bounded(10) { await resume.value }
+        await session.stop(forReconnect: true)
     }
 
     /// While the replacement dials and attaches, the screen keeps showing the

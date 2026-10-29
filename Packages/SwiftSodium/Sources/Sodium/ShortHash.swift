@@ -1,0 +1,39 @@
+import Clibsodium
+import Foundation
+
+public struct ShortHash {
+    public let Bytes = Int(crypto_shorthash_bytes())
+}
+
+public extension ShortHash {
+    /**
+     Computes short but unpredictable (without knowing the secret key) values suitable for picking a list in a hash table for a given key.
+
+     - Parameter message: The data to be hashed.
+     - Parameter key: The hash key.  Must be of length `KeyBytes`. Can be created using `RandomBytes.buf()`.
+
+     - Returns: The computed fingerprint.
+     */
+    func hash(message: Bytes, key: Bytes) -> Bytes? {
+        guard key.count == KeyBytes else { return nil }
+        var output = [UInt8](count: Bytes)
+
+        guard crypto_shorthash(
+            &output,
+            message, UInt64(message.count),
+            key
+        ).exitCode == .SUCCESS else { return nil }
+
+        return output
+    }
+}
+
+extension ShortHash: SecretKeyGenerator {
+    public var KeyBytes: Int {
+        Int(crypto_shorthash_keybytes())
+    }
+
+    public typealias Key = Bytes
+
+    public static var keygen: (UnsafeMutablePointer<UInt8>) -> Void = crypto_shorthash_keygen
+}

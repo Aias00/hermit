@@ -121,11 +121,15 @@ final class WhisperDictationEngine: DictationEngine {
             throw DictationFailure.audioCapture(
                 String(localized: "16 kHz mono audio is unavailable on this device."))
         }
-        lock.withLock { samples.removeAll(keepingCapacity: true) }
-        previewTask = Task { [weak self] in await self?.runPreviewLoop() }
+        try lock.withLock {
+            guard !cancelled else { throw CancellationError() }
+            samples.removeAll(keepingCapacity: true)
+            previewTask = Task { [weak self] in await self?.runPreviewLoop() }
+        }
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
+        guard lock.withLock({ !cancelled }) else { return }
         // `start()` already refused the session if this were nil.
         guard let format = Self.targetFormat else { return }
         let converted: AVAudioPCMBuffer
@@ -140,34 +144,46 @@ final class WhisperDictationEngine: DictationEngine {
         let frames = Int(converted.frameLength)
         guard frames > 0 else { return }
         lock.lock()
-        if samples.count < Self.maximumSamples {
+        if !cancelled, samples.count < Self.maximumSamples {
             samples.append(contentsOf: UnsafeBufferPointer(start: channel, count: frames))
         }
         lock.unlock()
     }
 
     func finishAudio() async {
-        previewTask?.cancel()
-        previewTask = nil
-        guard !cancelled else {
+        let preview = lock.withLock {
+            let task = previewTask
+            previewTask = nil
+            return task
+        }
+        preview?.cancel()
+        // Cancellation is cooperative. The old decode must really return
+        // before this engine starts its final pass against the shared model.
+        await preview?.value
+        guard !Task.isCancelled else {
             updateContinuation.finish()
             return
         }
-        let final = lock.withLock { samples }
+        guard let final = lock.withLock({ cancelled ? nil : samples }) else {
+            updateContinuation.finish()
+            return
+        }
         // Too short to be speech — a mis-tap, or the mic opened and closed.
         // Return nothing rather than whatever Whisper invents from silence.
         guard final.count >= WhisperModelStore.minimumSamples else {
-            updateContinuation.yield(DictationUpdate(finalizedText: "", volatileText: ""))
-            updateContinuation.finish()
+            publishFinal("")
             return
         }
         do {
             let text = try await store.transcribe(
                 samples: final, language: language, variant: variant)
-            updateContinuation.yield(DictationUpdate(finalizedText: text, volatileText: ""))
-            updateContinuation.finish()
+            guard !Task.isCancelled else {
+                updateContinuation.finish()
+                return
+            }
+            publishFinal(text)
         } catch {
-            if cancelled || error is CancellationError {
+            if lock.withLock({ cancelled }) || error is CancellationError {
                 updateContinuation.finish()
             } else {
                 updateContinuation.finish(throwing: DictationFailure.engine(error.localizedDescription))
@@ -176,9 +192,22 @@ final class WhisperDictationEngine: DictationEngine {
     }
 
     func cancel() {
-        cancelled = true
-        previewTask?.cancel()
-        previewTask = nil
+        let preview = lock.withLock {
+            cancelled = true
+            samples.removeAll()
+            let task = previewTask
+            previewTask = nil
+            return task
+        }
+        preview?.cancel()
+        updateContinuation.finish()
+    }
+
+    private func publishFinal(_ text: String) {
+        lock.withLock {
+            guard !cancelled else { return }
+            updateContinuation.yield(DictationUpdate(finalizedText: text, volatileText: ""))
+        }
         updateContinuation.finish()
     }
 

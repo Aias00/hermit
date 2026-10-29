@@ -104,16 +104,73 @@ enum WhisperLanguageCatalog {
 
 // MARK: - Store
 
-/// Owns everything about local Whisper models: which variants this device is
-/// offered, downloading and deleting their weights, and the one loaded
-/// `WhisperKit` instance that actually transcribes.
-///
-/// An actor rather than a plain type because `WhisperKit` is a non-Sendable
-/// class holding CoreML state that must not be touched from two tasks at once,
-/// and because loading a model is expensive enough (seconds, hundreds of MB)
-/// that it has to be shared across dictation sessions instead of rebuilt per
-/// session. Nothing hands the instance out — callers ask the store to
-/// transcribe, so the model never escapes the actor.
+/// Keeps model work serial across previews, final passes and retried engines.
+/// Actor isolation alone does not cover an awaited WhisperKit operation.
+actor WhisperTranscriptionGate {
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<UUID, Error>
+    }
+
+    private var active: UUID?
+    private var waiters: [Waiter] = []
+    var waitingCount: Int { waiters.count }
+
+    func withPermit<Value: Sendable>(
+        _ operation: @Sendable () async throws -> Value
+    ) async throws -> Value {
+        let permit = try await acquire()
+        do {
+            try Task.checkCancellation()
+            let result = try await operation()
+            try Task.checkCancellation()
+            release(permit)
+            return result
+        } catch {
+            release(permit)
+            throw error
+        }
+    }
+
+    private func acquire() async throws -> UUID {
+        try Task.checkCancellation()
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                if active == nil {
+                    active = id
+                    continuation.resume(returning: id)
+                } else {
+                    waiters.append(Waiter(id: id, continuation: continuation))
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id) }
+        }
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(throwing: CancellationError())
+    }
+
+    private func release(_ id: UUID) {
+        guard active == id else { return }
+        guard !waiters.isEmpty else { active = nil; return }
+        let next = waiters.removeFirst()
+        active = next.id
+        next.continuation.resume(returning: next.id)
+    }
+}
+
+/// Owns local model installation and the shared `WhisperKit` instance.
+/// The actor protects its cache; the transcription gate also covers awaited
+/// loading and decoding, which actor reentrancy would otherwise overlap.
+/// Callers receive transcripts, never the non-Sendable model instance.
 actor WhisperModelStore {
     static let shared = WhisperModelStore()
 
@@ -155,6 +212,7 @@ actor WhisperModelStore {
     /// Currently loaded model, keyed by variant so switching models in
     /// Settings drops the old one instead of stacking two in memory.
     private var loaded: (variant: String, kit: WhisperKit)?
+    private let transcriptionGate = WhisperTranscriptionGate()
 
     // MARK: Locations
 
@@ -413,6 +471,13 @@ actor WhisperModelStore {
     /// first call in a process; the first call is where CoreML compilation and
     /// tokenizer setup are paid for.
     func warmUp(variant: String) async throws {
+        try await transcriptionGate.withPermit { [self] in
+            try await warmUpWithPermit(variant: variant)
+        }
+    }
+
+    private func warmUpWithPermit(variant: String) async throws {
+        try Task.checkCancellation()
         _ = try await kit(for: variant)
     }
 
@@ -429,7 +494,15 @@ actor WhisperModelStore {
     /// replaceable hypothesis rather than an append-only transcript.
     func transcribe(samples: [Float], language: String?, variant: String) async throws -> String {
         guard samples.count >= Self.minimumSamples else { return "" }
+        return try await transcriptionGate.withPermit { [self] in
+            try await transcribeWithPermit(samples: samples, language: language, variant: variant)
+        }
+    }
+
+    private func transcribeWithPermit(samples: [Float], language: String?, variant: String) async throws -> String {
+        try Task.checkCancellation()
         let kit = try await kit(for: variant)
+        try Task.checkCancellation()
         let options = DecodingOptions(
             verbose: false,
             task: .transcribe,

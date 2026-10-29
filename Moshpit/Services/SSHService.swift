@@ -4,6 +4,11 @@ import Crypto
 import NIOCore
 import NIOSSH
 import MoshpitKit
+import CloudflareAccess
+import CloudflareSSH
+import TailcatSSH
+import TailscaleSSH
+import NIOPosix
 
 // MARK: - Errors
 
@@ -28,6 +33,18 @@ enum SSHError: Error, CustomStringConvertible, LocalizedError {
     /// — which users must see as "authentication failed", not "error 4".
     static func map(_ error: Error) -> SSHError {
         if let e = error as? SSHError { return e }
+        if let authentication = error as? SSHChannelAuthentication.Failure {
+            switch authentication {
+            case .connectionClosed: return .handshakeFailed
+            case .timedOut: return .connectionFailed
+            }
+        }
+        if error is CloudflareAuthError || error is AccessError
+            || error is CloudflareSSHTransportError || error is ConnectionTransportError
+            || error is TailcatSSHTransportError || error is TailcatCredentialError
+            || error is TailscaleSSHTransportError || error is TailscaleAccountError {
+            return .underlying(error)
+        }
         if let c = error as? SSHClientError {
             switch c {
             case .allAuthenticationOptionsFailed:
@@ -58,6 +75,60 @@ enum SSHError: Error, CustomStringConvertible, LocalizedError {
             return .handshakeFailed
         }
         return .underlying(error)
+    }
+
+    /// Citadel may report only EOF after the carrier already recorded a useful
+    /// failure. Recover only bounded transport metadata, before local cleanup
+    /// can add its own close events. Explicit SSH/auth decisions remain primary.
+    static func preservingCloudflareSetupCause(
+        _ error: Error,
+        firstTermination: CloudflareSSHDiagnosticEvent.Kind?,
+        firstFailure: CloudflareSSHTransportError?
+    ) -> Error {
+        var underlying = error
+        while let ssh = underlying as? SSHError, case .underlying(let nested) = ssh {
+            underlying = nested
+        }
+        guard !(underlying is HostKeyRejected), !(underlying is CancellationError),
+              (underlying as? URLError)?.code != .cancelled else { return error }
+
+        let mayUseTransportCause: Bool
+        if let authentication = underlying as? SSHChannelAuthentication.Failure {
+            mayUseTransportCause = authentication == .connectionClosed
+        } else if let transport = underlying as? CloudflareSSHTransportError {
+            mayUseTransportCause = transport == .connectionClosed
+        } else if let channel = underlying as? ChannelError {
+            switch channel {
+            case .alreadyClosed, .ioOnClosedChannel, .eof: mayUseTransportCause = true
+            default: mayUseTransportCause = false
+            }
+        } else if underlying is CloudflareAuthError || underlying is AccessError
+                    || underlying is ConnectionTransportError || underlying is TailcatSSHTransportError
+                    || underlying is TailcatCredentialError || underlying is TailscaleSSHTransportError
+                    || underlying is TailscaleAccountError {
+            mayUseTransportCause = false
+        } else {
+            switch map(underlying) {
+            case .sessionClosed, .handshakeFailed, .underlying: mayUseTransportCause = true
+            default: mayUseTransportCause = false
+            }
+        }
+        guard mayUseTransportCause else { return error }
+
+        switch firstTermination {
+        case .failed(let failure): return firstFailure ?? failure
+        case .transportEOF, .peerClose:
+            // A close code is not an Access HTTP status or an SSH auth result.
+            // Preserve closure without guessing why the peer chose to close.
+            return CloudflareSSHTransportError.connectionClosed
+        case nil:
+            if let firstFailure { return firstFailure }
+            return error
+        default:
+            // In particular, a local close/cancellation must not be relabelled
+            // with a TLS/IO error produced later while the channel shuts down.
+            return error
+        }
     }
 
     /// NSError bridging shows "SSHError error 1." unless we hand Foundation
@@ -101,7 +172,15 @@ enum SSHError: Error, CustomStringConvertible, LocalizedError {
             return String(localized: "The server closed the connection while setting up SSH. Check that the port really is an SSH server, and that a firewall or proxy isn't cutting the connection.")
         case .credentialUnavailable:
             return String(localized: "Couldn't read the saved credential. After re-installing or re-signing the app (e.g. via SideStore), open Edit and re-enter your password / re-select your key.")
-        case .underlying:
+        case .underlying(let error):
+            if let tailcat = error as? TailcatSSHTransportError { return tailcat.moshpitMessage }
+            if let tailscale = error as? TailscaleSSHTransportError { return tailscale.moshpitMessage }
+            if error is CloudflareAuthError || error is AccessError
+                || error is CloudflareSSHTransportError || error is ConnectionTransportError
+                || error is TailcatSSHTransportError || error is TailcatCredentialError
+                || error is TailscaleAccountError {
+                return error.localizedDescription
+            }
             // Deliberately says nothing about the wrapped error. For a library
             // type that does not implement LocalizedError — which Citadel's
             // internals do not — `localizedDescription` renders as
@@ -166,11 +245,40 @@ struct CitadelSSHClientProvider: SSHClientProvider {
         authenticationMethod: SSHAuthenticationMethod,
         hostKeyValidator: SSHHostKeyValidator
     ) async throws -> SSHClient {
-        try await SSHClient.connect(
-            on: channel,
-            authenticationMethod: authenticationMethod,
-            hostKeyValidator: hostKeyValidator
-        )
+        do {
+            try Task.checkCancellation()
+            // Citadel's connect(on:) installs its NIOSSH handlers before it
+            // returns; authentication itself is driven by later inbound data.
+            let executor = SSHChannelTaskExecutor(eventLoop: channel.eventLoop)
+            let client = try await withTaskExecutorPreference(executor) {
+                try await SSHClient.connect(
+                    on: channel,
+                    authenticationMethod: authenticationMethod,
+                    hostKeyValidator: hostKeyValidator
+                )
+            }
+            try Task.checkCancellation()
+            return client
+        } catch {
+            try? await channel.close()
+            throw error
+        }
+    }
+}
+
+/// Citadel's existing-channel entry installs handlers with NIO's synchronous
+/// pipeline API before its first await. Its nonisolated async function must run
+/// on this channel's event loop, including when called from Swift concurrency.
+private final class SSHChannelTaskExecutor: TaskExecutor {
+    private let eventLoop: EventLoop
+
+    init(eventLoop: EventLoop) { self.eventLoop = eventLoop }
+
+    func enqueue(_ job: consuming ExecutorJob) {
+        let job = UnownedJob(job)
+        eventLoop.execute { [self] in
+            job.runSynchronously(on: asUnownedTaskExecutor())
+        }
     }
 }
 
@@ -216,6 +324,10 @@ actor SSHSession {
     private(set) var rows: Int = 24
     private(set) var cols: Int = 80
     private var closed = false
+    /// Logical EOF and physical transport teardown are separate states. Every
+    /// close caller joins the same owned transport shutdown, including after
+    /// the PTY has already marked the session disconnected.
+    private var shutdownTask: Task<Void, Never>?
     /// Fired when the transport dies on its own (read loop hit EOF/error) —
     /// NOT on an intentional `close()`. Drives auto-reconnect. Cleared after.
     private var onUnexpectedClose: (@Sendable () -> Void)?
@@ -255,24 +367,33 @@ actor SSHSession {
     // MARK: - PTY
 
     func requestPTY(rows: Int, cols: Int) async throws {
+        try Task.checkCancellation()
         guard !closed else { throw SSHError.sessionClosed }
         guard !ptyOpened else { throw SSHError.ptyAlreadyOpen }
         ptyOpened = true
         self.rows = rows
         self.cols = cols
 
-        let w = try await transport.openPTY(
-            rows: rows, cols: cols,
-            onOutput: { [weak self] data in
-                // Synchronous, in-order: the read loop is the only caller and
-                // it is sequential. See `continuation`'s doc for the
-                // reordering bug the old per-chunk Task caused.
-                self?.continuation.yield(data)
-            },
-            onEnd: { [weak self] in
-                Task { await self?.markClosed() }
-            })
-        installWriter(w)
+        try await withTaskCancellationHandler {
+            let w = try await transport.openPTY(
+                rows: rows, cols: cols,
+                onOutput: { [weak self] data in
+                    // Synchronous, in-order: the read loop is the only caller
+                    // and it is sequential. See `continuation`'s doc.
+                    self?.continuation.yield(data)
+                },
+                onEnd: { [weak self] in
+                    Task { await self?.markClosed() }
+                })
+            try Task.checkCancellation()
+            guard !closed else { throw SSHError.sessionClosed }
+            installWriter(w)
+        } onCancel: {
+            // Citadel's PTY setup awaits NIO futures. Cancelling the Swift task
+            // alone does not release those waits; closing this session's owned
+            // transport ends the pending setup and its unstructured read loop.
+            Task { await self.close() }
+        }
     }
 
     // MARK: - I/O
@@ -297,18 +418,24 @@ actor SSHSession {
     /// port + session key, then daemonizes). Does not touch the PTY channel.
     func executeCommand(_ command: String) async throws -> Data {
         guard !closed else { throw SSHError.sessionClosed }
-        // Debug level, so it costs nothing unless someone is listening — but
-        // when they are, this is the only way to see channel churn, which is
-        // what a flaky link actually pays for (one exec = one channel = a
-        // fork on the server and a couple of round trips).
-        // The PATH prefix is 60 characters of boilerplate on every herdr
-        // command — log what actually differs.
-        let logged = command.hasPrefix("PATH=")
-            ? String(command.drop(while: { $0 != " " }).dropFirst())
-            : command
-        Log.ssh.debug("exec: \(logged.prefix(60), privacy: .public)")
+        // Exec arguments can contain terminal input, credentials or uploaded
+        // content. Even a short public prefix leaks passwords into diagnostics.
+        Log.ssh.debug("exec: opening command channel")
         do {
             return try await transport.run(command)
+        } catch {
+            throw SSHError.underlying(error)
+        }
+    }
+
+    /// Run a command with a separate, binary-safe stdin payload. The caller
+    /// frames the payload (for example one JSON line); no payload is placed in
+    /// the remote process arguments or diagnostics.
+    func executeCommand(_ command: String, standardInput: Data) async throws -> Data {
+        guard !closed else { throw SSHError.sessionClosed }
+        Log.ssh.debug("exec: opening command channel with stdin")
+        do {
+            return try await transport.run(command, standardInput: standardInput)
         } catch {
             throw SSHError.underlying(error)
         }
@@ -375,7 +502,8 @@ actor SSHSession {
             // therefore no SFTP — throw into the exec/base64 fallback, which
             // is exactly the path such a session wants exercised.
             guard let sftpClient else { throw SSHError.sessionClosed }
-            return try await sftpClient.withSFTP { sftp in
+            let sftp = try await sftpClient.openSFTP()
+            return try await SSHResourceScope.withCleanup(operation: {
                 let home = try await sftp.getRealPath(atPath: ".")
                 let appDir = home + "/.moshpit"
                 let uploads = appDir + "/uploads"
@@ -384,10 +512,11 @@ actor SSHSession {
                 try? await sftp.createDirectory(
                     atPath: uploads, attributes: attributes(permissions: 0o700))
                 let path = uploads + "/" + filename
-                try await sftp.withFile(
+                let file = try await sftp.openFile(
                     filePath: path,
                     flags: [.write, .create, .truncate],
-                    attributes: attributes(permissions: 0o600)) { file in
+                    attributes: attributes(permissions: 0o600))
+                try await SSHResourceScope.withCleanup(operation: {
                     // Chunked so a cancel lands between writes and progress
                     // moves during the transfer, not just at its end.
                     let chunkSize = 128 * 1024
@@ -400,9 +529,9 @@ actor SSHSession {
                         offset = end
                         progress?(Double(offset) / Double(data.count))
                     }
-                }
+                }, cleanup: { try await file.close() })
                 return path
-            }
+            }, cleanup: { try await sftp.close() })
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -458,11 +587,16 @@ actor SSHSession {
     private var previewSFTP: SFTPClient?
 
     private func previewReader() async throws -> SFTPClient {
+        guard !closed else { throw SSHError.sessionClosed }
         if let previewSFTP, previewSFTP.isActive { return previewSFTP }
         // A transport-injected session (tests) has no Citadel client; the
         // callers fall back to exec, as uploads do.
         guard let sftpClient else { throw SSHError.sessionClosed }
         let fresh = try await sftpClient.openSFTP()
+        guard !closed else {
+            try? await fresh.close()
+            throw SSHError.sessionClosed
+        }
         previewSFTP = fresh
         return fresh
     }
@@ -737,15 +871,11 @@ actor SSHSession {
     }
 
     func close() async {
-        guard !closed else { return }
         closed = true
         writer = nil
+        onUnexpectedClose = nil
         continuation.finish()
-        try? await previewSFTP?.close()
-        previewSFTP = nil
-        // Shutting the transport cancels in-flight PTY reads via channel
-        // close → the read loop exits → its markClosed is a no-op.
-        await transport.shutdown()
+        await shutdownOwnedTransport()
     }
 
     // MARK: - Private actor-isolated helpers
@@ -754,7 +884,7 @@ actor SSHSession {
         self.writer = w
     }
 
-    private func markClosed() {
+    private func markClosed() async {
         guard !closed else { return }
         closed = true
         writer = nil
@@ -764,6 +894,23 @@ actor SSHSession {
         let handler = onUnexpectedClose
         onUnexpectedClose = nil
         handler?()
+        await shutdownOwnedTransport()
+    }
+
+    private func shutdownOwnedTransport() async {
+        if let shutdownTask { await shutdownTask.value; return }
+        let transport = self.transport
+        let preview = previewSFTP
+        previewSFTP = nil
+        let shutdown = Task {
+            // Close the parent first. Waiting for an SFTP child on a dead or
+            // backpressured carrier must not delay the operation that releases
+            // all pending channel reads/writes.
+            await transport.shutdown()
+            try? await preview?.close()
+        }
+        shutdownTask = shutdown
+        await shutdown.value
     }
 }
 
@@ -779,6 +926,8 @@ actor SSHSession {
 protocol SSHClientTransport: AnyObject, Sendable {
     /// One-shot exec channel: stderr merged, buffered to completion.
     func run(_ command: String) async throws -> Data
+    /// One-shot exec with framed stdin, separate from the command arguments.
+    func run(_ command: String, standardInput: Data) async throws -> Data
     /// Open the interactive PTY. Returns once the server accepted it,
     /// handing back the stdin writer; `onOutput` then streams host bytes for
     /// the channel's lifetime, and `onEnd` fires when the read loop finishes
@@ -789,6 +938,18 @@ protocol SSHClientTransport: AnyObject, Sendable {
     /// Tear the connection down; must also end an open PTY's read loop
     /// (which makes the session's `close()` race-free against `markClosed`).
     func shutdown() async
+}
+
+enum SSHExecInputError: Error {
+    case unsupportedTransport
+}
+
+extension SSHClientTransport {
+    // Test transports that only support ordinary exec must fail closed. Falling
+    // back to a quoted argument would put sensitive stdin back into argv.
+    func run(_ command: String, standardInput: Data) async throws -> Data {
+        throw SSHExecInputError.unsupportedTransport
+    }
 }
 
 /// The PTY stdin surface the session writes through.
@@ -808,6 +969,26 @@ final class CitadelClientTransport: SSHClientTransport {
     func run(_ command: String) async throws -> Data {
         let buffer = try await client.executeCommand(command, mergeStreams: true)
         return Data(buffer.readableBytesView)
+    }
+
+    func run(_ command: String, standardInput: Data) async throws -> Data {
+        var result = Data()
+        var receivedEOF = false
+        do {
+            try await client.withExec(command) { inbound, outbound in
+                try await outbound.write(ByteBuffer(bytes: standardInput))
+                for try await chunk in inbound {
+                    switch chunk {
+                    case .stdout(let bytes), .stderr(let bytes):
+                        result.append(contentsOf: bytes.readableBytesView)
+                    }
+                }
+                receivedEOF = true
+            }
+        } catch let error as ChannelError where error == .alreadyClosed && receivedEOF {
+            // The server can close after EOF before withExec's own close.
+        }
+        return result
     }
 
     func openPTY(rows: Int, cols: Int,
@@ -895,6 +1076,114 @@ private struct CitadelPTYWriter: SSHPTYWriter {
 
 // MARK: - SSHService
 
+/// Only allowlisted routing/stage metadata crosses the diagnostic boundary.
+/// In particular, neither an Error's description nor a saved transportRaw
+/// value is suitable for the user's exportable recent log.
+struct SSHConnectionDiagnostic: Sendable {
+    enum Phase: String, Sendable {
+        case transportValidation = "transport-validation"
+        case cloudflareAccess = "cloudflare-access"
+        case tailcatCredential = "tailcat-credential"
+        case tailscaleAccount = "tailscale-account"
+        case sshCredential = "ssh-credential"
+        case authenticationMethod = "authentication-method"
+        case transportDial = "transport-dial"
+        case sshAuthentication = "ssh-authentication"
+        // Citadel's direct connect combines TCP dial and SSH authentication.
+        case directSSHConnect = "direct-ssh-connect"
+    }
+    enum Outcome: String, Sendable { case started, succeeded, failed }
+
+    let attemptID: UUID
+    let connectionID: UUID
+    let route: ConnectionTransport?
+    let phase: Phase
+    let outcome: Outcome
+    let errorClass: String?
+
+    var context: String { "conn=\(connectionID.uuidString) route=\(route?.rawValue ?? "unknown")" }
+    var message: String {
+        "ssh[\(attemptID.uuidString)] \(context) phase=\(phase.rawValue) result=\(outcome.rawValue)"
+            + (errorClass.map { " error=\($0)" } ?? "")
+    }
+
+    static func classify(_ error: Error) -> String {
+        if let ssh = error as? SSHError {
+            switch ssh {
+            case .underlying(let nested): return classify(nested)
+            case .missingKeychainRef: return "ssh.missing-keychain-ref"
+            case .missingSecret: return "ssh.missing-secret"
+            case .unsupportedKeyType: return "ssh.unsupported-key-type"
+            case .credentialUnavailable: return "ssh.credential-unavailable"
+            case .authenticationFailed: return "ssh.authentication-failed"
+            case .authMethodRejected: return "ssh.auth-method-rejected"
+            case .handshakeFailed: return "ssh.handshake-failed"
+            case .connectionFailed: return "ssh.connection-failed"
+            case .channelOpenFailed: return "ssh.channel-open-failed"
+            case .sessionClosed: return "ssh.session-closed"
+            case .ptyAlreadyOpen, .ptyNotReady: return "ssh.pty-state"
+            }
+        }
+        if let auth = error as? CloudflareAuthError {
+            switch auth {
+            case .loginRequired: return "cloudflare-auth.login-required"
+            case .cancelled: return "cloudflare-auth.cancelled"
+            case .presentationUnavailable: return "cloudflare-auth.presentation-unavailable"
+            case .credentialStorage: return "cloudflare-auth.credential-storage"
+            }
+        }
+        if let access = error as? AccessError {
+            switch access {
+            case .expiredToken: return "access.expired-token"
+            case .httpStatus(let code): return "access.http-\(code)"
+            case .networkFailure: return "access.network-failure"
+            case .deadlineExceeded: return "access.deadline-exceeded"
+            case .wrongAudience: return "access.wrong-audience"
+            case .wrongIssuer: return "access.wrong-issuer"
+            case .invalidSignature: return "access.invalid-signature"
+            case .invalidClaims: return "access.invalid-claims"
+            case .invalidToken: return "access.invalid-token"
+            case .userIdentityRequired: return "access.user-identity-required"
+            default: return "access.validation-failed"
+            }
+        }
+        if let transport = error as? CloudflareSSHTransportError {
+            switch transport {
+            case .invalidEndpoint: return "cloudflare.invalid-endpoint"
+            case .invalidCredential: return "cloudflare.invalid-credential"
+            case .deadlineExceeded: return "cloudflare.deadline-exceeded"
+            case .httpStatus(let code): return "cloudflare.http-\(code)"
+            case .dnsFailure(let code): return "cloudflare.dns-\(code.map(String.init) ?? "unknown")"
+            case .socketFailure(let code): return "cloudflare.socket-\(code.map(String.init) ?? "unknown")"
+            case .tlsFailure(let reason): return "cloudflare.tls-\(reason.rawValue)"
+            case .connectionClosed: return "cloudflare.connection-closed"
+            case .heartbeatTimedOut: return "cloudflare.heartbeat-timeout"
+            case .heartbeatWriteTimedOut: return "cloudflare.heartbeat-write-timeout"
+            case .upgradeFailed: return "cloudflare.upgrade-failed"
+            case .unsupportedWebSocketOptions: return "cloudflare.unsupported-websocket-options"
+            case .invalidWebSocketFrame: return "cloudflare.invalid-websocket-frame"
+            case .textFrameUnsupported: return "cloudflare.text-frame-unsupported"
+            case .bufferLimitExceeded: return "cloudflare.buffer-limit"
+            }
+        }
+        if error is ConnectionTransportError { return "transport.invalid-configuration" }
+        if error is TailcatCredentialError { return "tailcat.credential" }
+        if error is TailcatSSHTransportError { return "tailcat.transport" }
+        if error is TailscaleAccountError { return "tailscale.account" }
+        if error is TailscaleSSHTransportError { return "tailscale.transport" }
+        if error is KeychainError { return "keychain.failure" }
+        if error is HostKeyRejected { return "ssh.host-key-rejected" }
+        if error is CancellationError { return "cancelled" }
+        if let url = error as? URLError { return "url.code-\(url.code.rawValue)" }
+        if let authentication = error as? SSHChannelAuthentication.Failure {
+            return authentication == .timedOut ? "ssh.authentication-timeout" : "ssh.authentication-closed"
+        }
+        if error is SSHClientError { return classify(SSHError.map(error)) }
+        if error is ChannelError { return "nio.channel" }
+        return "unclassified"
+    }
+}
+
 /// Top-level façade that resolves credentials, authenticates, and hands the
 /// caller an `SSHSession`. The service holds the long-lived dependencies
 /// (`KeychainService`, `HostKeyValidator`) so views/view-models only need
@@ -906,6 +1195,10 @@ actor SSHService {
     private let keychain: KeychainService
     private let validator: HostKeyValidator
     private let clientProvider: SSHClientProvider
+    private let cloudflareAuth: CloudflareAccessAuth
+    private let tailcatCredentials: TailcatCredentials
+    private let tailscaleRuntime: TailscaleRuntime
+    private let onConnectionDiagnostic: (@Sendable (SSHConnectionDiagnostic) -> Void)?
 
     /// In-memory credential cache, keyed by connection id. Populated after the
     /// first successful (biometry-gated) keychain read so the now-frequent
@@ -959,10 +1252,18 @@ actor SSHService {
 
     init(keychain: KeychainService,
          hostKeyValidator: HostKeyValidator,
-         clientProvider: SSHClientProvider = CitadelSSHClientProvider()) {
+         clientProvider: SSHClientProvider = CitadelSSHClientProvider(),
+         tailcatCredentials: TailcatCredentials = .shared,
+         tailscaleRuntime: TailscaleRuntime = .shared,
+         cloudflareAuth: CloudflareAccessAuth = .shared,
+         onConnectionDiagnostic: (@Sendable (SSHConnectionDiagnostic) -> Void)? = nil) {
         self.keychain = keychain
         self.validator = hostKeyValidator
         self.clientProvider = clientProvider
+        self.cloudflareAuth = cloudflareAuth
+        self.tailcatCredentials = tailcatCredentials
+        self.tailscaleRuntime = tailscaleRuntime
+        self.onConnectionDiagnostic = onConnectionDiagnostic
     }
 
     // MARK: - Connect
@@ -991,7 +1292,68 @@ actor SSHService {
                  overrideSecret: String? = nil,
                  onUnknownHost: @escaping TrustNewHostHandler = { _, _, _ in false },
                  onChangedHost: @escaping AcceptChangedHostHandler = { _, _, _, _ in false }) async throws -> SSHSession {
+        let attemptID = UUID()
+        let route = connection.transport
+        var phase = SSHConnectionDiagnostic.Phase.transportValidation
+        func record(_ outcome: SSHConnectionDiagnostic.Outcome, error: Error? = nil) {
+            let event = SSHConnectionDiagnostic(attemptID: attemptID, connectionID: connection.id,
+                route: route, phase: phase, outcome: outcome, errorClass: error.map(SSHConnectionDiagnostic.classify))
+            Log.ssh.notice("\(event.message, privacy: .public)")
+            onConnectionDiagnostic?(event)
+        }
+        do {
+            let session = try await connectImplementation(connection, overrideSecret: overrideSecret,
+                onUnknownHost: onUnknownHost, onChangedHost: onChangedHost, diagnosticID: attemptID.uuidString,
+                diagnosticContext: "conn=\(connection.id.uuidString) route=\(route?.rawValue ?? "unknown")",
+                onPhase: { next in phase = next; record(.started) })
+            record(.succeeded)
+            return session
+        } catch {
+            // Includes validation/Access/keychain errors before the existing
+            // transport catch. Logging must not change their error semantics.
+            record(.failed, error: error)
+            throw error
+        }
+    }
+
+    private func connectImplementation(_ connection: ServerConnection,
+                 overrideSecret: String?,
+                 onUnknownHost: @escaping TrustNewHostHandler,
+                 onChangedHost: @escaping AcceptChangedHostHandler,
+                 diagnosticID: String, diagnosticContext: String,
+                 onPhase: (SSHConnectionDiagnostic.Phase) -> Void) async throws -> SSHSession {
+        // Validate before reading SSH keys or touching the network. Unknown
+        // transport values and Cloudflare+Mosh must never fall back to direct.
+        onPhase(.transportValidation)
+        let transport = try connection.validatedTransport()
+        let accessToken: String?
+        if case .cloudflare(let settings) = transport {
+            onPhase(.cloudflareAccess)
+            accessToken = try await cloudflareAuth.credentials(settings: settings).applicationToken
+        } else {
+            accessToken = nil
+        }
+        let tailcatCredential: TailcatCredential?
+        if case .tailcat(let settings) = transport {
+            onPhase(.tailcatCredential)
+            let credential = try await tailcatCredentials.load(ref: settings.credentialRef)
+            guard credential.serverPublicKey == settings.serverPublicKey else {
+                throw SSHError.credentialUnavailable
+            }
+            tailcatCredential = credential
+        } else {
+            tailcatCredential = nil
+        }
+        let tailscaleConnection: TailscalePreparedConnection?
+        if case .tailscale(let settings) = transport {
+            onPhase(.tailscaleAccount)
+            tailscaleConnection = try await tailscaleRuntime.prepare(settings: settings, host: connection.host)
+        } else {
+            tailscaleConnection = nil
+        }
+        try Task.checkCancellation()
         let authMethod: SSHAuthenticationMethod
+        onPhase(.sshCredential)
         if connection.authMethod == .key, connection.sshKeyAlgorithm == .seP256 {
             // Secure Enclave key: the keychain blob is the key's
             // dataRepresentation (an enclave handle), not PEM. Signing runs
@@ -1010,6 +1372,7 @@ actor SSHService {
                 }
                 seBlobCache[connection.id] = blob
             }
+            onPhase(.authenticationMethod)
             do {
                 let seKey = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: blob)
                 authMethod = .custom(SecureEnclaveP256AuthDelegate(
@@ -1019,38 +1382,163 @@ actor SSHService {
             }
         } else {
             let secret = try await resolveSecret(for: connection, override: overrideSecret)
+            onPhase(.authenticationMethod)
             authMethod = try makeAuthMethod(connection: connection, secret: secret)
         }
 
+        // A Tailcat alias is only a display name. Pin SSH trust to the remote
+        // node identity so two servers named "mac-mini" never share trust.
+        let hostKeyIdentity: String
+        if case .tailcat(let settings) = transport {
+            hostKeyIdentity = settings.hostKeyIdentity
+        } else if let tailscaleConnection {
+            hostKeyIdentity = tailscaleConnection.hostKeyIdentity
+        } else {
+            hostKeyIdentity = connection.host
+        }
+        let displayHost = connection.host
         let delegate = TOFUHostKeyDelegate(
             validator: validator,
-            host: connection.host,
+            host: hostKeyIdentity,
             port: connection.port,
-            onNewHost: onUnknownHost,
-            onChangedHost: onChangedHost
+            onNewHost: { _, port, fingerprint in
+                await onUnknownHost(displayHost, port, fingerprint)
+            },
+            onChangedHost: { _, port, newFingerprint, oldFingerprint in
+                await onChangedHost(displayHost, port, newFingerprint, oldFingerprint)
+            }
         )
         let hostKeyValidator = SSHHostKeyValidator.custom(delegate)
 
         do {
             let client: SSHClient
+            onPhase(.transportDial)
             // SOCKS proxies only speak TCP CONNECT — this affects the SSH
             // dial only. If Mosh is also on, its UDP session still connects
             // directly once SSH bootstraps it; the Add Connection form's
             // PROXY footer says so up front rather than let that surface as
             // a silent post-handshake failure.
-            if connection.useSOCKSProxy == true, let proxyHost = connection.socksProxyHost, !proxyHost.isEmpty {
+            switch transport {
+            case .socks5(let proxyHost, let proxyPort):
                 let channel = try await SOCKSProxyDialer.connect(
                     proxyHost: proxyHost,
-                    proxyPort: connection.socksProxyPort ?? 1080,
+                    proxyPort: proxyPort,
                     targetHost: connection.host,
                     targetPort: connection.port
                 )
-                client = try await clientProvider.connect(
-                    on: channel,
-                    authenticationMethod: authMethod,
-                    hostKeyValidator: hostKeyValidator
-                )
-            } else {
+                do {
+                    onPhase(.sshAuthentication)
+                    client = try await clientProvider.connect(
+                        on: channel,
+                        authenticationMethod: authMethod,
+                        hostKeyValidator: hostKeyValidator
+                    )
+                    try Task.checkCancellation()
+                    try await SOCKSProxyDialer.completeHandoff(on: channel)
+                    try Task.checkCancellation()
+                } catch {
+                    try? await channel.close()
+                    throw error
+                }
+            case .cloudflare(let settings):
+                let endpoint = URL(string: "wss://" + settings.hostname + "/")!
+                // Correlate only typed phases and monotonic times, never the
+                // endpoint, credentials, terminal bytes or peer close text.
+                let tunnel: CloudflareSSHConnection
+                do {
+                    tunnel = try await CloudflareSSHDialer().connect(
+                        endpoint: endpoint, accessToken: accessToken,
+                        on: MultiThreadedEventLoopGroup.singleton,
+                        onDiagnostic: { event in
+                            let kind = String(describing: event.kind)
+                            switch event.kind {
+                            case .pingQueued, .pingSent, .pongReceived:
+                                Log.ssh.debug("cloudflare[\(diagnosticID, privacy: .public)] \(diagnosticContext, privacy: .public) +\(event.elapsedMilliseconds)ms \(kind, privacy: .public)")
+                            default:
+                                Log.ssh.notice("cloudflare[\(diagnosticID, privacy: .public)] \(diagnosticContext, privacy: .public) +\(event.elapsedMilliseconds)ms \(kind, privacy: .public)")
+                            }
+                        })
+                } catch {
+                    if let failure = error as? CloudflareSSHTransportError,
+                       case .httpStatus(let code) = failure,
+                       [301, 302, 303, 307, 308, 401, 403].contains(code) {
+                        await cloudflareAuth.invalidate(settings: settings)
+                    }
+                    throw error
+                }
+                do {
+                    onPhase(.sshAuthentication)
+                    client = try await clientProvider.connect(
+                        on: tunnel.channel, authenticationMethod: authMethod,
+                        hostKeyValidator: hostKeyValidator)
+                    try await SSHChannelAuthentication.complete(on: tunnel.channel) {
+                        try await tunnel.activate()
+                    }
+                    Log.ssh.notice("cloudflare[\(diagnosticID, privacy: .public)] \(diagnosticContext, privacy: .public) SSH authenticated")
+                    try Task.checkCancellation()
+                } catch {
+                    let diagnostics = tunnel.diagnostics
+                    let failure = SSHError.preservingCloudflareSetupCause(error,
+                        firstTermination: diagnostics.firstTermination?.kind,
+                        firstFailure: diagnostics.firstFailure)
+                    let cause = String(describing: diagnostics.firstTermination?.kind)
+                    Log.ssh.notice("cloudflare[\(diagnosticID, privacy: .public)] \(diagnosticContext, privacy: .public) SSH setup ended; first transport termination=\(cause, privacy: .public)")
+                    await tunnel.close()
+                    throw failure
+                }
+            case .tailcat:
+                guard let credential = tailcatCredential else {
+                    throw SSHError.credentialUnavailable
+                }
+                let tunnel = try await TailcatSSHDialer().connect(
+                    address: credential.address,
+                    clientKey: credential.clientPrivateKey,
+                    port: connection.port,
+                    on: MultiThreadedEventLoopGroup.singleton,
+                    onDiagnostic: { event in
+                        let kind = event.kind.rawValue
+                        Log.ssh.notice("tailcat[\(diagnosticID, privacy: .public)] \(diagnosticContext, privacy: .public) +\(event.elapsedMilliseconds)ms \(kind, privacy: .public)")
+                    })
+                do {
+                    onPhase(.sshAuthentication)
+                    client = try await clientProvider.connect(
+                        on: tunnel.channel, authenticationMethod: authMethod,
+                        hostKeyValidator: hostKeyValidator)
+                    try await SSHChannelAuthentication.complete(on: tunnel.channel) {
+                        try await tunnel.activate()
+                    }
+                    Log.ssh.notice("tailcat[\(diagnosticID, privacy: .public)] \(diagnosticContext, privacy: .public) SSH authenticated")
+                    try Task.checkCancellation()
+                } catch {
+                    await tunnel.close()
+                    throw error
+                }
+            case .tailscale:
+                guard let prepared = tailscaleConnection, let node = prepared.client.nativeNode else {
+                    throw TailscaleAccountError.loginRequired
+                }
+                let tunnel = try await TailscaleSSHDialer().connect(
+                    node: node, host: prepared.host, port: connection.port,
+                    on: MultiThreadedEventLoopGroup.singleton,
+                    onDiagnostic: { event in
+                        Log.ssh.notice("tailscale[\(diagnosticID, privacy: .public)] \(diagnosticContext, privacy: .public) +\(event.elapsedMilliseconds)ms \(event.kind.rawValue, privacy: .public)")
+                    })
+                do {
+                    onPhase(.sshAuthentication)
+                    client = try await clientProvider.connect(
+                        on: tunnel.channel, authenticationMethod: authMethod,
+                        hostKeyValidator: hostKeyValidator)
+                    try await SSHChannelAuthentication.complete(on: tunnel.channel) {
+                        try await tunnel.activate()
+                    }
+                    Log.ssh.notice("tailscale[\(diagnosticID, privacy: .public)] \(diagnosticContext, privacy: .public) SSH authenticated")
+                    try Task.checkCancellation()
+                } catch {
+                    await tunnel.close()
+                    throw error
+                }
+            case .direct:
+                onPhase(.directSSHConnect)
                 client = try await clientProvider.connect(
                     host: connection.host,
                     port: connection.port,

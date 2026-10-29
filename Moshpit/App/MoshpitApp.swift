@@ -12,6 +12,7 @@ struct MoshpitApp: App {
     @State private var appThemes = AppThemeStore.shared
     @State private var hub: SessionHub
     @State private var monitor: AgentActivityMonitor
+    @State private var connectionActivity: ConnectionLiveActivity
     @State private var connectionHolder: ConnectionStoreHolder
     @State private var keychainHolder: KeychainServiceHolder
     @State private var router: DeepLinkRouter
@@ -25,6 +26,7 @@ struct MoshpitApp: App {
     private let keychain = KeychainService()
 
     init() {
+        TerminalInputPrivacy.removeLegacyHistory()
         let metrics = SessionMetricsRegistry()
         let settings = AppSettings.shared
         #if DEBUG
@@ -50,6 +52,7 @@ struct MoshpitApp: App {
         _store = State(initialValue: store)
         _hub = State(initialValue: hub)
         _monitor = State(initialValue: monitor)
+        _connectionActivity = State(initialValue: ConnectionLiveActivity(settings: settings, hub: hub))
         _router = State(initialValue: router)
         _notificationHandler = State(initialValue: notificationHandler)
         _connectionHolder = State(initialValue: ConnectionStoreHolder(store: store))
@@ -129,6 +132,7 @@ struct MoshpitApp: App {
     /// return to the foreground rather than trying to predict the one that
     /// follows an unattended launch.
     private func reloadStoresIfNeeded() {
+        TerminalInputPrivacy.removeLegacyHistory()
         store.reloadIfNeeded()
         shortcuts.reloadIfNeeded()
         sshKeys.reloadIfNeeded()
@@ -197,6 +201,19 @@ struct MoshpitApp: App {
             .onOpenURL { url in
                 router.handle(url)
             }
+            .onAppear {
+                connectionActivity.setForeground(scenePhase == .active)
+                CloudSyncService.shared.configure(CloudSyncLocalStore(
+                    connections: store, keys: sshKeys, themes: themes, appThemes: appThemes,
+                    shortcuts: shortcuts, settings: settings, keychain: keychainHolder.service))
+                if scenePhase == .active { Task { await CloudSyncService.shared.sync() } }
+            }
+            .onChange(of: settings.liveActivityEnabled) { _, _ in
+                connectionActivity.refresh(force: true)
+            }
+            .onChange(of: settings.liveActivityShowHostNames) { _, _ in
+                connectionActivity.refresh(force: true)
+            }
             // The stores loaded in init(), which may have run before the first
             // unlock after a reboot (prewarming, a push, a Live Activity intent
             // — see DefaultsReadiness). Read again the moment the file can be
@@ -204,6 +221,7 @@ struct MoshpitApp: App {
             .onReceive(NotificationCenter.default.publisher(
                 for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
                 reloadStoresIfNeeded()
+                if scenePhase == .active { Task { await CloudSyncService.shared.sync() } }
             }
             .onChange(of: scenePhase) { _, phase in
                 // iOS kills TCP during suspension; run a foreground keepalive
@@ -216,7 +234,9 @@ struct MoshpitApp: App {
                 switch phase {
                 case .active:
                     reloadStoresIfNeeded()
+                    Task { await CloudSyncService.shared.sync() }
                     hub.setForeground(true)
+                    connectionActivity.setForeground(true)
                     // Re-announce this phone to its relays. Unconditional: a
                     // relay that lost its registry would otherwise never hear
                     // from us again, and every push it was asked to send would
@@ -226,7 +246,9 @@ struct MoshpitApp: App {
                     // deliver the ones whose sessions are live, leave the
                     // rest for the next drain (session start re-drains too).
                     Task { await ShareQueueDrainer.drain(hub: hub) }
-                case .background: hub.setForeground(false)
+                case .background:
+                    hub.setForeground(false)
+                    connectionActivity.setForeground(false)
                 case .inactive:   break
                 @unknown default: break
                 }
@@ -316,7 +338,10 @@ struct RootView: View {
             #if DEBUG
             // Test-only: start from an empty store so UI tests are deterministic.
             if ProcessInfo.processInfo.arguments.contains("-MOSHPIT_RESET") {
-                for c in store.connections { store.delete(id: c.id) }
+                for c in store.connections {
+                    do { try await store.deleteSecurely(id: c.id) }
+                    catch { Log.ssh.error("Test reset could not delete a saved connection credential") }
+                }
                 // Custom themes and the theme selection live in UserDefaults,
                 // which outlives an app reinstall in the simulator — a UI test
                 // asserting on a fresh install would otherwise inherit the
@@ -345,7 +370,8 @@ struct RootView: View {
         // Password smoke tests use the environment so secrets never enter argv.
         // They are persisted only through the same Keychain path as the form.
         let password = ProcessInfo.processInfo.environment["MOSHPIT_SEED_PASSWORD"]
-        let pem = launchArg("-MOSHPIT_SEED_KEY_B64")
+        let pem = (ProcessInfo.processInfo.environment["MOSHPIT_SEED_KEY_B64"]
+            ?? launchArg("-MOSHPIT_SEED_KEY_B64"))
             .flatMap { Data(base64Encoded: $0) }
             .flatMap { String(data: $0, encoding: .utf8) }
         guard password?.isEmpty == false || pem != nil else { return }

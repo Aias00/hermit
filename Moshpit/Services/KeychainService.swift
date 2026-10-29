@@ -56,6 +56,21 @@ protocol KeychainBackend: Sendable {
     func load(account: String, prompt: String) throws -> Data
     func delete(account: String) throws
     func exists(account: String) -> Bool
+    func loadForSync(account: String, allowAuthentication: Bool) throws -> Data
+    func saveForSync(secret: Data, account: String, requireBiometry: Bool) throws
+    func beginSyncExport(allowAuthentication: Bool)
+    func endSyncExport()
+}
+
+extension KeychainBackend {
+    func beginSyncExport(allowAuthentication: Bool) {}
+    func endSyncExport() {}
+    func loadForSync(account: String, allowAuthentication: Bool) throws -> Data {
+        try load(account: account, prompt: "Authorize SSH credential sync")
+    }
+    func saveForSync(secret: Data, account: String, requireBiometry: Bool) throws {
+        try save(secret: secret, account: account, requireBiometry: requireBiometry)
+    }
 }
 
 // MARK: - System keychain backend
@@ -67,9 +82,11 @@ protocol KeychainBackend: Sendable {
 /// by `KeychainService.generateRef()`. When `requireBiometry` is true the
 /// item is gated by `.userPresence`, which prompts Face ID / Touch ID / device
 /// passcode on every read.
-final class SystemKeychainBackend: KeychainBackend {
+final class SystemKeychainBackend: KeychainBackend, @unchecked Sendable {
     private let service: String
     private let accessGroup: String?
+    private let syncContextLock = NSLock()
+    private var syncContext: LAContext?
 
     init(service: String = Bundle.main.bundleIdentifier ?? "com.cluas.moshpit",
          accessGroup: String? = nil) {
@@ -79,8 +96,8 @@ final class SystemKeychainBackend: KeychainBackend {
 
     /// Common attributes for every keychain operation. `kSecUseDataProtectionKeychain`
     /// pins us to the modern data-protection keychain, which:
-    ///   - Doesn't require a `keychain-access-groups` entitlement on unsigned
-    ///     simulator builds (legacy path fails with -34018 there).
+    ///   - Still requires a signed app on Simulator; ad hoc signing suffices
+    ///     for the app's private group. Unsigned writes can fail with -34018.
     ///   - Sandboxes items to the app by default (no implicit team-group sharing).
     ///   - Is what Apple recommends for new code on iOS 13+.
     private func baseQuery(account: String) -> [String: Any] {
@@ -130,6 +147,45 @@ final class SystemKeychainBackend: KeychainBackend {
     func load(account: String, prompt: String) throws -> Data {
         let context = LAContext()
         context.localizedReason = prompt
+        return try load(account: account, context: context)
+    }
+
+    func loadForSync(account: String, allowAuthentication: Bool) throws -> Data {
+        syncContextLock.lock()
+        let context = syncContext ?? LAContext()
+        syncContextLock.unlock()
+        context.localizedReason = String(localized: "Authorize SSH credential sync")
+        context.interactionNotAllowed = !allowAuthentication
+        return try load(account: account, context: context)
+    }
+
+    func beginSyncExport(allowAuthentication: Bool) {
+        let context = LAContext()
+        context.localizedReason = String(localized: "Authorize SSH credential sync")
+        context.interactionNotAllowed = !allowAuthentication
+        syncContextLock.lock()
+        syncContext?.invalidate(); syncContext = context
+        syncContextLock.unlock()
+    }
+
+    func endSyncExport() {
+        syncContextLock.lock()
+        syncContext?.invalidate(); syncContext = nil
+        syncContextLock.unlock()
+    }
+
+    /// An interrupted restore must never delete the existing SSH credential.
+    /// Updates retain its local access-control policy; new items get the
+    /// policy requested by their SSH key metadata.
+    func saveForSync(secret: Data, account: String, requireBiometry: Bool) throws {
+        let status = SecItemUpdate(baseQuery(account: account) as CFDictionary,
+                                  [kSecValueData as String: secret] as CFDictionary)
+        if status == errSecItemNotFound {
+            try save(secret: secret, account: account, requireBiometry: requireBiometry)
+        } else if status != errSecSuccess { throw KeychainError(osStatus: status) }
+    }
+
+    private func load(account: String, context: LAContext) throws -> Data {
 
         var query = baseQuery(account: account)
         query[kSecReturnData as String] = true
@@ -384,5 +440,25 @@ actor KeychainService {
 
     func contains(ref: String) -> Bool {
         backend.exists(account: ref)
+    }
+
+    /// iCloud can reach only ordinary SSH items, never provider sessions,
+    /// Tailcat capabilities, Tailscale node identities, or TOFU trust.
+    nonisolated static func isPortableSSHReference(_ ref: String) -> Bool {
+        let prefix = "moshpit.secret."
+        return ref.hasPrefix(prefix) && UUID(uuidString: String(ref.dropFirst(prefix.count))) != nil
+    }
+
+    func exportSSHSecret(ref: String, allowAuthentication: Bool) throws -> Data {
+        guard Self.isPortableSSHReference(ref) else { throw KeychainError.invalidData }
+        return try backend.loadForSync(account: ref, allowAuthentication: allowAuthentication)
+    }
+
+    func beginSSHSyncExport(allowAuthentication: Bool) { backend.beginSyncExport(allowAuthentication: allowAuthentication) }
+    func endSSHSyncExport() { backend.endSyncExport() }
+
+    func restoreSSHSecret(_ data: Data, ref: String, requireBiometry: Bool) throws {
+        guard Self.isPortableSSHReference(ref) else { throw KeychainError.invalidData }
+        try backend.saveForSync(secret: data, account: ref, requireBiometry: requireBiometry)
     }
 }

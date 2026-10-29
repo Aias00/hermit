@@ -130,6 +130,11 @@ protocol MultiplexerControlling: AnyObject, Observable {
     /// up bare and grows its agent a reply later.
     var agentHooksLoaded: Bool { get }
 
+    /// Last successful remote observation of the hook snapshot. Inherited
+    /// cache, transport liveness, malformed replies and read failures do not
+    /// advance this date. nil means this controller has not verified it yet.
+    var agentHooksObservedAt: Date? { get }
+
     /// Invoked on the main actor once ``agentHooks`` has been rebuilt, so the
     /// Vibe Island can re-sync immediately instead of waiting for its next
     /// sweep.
@@ -174,5 +179,6 @@ protocol MultiplexerControlling: AnyObject, Observable {
 }
 
 extension MultiplexerControlling {
+    var agentHooksObservedAt: Date? { nil }
     func worktreeRepo(for sessionId: String) -> String? { nil }
 }

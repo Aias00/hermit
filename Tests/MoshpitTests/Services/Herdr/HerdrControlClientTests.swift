@@ -15,6 +15,8 @@ struct HerdrControlClientTests {
 
         private let lock = NSLock()
         private var _commands: [String] = []
+        private var _inputs: [Data] = []
+        private var _socketResponse = #"{"socket":"/tmp/herdr-review.sock"}"# + "\n__moshpit_rc=0"
         private var _response: String
         private var _failNext = false
         private var _script: (@Sendable (String) -> Scripted)?
@@ -22,7 +24,10 @@ struct HerdrControlClientTests {
         init(response: String = "") { _response = response }
 
         var commands: [String] { lock.withLock { _commands } }
+        var inputs: [Data] { lock.withLock { _inputs } }
+        var inputObjects: [[String: Any]] { inputs.compactMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } }
         func setResponse(_ value: String) { lock.withLock { _response = value } }
+        func setSocketResponse(_ value: String) { lock.withLock { _socketResponse = value } }
         func failNext() { lock.withLock { _failNext = true } }
         /// Route each command to its own behaviour — the single-response
         /// fields above cover the older single-command tests.
@@ -30,9 +35,33 @@ struct HerdrControlClientTests {
             lock.withLock { _script = script }
         }
 
+        func run(_ command: String, standardInput: Data) async throws -> String {
+            lock.withLock { _inputs.append(standardInput) }
+            let response = try await run(command)
+            guard let request = try JSONSerialization.jsonObject(with: standardInput) as? [String: Any],
+                  let id = request["id"] as? String else { return response }
+            let object: [String: Any]
+            switch response {
+            case "__moshpit_rc=0": object = ["id": id, "result": [:]]
+            case "__moshpit_rc=1": object = ["id": id, "error": ["code": "pane_not_found"]]
+            case "unknown-input-method", "unknown-input-method-empty-id":
+                object = ["id": response.hasSuffix("empty-id") ? "" : id, "error": ["code": "invalid_request", "message":
+                    "invalid request: unknown variant `pane.send_input`, expected one of `pane.send_text`, `pane.send_keys` at line 1 column 98"]]
+            case "invalid-input-params":
+                object = ["id": id, "error": ["code": "invalid_request", "message":
+                    "invalid request: missing field `pane_id` at line 1 column 98"]]
+            case "invalid-key-variant":
+                object = ["id": id, "error": ["code": "invalid_request", "message":
+                    "invalid request: unknown variant `enter`, expected one of `up`, `down` at line 1 column 98"]]
+            default: return response
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        }
+
         func run(_ command: String) async throws -> String {
             let action: Scripted = lock.withLock {
                 _commands.append(command)
+                if command.contains("status server --json") { return .reply(_socketResponse) }
                 if let script = _script { return script(command) }
                 if _failNext {
                     _failNext = false
@@ -66,12 +95,13 @@ struct HerdrControlClientTests {
         client.sendKey("left", paneId: "w1:p1")
         client.sendBytes(Data("中文".utf8), paneId: "w1:p1")
         try await client.submitLine("draft", paneId: "w1:p1")
-        let commands = runner.commands.filter { !$0.contains("api snapshot") }
+        let commands = runner.commands.filter { !$0.contains("api snapshot") && !$0.contains("status server --json") }
         #expect(commands.count == 4)
-        #expect(commands[0].contains("pane send-text 'w1:p1' 'abc'"))
+        #expect(runner.inputObjects[0]["method"] as? String == "pane.send_text")
+        #expect((runner.inputObjects[0]["params"] as? [String: String])?["text"] == "abc")
         #expect(commands[1].contains("pane send-keys 'w1:p1' 'left'"))
-        #expect(commands[2].contains("pane send-text 'w1:p1' '中文'"))
-        #expect(commands[3].contains("pane run 'w1:p1' 'draft'"))
+        #expect((runner.inputObjects[1]["params"] as? [String: String])?["text"] == "中文")
+        #expect(runner.inputObjects[2]["method"] as? String == "pane.send_input")
         client.stop()
     }
 
@@ -82,7 +112,7 @@ struct HerdrControlClientTests {
         client.sendBytes(Data("abc".utf8), paneId: "w1:p1")
         client.sendKey("up", paneId: "w1:p1")
         do { try await client.flushInput(); Issue.record("must fail") } catch {}
-        #expect(runner.commands.count == 1)
+        #expect(runner.commands.filter { !$0.contains("status server --json") }.count == 1)
         client.stop()
     }
 
@@ -92,10 +122,11 @@ struct HerdrControlClientTests {
         let client = HerdrControlClient(runner: runner)
         let text = "hello 'quoted'\nsecond line"
         try await client.submitLine(text, paneId: "w1:p2")
-        let sends = runner.commands.filter { $0.contains("pane run ") }
-        #expect(sends.count == 1)
-        #expect(sends[0].contains(HerdrLaunch.quote(text)))
-        #expect(!sends[0].contains("pane send-keys"))
+        #expect(runner.inputs.count == 1)
+        let params = runner.inputObjects[0]["params"] as? [String: Any]
+        #expect(params?["text"] as? String == text)
+        #expect(params?["keys"] as? [String] == ["enter"])
+        #expect(!runner.commands.joined().contains(text))
         client.stop()
     }
 
@@ -108,7 +139,7 @@ struct HerdrControlClientTests {
                 try await client.submitLine("test", paneId: "w1:p2", timeout: 0.1)
                 Issue.record("must retain draft when the command is not confirmed")
             } catch {}
-            #expect(runner.commands.filter { $0.contains("pane run ") }.count == 1)
+            #expect(runner.inputs.count == 1)
             client.stop()
         }
     }
@@ -124,7 +155,158 @@ struct HerdrControlClientTests {
             Issue.record("a hung command cannot be acknowledged")
         } catch {}
         #expect(Date().timeIntervalSince(began) < 1)
-        #expect(runner.commands.count == 1)
+        #expect(runner.commands.filter { !$0.contains("status server --json") }.count == 1)
+        client.stop()
+    }
+
+    @Test("New input recovers after failure without replaying already-queued Enter")
+    func freshInputAfterFailure() async throws {
+        let runner = FakeRunner(response: "__moshpit_rc=1")
+        let client = HerdrControlClient(runner: runner)
+        client.sendBytes(Data("failed text".utf8), paneId: "w1:p1")
+        client.sendKey("enter", paneId: "w1:p1")
+        do { try await client.flushInput(); Issue.record("must reject") } catch {}
+        runner.setResponse("__moshpit_rc=0")
+        try await client.submitLine("new command", paneId: "w2:p1")
+        #expect(runner.inputs.count == 2)
+        #expect(!runner.commands.contains { $0.contains("send-keys") })
+        #expect(client.inputError == nil)
+        client.stop()
+    }
+
+    @Test("Keyboard bytes use terminal stdin even on hosts without Python")
+    func keyboardUsesRawWriter() async throws {
+        let runner = FakeRunner(response: "MOSHPIT_PRIVATE_INPUT_UNAVAILABLE\n")
+        let client = HerdrControlClient(runner: runner)
+        var written = Data()
+        client.rawInputWriter = { bytes, _ in written.append(bytes) }
+        let secret = Data([0, 0xff]) + Data("password with ' quotes".utf8)
+        client.sendBytes(secret, paneId: "w1:p1")
+        try await client.flushInput()
+        #expect(written == secret)
+        #expect(runner.commands.isEmpty)
+        client.stop()
+    }
+
+    @Test("A known missing Python safely falls back once, but an uncertain reply never does")
+    func privateSubmitFallback() async throws {
+        for response in ["MOSHPIT_PRIVATE_INPUT_UNAVAILABLE\n", "missing acknowledgement"] {
+            let runner = FakeRunner(response: response)
+            let client = HerdrControlClient(runner: runner)
+            var fallback: [String] = []
+            client.rawSubmitWriter = { text, _ in fallback.append(text) }
+            do { try await client.submitLine("secret-value", paneId: "w1:p1") }
+            catch { #expect(response == "missing acknowledgement") }
+            #expect(fallback.count == (response.hasPrefix("MOSHPIT_PRIVATE") ? 1 : 0))
+            #expect(!runner.commands.joined().contains("secret-value"))
+            #expect(runner.inputs.count == 1)
+            client.stop()
+        }
+    }
+
+    @Test("Only an explicit missing method permits private input fallback",
+          arguments: ["unknown-input-method", "unknown-input-method-empty-id", "invalid-input-params", "invalid-key-variant"])
+    func oldServerMethodFallback(response: String) async throws {
+        let runner = FakeRunner(response: response)
+        let client = HerdrControlClient(runner: runner)
+        var fallback: [String] = []
+        client.rawSubmitWriter = { text, _ in fallback.append(text) }
+        do { try await client.submitLine("sensitive draft", paneId: "w1:p1") }
+        catch { #expect(!response.hasPrefix("unknown-input-method")) }
+        #expect(fallback.count == (response.hasPrefix("unknown-input-method") ? 1 : 0))
+        #expect(runner.inputs.count == 1)
+        #expect(!runner.commands.joined().contains("sensitive draft"))
+        client.stop()
+    }
+
+    @Test("Private input discovers the configured herdr endpoint and caches it")
+    func privateInputUsesConfiguredEndpoint() async throws {
+        let runner = FakeRunner(response: "__moshpit_rc=0")
+        let socket = "/tmp/custom session's herdr.sock"
+        runner.setSocketResponse("{\"socket\":\"\(socket)\"}\n__moshpit_rc=0")
+        let client = HerdrControlClient(runner: runner, customPath: "/opt/custom-herdr --session work")
+        try await client.submitLine("first secret", paneId: "w1:p1")
+        try await client.submitLine("second secret", paneId: "w1:p1")
+        let discovery = runner.commands.filter { $0.contains("status server --json") }
+        #expect(discovery.count == 1)
+        #expect(discovery[0].contains("/opt/custom-herdr --session work status server --json"))
+        let bridges = runner.commands.filter { $0.contains("python3 -c") }
+        #expect(bridges.count == 2)
+        #expect(bridges.allSatisfy { $0.contains(HerdrLaunch.quote(socket)) })
+        #expect(!bridges.joined().contains(".config/herdr/herdr.sock"))
+        #expect(!runner.commands.joined().contains("secret"))
+        client.stop()
+    }
+
+    @Test("No discoverable endpoint falls back without touching a default server")
+    func missingEndpointUsesTerminal() async throws {
+        let runner = FakeRunner(response: "__moshpit_rc=0")
+        runner.setSocketResponse("unsupported command\n__moshpit_rc=1")
+        let client = HerdrControlClient(runner: runner, customPath: "/opt/old-herdr")
+        var written: [String] = []
+        client.rawSubmitWriter = { text, _ in written.append(text) }
+        try await client.submitLine("private draft", paneId: "w1:p1")
+        #expect(written == ["private draft"])
+        #expect(runner.inputs.isEmpty)
+        #expect(!runner.commands.contains { $0.contains("python3") })
+        client.stop()
+    }
+
+    @Test("Raw submit rejects an unknown paste mode before creating input bytes")
+    func rawSubmitRejectsUnknownMode() {
+        #expect(throws: HerdrControlClient.SubmissionError.pasteUnavailable) {
+            try HerdrControlClient.rawSubmitPayload("retained draft", bracketedPasteMode: nil)
+        }
+    }
+
+    @Test("Raw submit preserves multiline text and appends one Enter using the known remote mode",
+          arguments: [true, false])
+    func rawSubmitUsesKnownMode(bracketed: Bool) throws {
+        let text = "第一行\nsecond 'quoted' line"
+        let payload = try HerdrControlClient.rawSubmitPayload(text, bracketedPasteMode: bracketed)
+        let expected = bracketed ? "\u{1b}[200~" + text + "\u{1b}[201~\r" : text + "\r"
+        #expect(payload == Data(expected.utf8))
+        #expect(payload.filter { $0 == 0x0d }.count == 1)
+    }
+
+    @Test("An unknown frame paste mode stops fallback before any terminal write")
+    func framePasteFallbackPreservesDraft() async {
+        let runner = FakeRunner(response: "unknown-input-method")
+        let client = HerdrControlClient(runner: runner)
+        var attempts = 0
+        var written = Data()
+        client.rawSubmitWriter = { text, _ in
+            attempts += 1
+            written.append(try HerdrControlClient.rawSubmitPayload(text, bracketedPasteMode: nil))
+        }
+        do {
+            try await client.submitLine("retained draft", paneId: "w1:p1")
+            Issue.record("a frame-only client must not report an unsafe paste as accepted")
+        } catch {
+            #expect(error as? HerdrControlClient.SubmissionError == .pasteUnavailable)
+        }
+        #expect(attempts == 1)
+        #expect(written.isEmpty)
+        #expect(runner.inputObjects.count == 1)
+        #expect(runner.inputObjects.first?["method"] as? String == "pane.send_input")
+        #expect(!runner.commands.contains { $0.contains("send-keys") })
+        #expect(client.inputError == HerdrControlClient.SubmissionError.pasteUnavailable.errorDescription)
+        client.stop()
+    }
+
+    @Test("Unavailable paste without a mode-aware writer gives an actionable error")
+    func unavailablePasteWithoutFallback() async {
+        let runner = FakeRunner(response: "__moshpit_rc=0")
+        runner.setSocketResponse("unsupported command\n__moshpit_rc=1")
+        let client = HerdrControlClient(runner: runner)
+        do {
+            try await client.submitLine("retained draft", paneId: "w1:p1")
+            Issue.record("undiscoverable endpoint cannot accept a draft")
+        } catch {
+            #expect(error as? HerdrControlClient.SubmissionError == .pasteUnavailable)
+        }
+        #expect(runner.inputs.isEmpty)
+        #expect(client.inputError?.contains("python3") == true)
         client.stop()
     }
 
@@ -165,6 +347,43 @@ struct HerdrControlClientTests {
     }
 
     // MARK: - Reading
+
+    @Test("Hook observation time advances only for verified snapshots or a stopped server")
+    func hookObservationRequiresVerifiedRead() async throws {
+        let runner = FakeRunner(response: "shell noise")
+        let client = HerdrControlClient(runner: runner)
+        defer { client.stop() }
+        #expect(client.agentHooksObservedAt == nil)
+        await client.pollNowForTesting()
+        #expect(client.agentHooksObservedAt == nil)
+
+        runner.setResponse(Self.twoWorkspaces)
+        await client.pollNowForTesting()
+        let first = try #require(client.agentHooksObservedAt)
+        let beforeFailures = client.snapshot
+        runner.failNext()
+        await client.pollNowForTesting()
+        #expect(client.agentHooksObservedAt == first)
+        runner.setResponse("{\"workspaces\":[")
+        await client.pollNowForTesting()
+        #expect(client.agentHooksObservedAt == first)
+        #expect(client.snapshot == beforeFailures)
+
+        // A complete stdout payload with a failed exit still cannot certify
+        // freshness. A later identical successful observation can.
+        runner.setResponse(Self.twoWorkspaces + "\n__moshpit_rc=1")
+        await client.pollNowForTesting()
+        #expect(client.agentHooksObservedAt == first)
+        runner.setResponse(Self.twoWorkspaces)
+        await client.pollNowForTesting()
+        let renewed = try #require(client.agentHooksObservedAt)
+        #expect(renewed > first)
+
+        runner.setResponse("{\"error\":{\"code\":\"server_not_running\"}}")
+        await client.pollNowForTesting()
+        #expect(client.snapshot.sessions.isEmpty)
+        #expect(try #require(client.agentHooksObservedAt) > renewed)
+    }
 
     @Test("First poll populates the tree")
     func firstPollPopulates() async {
@@ -809,6 +1028,144 @@ struct HerdrControlClientTests {
     }
 
     // MARK: - Lifecycle
+
+    /// Explicitly releases replies, including after cancellation, to model
+    /// slow SSH exec futures without relying on wall-clock sleeps or a host.
+    final class HeldSnapshotRunner: HerdrCommandRunner, @unchecked Sendable {
+        private let lock = NSLock()
+        private var calls = 0
+        private var inFlight = 0
+        private var peak = 0
+        private var replies: [Int: CheckedContinuation<String, Error>] = [:]
+        var count: Int { lock.withLock { calls } }
+        var maximumInFlight: Int { lock.withLock { peak } }
+
+        func run(_ command: String) async throws -> String {
+            guard command.contains("api snapshot") else { return "__moshpit_rc=0" }
+            return try await withCheckedThrowingContinuation { continuation in
+                lock.withLock {
+                    let index = calls
+                    calls += 1
+                    inFlight += 1
+                    peak = max(peak, inFlight)
+                    replies[index] = continuation
+                }
+            }
+        }
+
+        func complete(_ index: Int, with result: Result<String, Error>) {
+            let continuation = lock.withLock {
+                let continuation = replies.removeValue(forKey: index)
+                if continuation != nil { inFlight -= 1 }
+                return continuation
+            }
+            continuation?.resume(with: result)
+        }
+
+        func finishAll() {
+            let pending = lock.withLock {
+                let pending = Array(replies.values)
+                replies.removeAll()
+                inFlight = 0
+                return pending
+            }
+            for reply in pending { reply.resume(throwing: SSHError.sessionClosed) }
+        }
+    }
+
+    @Test("Slow snapshots coalesce push bursts into one trailing refresh and retain awaited completion")
+    func slowSnapshotsCoalesce() async {
+        let runner = HeldSnapshotRunner()
+        let client = HerdrControlClient(runner: runner)
+        defer { client.stop(); runner.finishAll() }
+        var firstFinished = false
+        let first = Task { await client.pollNowForTesting(); firstFinished = true }
+        await settle(until: { runner.count == 1 })
+
+        for _ in 0..<30 { client.quicken() }
+        var trailingFinished = false
+        let trailing = Task { await client.pollNowForTesting(); trailingFinished = true }
+        await settle()
+        #expect(runner.count == 1)
+        #expect(runner.maximumInFlight == 1)
+        #expect(!firstFinished && !trailingFinished)
+
+        runner.complete(0, with: .success(Self.twoWorkspaces))
+        await settle(until: { runner.count == 2 })
+        #expect(firstFinished, "the first caller need not wait for a newer requested refresh")
+        #expect(!trailingFinished, "a refresh requested during a read must wait for its trailing read")
+        let updated = Self.twoWorkspaces.replacingOccurrences(of: #""focused_pane_id":"w1:p2""#,
+                                                              with: #""focused_pane_id":"w1:p1""#)
+        runner.complete(1, with: .success(updated))
+        await first.value
+        await trailing.value
+        await settle()
+        #expect(runner.count == 2)
+        #expect(runner.maximumInFlight == 1)
+        #expect(client.snapshot.activePaneId == "w1:p1")
+    }
+
+    @Test("Events during the trailing read get one later read without overlapping SSH channels")
+    func eventsDuringTrailingReadAreNotLost() async {
+        let runner = HeldSnapshotRunner()
+        let client = HerdrControlClient(runner: runner)
+        defer { client.stop(); runner.finishAll() }
+        client.quicken()
+        await settle(until: { runner.count == 1 })
+        client.quicken()
+        await settle()
+        runner.complete(0, with: .success(Self.twoWorkspaces))
+        await settle(until: { runner.count == 2 })
+        for _ in 0..<10 { client.quicken() }
+        await settle()
+        #expect(runner.count == 2)
+        runner.complete(1, with: .failure(SSHError.sessionClosed))
+        await settle(until: { runner.count == 3 })
+        #expect(client.snapshot.activePaneId == "w1:p2", "a failed read keeps the last tree")
+        runner.complete(2, with: .success(Self.twoWorkspaces))
+        await settle()
+        #expect(runner.count == 3)
+        #expect(runner.maximumInFlight == 1)
+    }
+
+    @Test("Stopping releases refresh waiters and rejects a late old reply after restart")
+    func stoppedSnapshotCannotOverwriteRestart() async {
+        let runner = HeldSnapshotRunner()
+        let client = HerdrControlClient(runner: runner)
+        defer { client.stop(); runner.finishAll() }
+        var firstFinished = false
+        var trailingFinished = false
+        var focused: [String] = []
+        client.onFocusedPaneChanged = { focused.append($0) }
+        let first = Task { await client.pollNowForTesting(); firstFinished = true }
+        await settle(until: { runner.count == 1 })
+        let trailing = Task { await client.pollNowForTesting(); trailingFinished = true }
+        await settle()
+
+        client.stop()
+        await settle(until: { firstFinished && trailingFinished })
+        #expect(firstFinished && trailingFinished, "stop must not wait for an uncooperative SSH future")
+        client.quicken()
+        client.refresh()
+        await settle()
+        #expect(runner.count == 1)
+        #expect(!client.isRefreshing)
+        client.start()
+        await settle(until: { runner.count == 2 })
+        let updated = Self.twoWorkspaces.replacingOccurrences(of: #""focused_pane_id":"w1:p2""#,
+                                                              with: #""focused_pane_id":"w1:p1""#)
+        runner.complete(1, with: .success(updated))
+        await settle(until: { client.snapshot.activePaneId == "w1:p1" })
+        let successfulPoll = client.lastSuccessfulPoll
+        runner.complete(0, with: .success(Self.twoWorkspaces))
+        await first.value
+        await trailing.value
+        await settle()
+        #expect(client.snapshot.activePaneId == "w1:p1")
+        #expect(focused == ["w1:p1"])
+        #expect(client.lastSuccessfulPoll == successfulPoll)
+        #expect(runner.count == 2)
+    }
 
     @Test("stop() ends the polling")
     func stopEndsPolling() async {

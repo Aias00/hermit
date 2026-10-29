@@ -105,6 +105,15 @@ struct HostCapabilities: Codable, Equatable, Sendable {
         "PATH=\"$PATH:\(extraPathDirs)\" command -v tmux mosh-server herdr python3; " +
         "echo \"::$(uname -s)::$(PATH=\"$PATH:\(extraPathDirs)\" command -v apt-get dnf yum pacman apk brew 2>/dev/null | head -1)\""
 
+    /// A Cloudflare Shell is usable without installing a multiplexer. Only
+    /// inspect dependencies of the selected mode; these partial results never
+    /// replace the full capability cache used by existing direct connections.
+    static func probeCommand(for multiplexer: Multiplexer) -> String {
+        let tools = ([multiplexer.binaryName].compactMap { $0 } + ["python3"]).joined(separator: " ")
+        return "PATH=\"$PATH:\(extraPathDirs)\" command -v \(tools); "
+            + "echo \"::$(uname -s)::$(PATH=\"$PATH:\(extraPathDirs)\" command -v apt-get dnf yum pacman apk brew 2>/dev/null | head -1)\""
+    }
+
     /// Parse the probe stdout. Lines before the `::os::pkg` marker are the
     /// resolved paths of whatever `command -v tmux mosh-server` found; a line
     /// ending in `/tmux` (or just `tmux`) means tmux is on PATH, same for
@@ -225,6 +234,7 @@ final class HostCapabilityCache {
     static let shared = HostCapabilityCache()
 
     private var memory: [UUID: HostCapabilities] = [:]
+    private var generations: [UUID: UUID] = [:]
     private let defaults: UserDefaults
     private let keyPrefix = "hostcaps."
 
@@ -241,6 +251,12 @@ final class HostCapabilityCache {
         return decoded
     }
 
+    func invalidate(_ id: UUID) {
+        generations[id] = UUID()
+        memory[id] = nil
+        defaults.removeObject(forKey: keyPrefix + id.uuidString)
+    }
+
     func store(_ caps: HostCapabilities, for id: UUID) {
         memory[id] = caps
         if let data = try? JSONEncoder().encode(caps) {
@@ -255,9 +271,11 @@ final class HostCapabilityCache {
     /// optimistic default would retry `tmux -CC attach` on a tmux-less box and
     /// stall — a `nil` means "no new information", not "all present".
     func probe(over ssh: SSHSession, for id: UUID) async -> HostCapabilities? {
+        let generation = generations[id]
         guard let output = try? await ssh.executeCommand(HostCapabilities.probeCommand),
               let text = String(data: output, encoding: .utf8)
         else { return nil }
+        guard generations[id] == generation else { return nil }
         let caps = HostCapabilities.parse(text)
         store(caps, for: id)
         return caps

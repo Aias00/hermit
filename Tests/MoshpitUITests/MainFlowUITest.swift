@@ -19,7 +19,7 @@ final class MainFlowUITest: XCTestCase {
         app.launch()
 
         // 1. Home: large "Attach" title
-        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.buttons["home-add"].waitForExistence(timeout: 5),
                       "Moshpit title should be visible at launch")
 
         // 2. ＋ opens Add Connection
@@ -43,26 +43,28 @@ final class MainFlowUITest: XCTestCase {
         XCTAssertTrue(app.reveal(app.staticTexts["Use Mosh"]))
         XCTAssertFalse(app.staticTexts["Roam on Cellular"].exists,
                        "mosh tuning rows must stay hidden while Use Mosh is off")
-        app.switches["toggle-use-mosh"].tap()
+        app.switches.matching(NSPredicate(format: "label == %@", "Use Mosh")).firstMatch
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
         XCTAssertTrue(app.staticTexts["Roam on Cellular"].waitForExistence(timeout: 3),
                       "enabling Use Mosh should reveal the tuning rows")
-        app.switches["toggle-use-mosh"].tap()
+        app.switches.matching(NSPredicate(format: "label == %@", "Use Mosh")).firstMatch
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
 
         // 5. SSH Key auth reveals the PEM editor
-        app.buttons["SSH Key"].firstMatch.tap()
+        let keyAuthentication = app.buttons["SSH Key"].firstMatch
+        XCTAssertTrue(app.reveal(keyAuthentication))
+        keyAuthentication.tap()
         XCTAssertTrue(app.textViews["private-key-editor"].waitForExistence(timeout: 3),
                       "PEM editor should appear after switching to SSH Key auth")
 
         // 6. Cancel back to home
         app.navigationBars["新建 Host"].buttons["Cancel"].tap()
-        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["home-add"].waitForExistence(timeout: 3))
 
         // 7. Gear opens Settings with prototype groups
-        app.buttons["主机与设置"].tap()
-        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Font"].exists)
+        XCTAssertTrue(app.reveal(app.buttons["settings-font-menu"]))
         // Settings is a lazy Form: rows below the fold don't exist to XCUI
         // until scrolled into view.
         XCTAssertTrue(app.reveal(app.staticTexts["Trail on predict"]))
@@ -119,7 +121,7 @@ final class MainFlowUITest: XCTestCase {
 
         // 10. Done returns home
         app.navigationBars["Settings"].buttons["Done"].tap()
-        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["home-add"].waitForExistence(timeout: 3))
     }
 
     /// The other side of the storefront line: bought anywhere but the mainland
@@ -131,10 +133,8 @@ final class MainFlowUITest: XCTestCase {
         app.launchArguments += ["-MOSHPIT_RESET", MainlandStorefrontArgs.mainland, "USA"]
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["home-add"].waitForExistence(timeout: 5))
 
-        app.buttons["主机与设置"].tap()
-        app.buttons["launchpad-tab-2"].tap()
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 3))
         // The build-identity line proves the footer rendered before we assert
@@ -157,7 +157,7 @@ final class MainFlowUITest: XCTestCase {
         app.launchArguments += ["-MOSHPIT_RESET"]   // empty store, under the free cap
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.buttons["主机与设置"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["home-add"].waitForExistence(timeout: 5))
 
         // Add a connection named "QA-Delete".
         app.buttons["home-add"].tap()

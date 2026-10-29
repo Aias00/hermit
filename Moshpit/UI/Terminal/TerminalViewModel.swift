@@ -1,5 +1,16 @@
 import Foundation
 import Observation
+import MoshpitKit
+
+/// Unsent input belongs to the live connection, including while its screen is
+/// offscreen. Keep it in memory only; terminal text may contain credentials.
+@Observable
+@MainActor
+final class TerminalComposerDraft {
+    var text = ""
+    var isSending = false
+    var errorMessage: String?
+}
 
 /// View model that owns the SSH session lifecycle for a single terminal screen.
 ///
@@ -37,8 +48,23 @@ final class TerminalViewModel {
     }
 
     let connection: ServerConnection
+    /// Correlate recovery with the configured route without logging a host,
+    /// username, credential or user-authored connection name.
+    var diagnosticSessionLabel: String {
+        "session[\(connection.id.uuidString)] route=\(connection.transport?.rawValue ?? "unsupported")"
+    }
+
+    private func logConnectionPhase(_ phase: String, generation: Int,
+                                    recovery: ConnectionFailure.Recovery? = nil) {
+        let decision = recovery.map { String(describing: $0) } ?? "-"
+        Log.ssh.notice("\(self.diagnosticSessionLabel, privacy: .public) primary-attempt=\(generation) phase=\(phase, privacy: .public) automatic=\(self.isAutoReconnectInFlight) recovery=\(decision, privacy: .public)")
+    }
+
     private(set) var status: Status = .idle
     var errorMessage: String?
+    private(set) var connectionFailure: ConnectionFailure?
+    var allowsAutomaticRetry: Bool { connectionFailure?.recovery == .retry || connectionFailure == nil }
+    var requiresAccessLogin: Bool { connectionFailure?.recovery == .login }
 
     /// What every surface showing this session's health should read.
     ///
@@ -105,6 +131,11 @@ final class TerminalViewModel {
     /// redial that had replaced it — as a stale `.failed`, or as a second
     /// session adopted over the live one.
     @ObservationIgnored private var dialGeneration = 0
+    @ObservationIgnored private var awaitingSSHGeneration: Int?
+    /// A tunnel's dial/auth deadlines apply until SSH returns. Opening its
+    /// PTY is a separate phase and must retain the existing stalled recovery.
+    var isAwaitingSSHConnection: Bool { awaitingSSHGeneration == dialGeneration }
+    @ObservationIgnored private var rejectedHostKey = false
     /// Chains outgoing writes so rapid-fire input (type a word, then
     /// immediately tap an arrow key) can't reorder at the transport —
     /// independently-spawned `Task`s have no FIFO guarantee relative to each
@@ -127,15 +158,28 @@ final class TerminalViewModel {
     /// Suspend the SSH handshake until the user answers the host-key prompt.
     private func promptForHostKey(host: String, port: Int,
                                   fingerprint: String,
-                                  previous: String?) async -> Bool {
-        await withCheckedContinuation { continuation in
+                                  previous: String?, generation: Int) async -> Bool {
+        guard generation == dialGeneration else { return false }
+        return await withCheckedContinuation { continuation in
+            var decided = false
             hostKeyPrompt = HostKeyPrompt(
                 host: host, port: port,
                 fingerprint: fingerprint,
                 previousFingerprint: previous
             ) { [weak self] trusted in
-                self?.hostKeyPrompt = nil
-                continuation.resume(returning: trusted)
+                guard !decided else { return }
+                decided = true
+                let current = self?.dialGeneration == generation
+                if current {
+                    self?.hostKeyPrompt = nil
+                    if !trusted {
+                        // Citadel can surface only a later channel timeout.
+                        // Keep the user's decision and stop retries immediately.
+                        self?.rejectedHostKey = true
+                        self?.fail(HostKeyRejected())
+                    }
+                }
+                continuation.resume(returning: trusted && current)
             }
         }
     }
@@ -148,15 +192,16 @@ final class TerminalViewModel {
     /// that used to race concurrent sessions.
     private func hostKeyHandlers() -> (onUnknown: SSHService.TrustNewHostHandler,
                                        onChanged: SSHService.AcceptChangedHostHandler) {
+        let generation = dialGeneration
         let onUnknown: SSHService.TrustNewHostHandler = { [weak self] host, port, fingerprint in
             guard let self else { return false }
             return await self.promptForHostKey(
-                host: host, port: port, fingerprint: fingerprint, previous: nil)
+                host: host, port: port, fingerprint: fingerprint, previous: nil, generation: generation)
         }
         let onChanged: SSHService.AcceptChangedHostHandler = { [weak self] host, port, newFingerprint, oldFingerprint in
             guard let self else { return false }
             return await self.promptForHostKey(
-                host: host, port: port, fingerprint: newFingerprint, previous: oldFingerprint)
+                host: host, port: port, fingerprint: newFingerprint, previous: oldFingerprint, generation: generation)
         }
         return (onUnknown, onChanged)
     }
@@ -164,6 +209,7 @@ final class TerminalViewModel {
     /// Flag the UI that a live transport dropped and we're auto-reconnecting.
     /// Only from a previously-live state — never interrupts an initial connect.
     func markReconnecting() {
+        guard allowsAutomaticRetry else { return }
         switch status {
         case .connected, .disconnected, .failed:
             status = .reconnecting
@@ -188,6 +234,7 @@ final class TerminalViewModel {
             session = nil
             status = .idle
             errorMessage = nil
+            connectionFailure = nil
         }
     }
 
@@ -204,26 +251,42 @@ final class TerminalViewModel {
         guard case .idle = status else { return }
         status = .connecting
         dialGeneration += 1
+        rejectedHostKey = false
         let generation = dialGeneration
+        awaitingSSHGeneration = generation
+        defer {
+            if awaitingSSHGeneration == generation { awaitingSSHGeneration = nil }
+        }
+        var pendingSession: SSHSession?
+        var phase = "ssh"
+        logConnectionPhase("pty-dial.started", generation: generation)
         do {
             let handlers = hostKeyHandlers()
             let newSession = try await dial(connection, handlers.onUnknown, handlers.onChanged)
+            if awaitingSSHGeneration == generation { awaitingSSHGeneration = nil }
+            pendingSession = newSession
             guard generation == dialGeneration else { await newSession.close(); return }
+            if rejectedHostKey { throw HostKeyRejected() }
+            phase = "pty"
+            logConnectionPhase("ssh.connected", generation: generation)
             try await newSession.requestPTY(rows: rows, cols: cols)
             guard generation == dialGeneration else { await newSession.close(); return }
+            if rejectedHostKey { throw HostKeyRejected() }
             self.session = newSession
             self.status = .connected
             self.isAutoReconnectInFlight = false
+            self.connectionFailure = nil
+            logConnectionPhase("pty.ready", generation: generation)
         } catch {
+            await pendingSession?.close()
             // A superseded dial's failure is not this attempt's failure.
             guard generation == dialGeneration else { return }
-            let message: String
-            if let sshError = error as? SSHError {
-                message = sshError.description
-            } else {
-                message = error.localizedDescription
-            }
+            let failure = ConnectionFailure(rejectedHostKey ? HostKeyRejected() : error)
+            logConnectionPhase("\(phase).failed", generation: generation, recovery: failure.recovery)
+            connectionFailure = failure
+            let message = failure.message
             self.status = .failed(message)
+            if failure.recovery != .retry { isAutoReconnectInFlight = false }
             // The status carries the reason either way; only a connect the user
             // asked for earns a modal on top of it.
             if !isAutoReconnectInFlight { self.errorMessage = message }
@@ -237,17 +300,30 @@ final class TerminalViewModel {
         guard case .idle = status else { return session }
         status = .connecting
         dialGeneration += 1
+        rejectedHostKey = false
         let generation = dialGeneration
+        awaitingSSHGeneration = generation
+        defer {
+            if awaitingSSHGeneration == generation { awaitingSSHGeneration = nil }
+        }
+        logConnectionPhase("exec-dial.started", generation: generation)
         do {
             let handlers = hostKeyHandlers()
             let newSession = try await dial(connection, handlers.onUnknown, handlers.onChanged)
+            if awaitingSSHGeneration == generation { awaitingSSHGeneration = nil }
             guard generation == dialGeneration else { await newSession.close(); return nil }
+            if rejectedHostKey { await newSession.close(); throw HostKeyRejected() }
             self.session = newSession
+            logConnectionPhase("exec-ssh.ready", generation: generation)
             return newSession
         } catch {
             guard generation == dialGeneration else { return nil }
-            let message = (error as? SSHError)?.description ?? error.localizedDescription
+            let failure = ConnectionFailure(rejectedHostKey ? HostKeyRejected() : error)
+            logConnectionPhase("exec-ssh.failed", generation: generation, recovery: failure.recovery)
+            connectionFailure = failure
+            let message = failure.message
             self.status = .failed(message)
+            if failure.recovery != .retry { isAutoReconnectInFlight = false }
             if !isAutoReconnectInFlight { self.errorMessage = message }
             return nil
         }
@@ -257,10 +333,21 @@ final class TerminalViewModel {
     func markConnected() {
         status = .connected
         isAutoReconnectInFlight = false
+        connectionFailure = nil
+    }
+
+    func fail(_ error: Error) {
+        let failure = ConnectionFailure(rejectedHostKey ? HostKeyRejected() : error)
+        logConnectionPhase("session.failed", generation: dialGeneration, recovery: failure.recovery)
+        connectionFailure = failure
+        status = .failed(failure.message)
+        if failure.recovery != .retry { isAutoReconnectInFlight = false }
+        if !isAutoReconnectInFlight { errorMessage = failure.message }
     }
 
     /// Surface a fatal mosh error through the same path as SSH failures.
     func fail(_ message: String) {
+        if rejectedHostKey { fail(HostKeyRejected()); return }
         status = .failed(message)
         if !isAutoReconnectInFlight { errorMessage = message }
     }
@@ -309,6 +396,8 @@ final class TerminalViewModel {
     func disconnect() async {
         // Disown a dial still in flight — see `dialGeneration`.
         dialGeneration += 1
+        hostKeyPrompt?.decide(false)
+        hostKeyPrompt = nil
         if let session {
             await session.close()
         }

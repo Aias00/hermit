@@ -26,7 +26,7 @@ final class KeyboardShortcutUITest: XCTestCase {
         app.launchArguments += ["-MOSHPIT_RESET"]
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.navigationBars["启动台"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["SSH 主机"].waitForExistence(timeout: 5))
 
         app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 3),
@@ -52,55 +52,75 @@ final class KeyboardShortcutUITest: XCTestCase {
             throw XCTSkip("no MOSHPIT_SEED_USER / MOSHPIT_SEED_KEY_B64 in the test runner's environment")
         }
         let app = XCUIApplication()
+        app.launchEnvironment["MOSHPIT_SEED_KEY_B64"] = key
         app.launchArguments += [
             "-MOSHPIT_RESET", "-MOSHPIT_AUTOCARE_OFF", "1", "-MOSHPIT_SEED_HOME", "1",
-            "-MOSHPIT_SEED_USER", user, "-MOSHPIT_SEED_KEY_B64", key,
+            "-MOSHPIT_SEED_USER", user,
             "-MOSHPIT_SEED_HOST", env["MOSHPIT_SEED_HOST"] ?? "127.0.0.1",
             "-MOSHPIT_SEED_PORT", env["MOSHPIT_SEED_PORT"] ?? "22",
             "-MOSHPIT_SEED_NAME", "local-mac", "-MOSHPIT_SEED_TMUX", "1", "-MOSHPIT_SEED_QUIET", "1",
         ]
+        if let fingerprint = env["MOSHPIT_SEED_TRUST_FP"] {
+            app.launchArguments += ["-MOSHPIT_SEED_TRUST_FP", fingerprint]
+        }
         if let tmux = env["MOSHPIT_SEED_TMUX_BIN"] {
             app.launchArguments += ["-MOSHPIT_SEED_TMUX_BIN", tmux]
         }
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
-        // Connect from the card; trust the host key the first time.
+        defer { app.terminate() }
         let card = app.buttons["connection-card-local-mac"]
         XCTAssertTrue(card.waitForExistence(timeout: 5))
         card.tap()
-        let trust = app.buttons["Trust"]
-        if trust.waitForExistence(timeout: 8) { trust.tap() }
-        // The tmux tree shows once attached; the card head then opens the terminal.
-        XCTAssertTrue(app.buttons["1: shell, 2p"].waitForExistence(timeout: 20),
-                      "the seeded tmux server should report its first window")
-        card.tap()
-        // iPhone shows Back; the iPad split layout shows the sidebar toggle.
-        let bar = app.buttons.matching(
-            NSPredicate(format: "identifier IN {'terminal-back', 'terminal-sidebar'}")).firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 8), "the terminal should be on screen")
-        XCTAssertTrue(app.buttons["1:shell"].waitForExistence(timeout: 8),
-                      "the breadcrumb should name the active window")
+        if env["MOSHPIT_SEED_TRUST_FP"] == nil {
+            let trust = app.buttons["Trust"]
+            if trust.waitForExistence(timeout: 8) { trust.tap() }
+        }
+        // A saved host now opens the terminal directly. Readiness comes from
+        // the live multiplexer controls, not the removed home session tree.
+        let title = app.staticTexts["terminal-host-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        XCTAssertEqual(title.label, "local-mac")
+        let sidebar = app.buttons["conversation-sidebar"]
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: sidebar)
+        waitForExpectations(timeout: 25)
 
-        // ⌘K with the keyboard down: nothing is first responder, so UIKit
-        // starts its key-command walk at the view controller — the case a
-        // hidden SwiftUI shortcut button never covered.
+        let firstName = env["MOSHPIT_SEED_FIRST_WINDOW"] ?? "1: shell"
+        let secondName = env["MOSHPIT_SEED_SECOND_WINDOW"] ?? "2: logs"
+        let first = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", firstName + ",")).firstMatch
+        let second = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", secondName + ",")).firstMatch
+        let windows = app.navigationBars["Windows"]
+
         app.typeKey("k", modifierFlags: .command)
-        XCTAssertTrue(app.navigationBars["Windows"].waitForExistence(timeout: 4), "⌘K opens Windows")
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH '2: logs'")).firstMatch.tap()
-        XCTAssertTrue(app.buttons["2:logs"].waitForExistence(timeout: 6),
-                      "picking a window should move the breadcrumb")
+        XCTAssertTrue(windows.waitForExistence(timeout: 5), "⌘K opens Windows")
+        XCTAssertTrue(second.waitForExistence(timeout: 5))
+        second.tap()
+        XCTAssertTrue(windows.waitForNonExistence(timeout: 5))
+        app.typeKey("k", modifierFlags: .command)
+        XCTAssertTrue(windows.waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: second)
+        waitForExpectations(timeout: 5)
+        second.tap() // Close the picker without changing its selected window.
+        XCTAssertTrue(windows.waitForNonExistence(timeout: 5))
 
-        // ⌘1 with the terminal focused: the chord now goes through SwiftTerm's
-        // pressesBegan first, which must hand it on.
-        app.buttons["keyboard-toggle"].tap()
+        // With a text input focused, the responder chain must still deliver
+        // the window shortcut instead of inserting the chord into the draft.
+        app.buttons["conversation-keyboard-toggle"].tap()
         app.typeKey("1", modifierFlags: .command)
-        XCTAssertTrue(app.buttons["1:shell"].waitForExistence(timeout: 6), "⌘1 selects window 1")
+        app.typeKey("k", modifierFlags: .command)
+        XCTAssertTrue(windows.waitForExistence(timeout: 5))
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: first)
+        waitForExpectations(timeout: 5)
+        first.tap()
+        XCTAssertTrue(windows.waitForNonExistence(timeout: 5))
 
-        // ⌘W: leave the terminal; the session stays alive on Home.
         app.typeKey("w", modifierFlags: .command)
-        XCTAssertTrue(app.navigationBars["启动台"].waitForExistence(timeout: 5), "⌘W goes back to Home")
-        XCTAssertTrue(app.buttons["1: shell, 2p"].waitForExistence(timeout: 5),
-                      "the session is still attached after leaving")
+        XCTAssertTrue(title.waitForNonExistence(timeout: 5), "⌘W closes the terminal screen")
+        XCTAssertTrue(app.navigationBars["SSH 主机"].waitForExistence(timeout: 5))
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(card.staticTexts["已连接"].exists,
+                      "The saved host stays connected after leaving its terminal")
     }
 }

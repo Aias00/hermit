@@ -59,6 +59,24 @@ final class ConnectionStore {
         persist()
     }
 
+    /// The user-facing delete path waits for Tailcat's device-only Keychain
+    /// cleanup. If the device is locked or deletion fails, the record remains
+    /// available for retry instead of losing the only reference to its secret.
+    @MainActor
+    func deleteSecurely(id: UUID, tailcatCredentials: TailcatCredentials = .shared) async throws {
+        reloadIfNeeded()
+        guard isAuthoritative else { throw TailcatCredentialError.storageUnavailable }
+        guard let connection = connections.first(where: { $0.id == id }) else { return }
+        if let ref = connection.tailcatCredentialRef {
+            // Imported/duplicated metadata can refer to one device credential.
+            // Keep it until the last referencing connection is removed.
+            if !connections.contains(where: { $0.id != id && $0.tailcatCredentialRef == ref }) {
+                try await tailcatCredentials.delete(ref: ref)
+            }
+        }
+        delete(id: id)
+    }
+
     // MARK: - Persistence
 
     func load() {

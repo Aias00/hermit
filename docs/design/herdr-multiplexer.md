@@ -291,7 +291,7 @@ ADVANCED
 **实测挖出来的四件事:**
 
 1. **帧是逐格绝对定位的重绘**(`ESC[3;6H` 一段一段),不是追加式字节流。喂给 SwiftTerm 完全正确,但**本地攒不出有意义的 scrollback** —— 历史只能走 `terminal.scroll` 由服务端翻页。印证了未决项 6。
-2. **retarget 不用重建 SSH 通道**:同一个 shell 里 release → 等 ~400ms → 再起一条即可。中间 shell 会回显命令、macOS 还会插一句 "The default interactive shell is now zsh." —— 分帧器全部跳过,而且不需要 reset(截断行解析失败被丢弃,新 target 又是整屏重绘)。
+2. **retarget 可以复用 SSH 通道**:早期使用同一个 shell 里 release → 等 ~400ms → 再起一条。现在由 reader loop 在旧进程退出后确认 stdin 已交还，才发送下一个目标，详见下面的 2026-10-27 修正。中间 shell 的回显和提示由分帧器跳过。
 3. **`terminal.closed` 会因为我们自己的 release 而触发**,且在新 target 设好之后才到。第一版无条件把 `herdrFrameTarget` 置 nil,结果 `sendInput` 掉回裸字节分支 —— **画面照常刷新、打字全部丢失**。这种"看起来一切正常"的 bug 单测抓不到,是实机切窗格时发现的;现在用 `herdrExpectedCloses` 计数区分,验证脚本也加了专门的 retarget 回归检查。
 4. **冷主机的引导变了**:Phase 0 跑裸 `herdr` 会顺带把服务器拉起来,帧通道没有这个副作用。改成 `nohup herdr server &`(实测 ~500ms 起来,**自带一个 workspace/tab/pane**),且**只在用户显式点"创建"时执行** —— 反而更贴合"绝不替用户建会话"的原则。
 
@@ -337,20 +337,75 @@ ADVANCED
 
 也就是说 500ms 里几乎没有一毫秒花在协议上:400ms 是我们自己睡的,~250ms 是用户
 zsh 的提示符 / precmd 钩子。真实链路上再叠 2 个 RTT,那是协议本身要的
-(release 出去、`terminal.closed` 回来、target 出去、full frame 回来)。
+(这里记录的是当时 release → `terminal.closed` → target → full frame 的测量；当前安全交接点已改为下面的 `moshpit.reader_ready`，未重新宣称同样的耗时)。
 
-1. **固定 400ms settle → 等 `terminal.closed`。** 那 400ms 是在猜"旧 attach 什么时候
-   放开 stdin",而这件事服务端自己会告诉我们。猜短了更糟:target 行会被正在退出的
-   client 吞掉(实测 pipeline 到 release 后面必丢),于是切换直接卡死到下一次轮询。
+1. **固定 400ms settle 最初改为等 `terminal.closed`。** 2026-10-27 核实这仍不充分：
+   CLI 在发出 closed 后才退出，stdin 线程此时仍可能读取。现在等待 shell 在该进程
+   真正退出后发出的 `moshpit.reader_ready`；不能向正在退出的客户端提前发送 target。
 2. **boot 行改成 reader loop**(`HerdrFrameCommand.boot`)。attach 结束后读一行
-   `<target> <cols> <rows>` 再 attach,不回提示符。`sh -c` 包住,fish/csh 也只看到一个
+   `moshpit.target <target> <cols> <rows>` 再 attach,不回提示符。`sh -c` 包住,fish/csh 也只看到一个
    带引号的参数;整段脚本过 `HerdrLaunch.quote`,自定义 herdr 路径里的引号跑不出来。
-   loop 起来时先打一行 `{"type":"moshpit.ready"}` —— **没收到就退回原来的一次性
-   start 行**,那台主机只是慢回去,不是坏掉。
+   loop 起来时先打一行 `{"type":"moshpit.ready"}`，只证明脚本已启动。若迟迟收不到
+   启动结果，应重建连接；旧实现直接补发一次性 start 行，会在慢链路上把 shell 命令
+   写进已启动的 JSON 控制通道，现已移除这条回退。
 3. **切换时先擦本地缓冲区**,不只是盖住它。veil 是个关于时间的承诺,而网络会毁约:
    安全超时、attach 被拒、被别的客户端抢走 —— 每条路径最后都会把盖子掀开。掀开后
    底下是什么才是问题:上一个 agent 的画面配着新 agent 的面包屑,就是那个"一闪而过"
    的报告。空屏幕才是诚实的。veil 的超时也不再是固定 1.6s,而是按实测切换耗时缩放。
+
+**2026-10-27：修复 `terminal session control input ignored: invalid json command`。**
+
+本机 herdr 0.9.5 的 stdin 线程遇到无效 JSON 只输出 warning，仍继续读取；主线程在
+退出前发出 `terminal.closed`。App 原先把 warning 当成 attach 结束，同时把 closed
+或等待超时当成 stdin 已交还的许可，后续裸 target/start 行再次触发同一错误。
+当前把 warning 独立解析为 `inputIgnored`，保留当前 attach；脚本只在 herdr 进程退出后、
+下一次 `read` 前发出 `moshpit.reader_ready`。切换必须等该标记，超时只能重建通道；
+reader 只接受 `moshpit.target` 前缀的目标行，忽略旧 attach 时期已在途的 JSON 控制消息，
+避免它们被当作窗格名称。排队的写入还要核对连接及目标代次，避免旧输入跨到新窗格。
+
+验证：`scripts/verify/verify-herdr-frame-handoff.py` 用实际 Swift 生成的启动命令和独立
+PTY 复现旧启动回退/过早交接错误，并验证新握手及迟到 JSON 过滤。独立 herdr 0.9.5
+服务完成 3 轮挂接/释放，`Shift + ←`、NUL、非 UTF-8、换行字节均精确往返，零条
+invalid-JSON 警告；临时服务及资源已清理，未操作用户现有窗格。iPhone 与 iPad mini
+模拟器各 132 项定向回归通过，包含 7 项 stdin 所有权、超时、前后台恢复及排队消息
+隔离测试。证据在工程相邻目录 `moshpit-herdr-input-fix-{phone,mini}.xcresult`、
+`moshpit-herdr-frame-handoff-probe.log` 和 `moshpit-herdr-real-handoff-probe.log`。
+
+同日使用 personal bundle 通过局域网覆盖安装到 iPhone 12 Pro Max，设备查询确认
+版本为 1.0.8（build 1）；签名和描述文件校验通过，`devicectl` 安装结果为 success。
+未卸载或清除数据；安装前后系统返回的容器路径变化，未检查用户数据内容，因此不把
+路径比较计作数据保留验证。本轮未自动启动 App 或操作用户现有 Herdr 窗格。
+本机部署证据：`build/Personal/device-deployment-report.json`。
+
+**同日后续：慢启动反复重连。** 手机最近日志在 20:53–21:03 反复记录
+`health: dropped (herdr-boot-timeout)`，期间 Herdr push 通道仍能建立。
+上一轮移除了不安全的裸命令回退，却沿用了原先 2.5 秒的能力探测期限，
+把响应慢当成必须重建连接；重复轮询还会在 3 秒未绘制时重新释放同一目标。
+计时从命令入队就开始，也会误把写入排队时间算成远端响应时间。
+
+iPad mini 模拟器在修复前复现了新增的五类失败：3.2 秒才返回首帧、boot 写入
+延迟、只有 ready 没有首帧、首帧前重复轮询、1.7 秒才交还 stdin。
+原有七项交接测试仍通过，说明之前的测试没有覆盖慢响应窗口。
+证据：工程相邻目录 `moshpit-herdr-slow-start-red-mini.xcresult`。
+日志确认了主动重连的触发路径，但没有记录远端 shell 启动耗时，不能据此断言
+远端慢在哪里；后续需要结合启动写入、ready、首帧等阶段日志核对。
+
+修复后，首帧和 stdin 交接等待均为 30 秒，从相关写入完成后计时；实际写入
+另有 30 秒期限，超时后关闭旧连接以解除排队。只有收到首帧才记启动成功，
+重复轮询不打断同一目标的启动，连续失败采用退避。未实际发送的 boot 被取消时，
+不再误发 release 或等待不存在的 reader；重连清理也不等待旧通道的礼貌 release。
+新增 `.notice` 阶段日志只记录写入/ready/首帧事件，不含命令、输入或窗格 ID。
+
+首轮 iPhone 与 iPad mini 模拟器各 165 项、10 套测试通过，包含关闭连接的回归。
+最后补充取消检查和后台启动边界后，再次在两个模拟器各跑 143 项相关测试，全部
+通过，其中 Herdr 生命周期测试为 18 项。最终证据为工程相邻目录
+`moshpit-herdr-slow-start-final-{phone,mini}.xcresult`；这些是模拟器定向回归，
+不能替代更新后手机连接用户 MacBook 的实测。
+
+修复包于 13:20 UTC 通过 Wi-Fi 覆盖安装到同一 iPhone，`devicectl` 返回 success，
+安装后查询 personal bundle 为 1.0.8（build 1）。安装前比对本轮源码和产物哈希、
+签名及设备授权范围均通过，未自动启动或操作用户窗格；手机连接结果待用户确认。
+本轮部署报告为 `build/Personal/slow-start-deployment-report.json`，保留此前部署报告。
 
 顺带把 tmux 那边同一个问题量了一遍:切窗口的命令本身是白送的,但 veil 要等
 **600ms(convergence 静默去抖)或 700ms(settling pass)**才掀开。实测一个空闲
@@ -366,6 +421,32 @@ pane 切过去 **一行 `%output` 都没有**,capture 回包只要个位数毫�
 被 resize 了两次,pane 也重排了两次。修法是 `TerminalHostContainer.geometryHeld`:
 模态期间把终端钉在它当前的尺寸上,等键盘回到原位再放开。同一个 harness 复测:
 **0 次**。
+
+### 2026-10-28：草稿提交与 Codex 粘贴识别
+
+隔离 PTY 中的 Codex 0.163.0 对照实验复现：把裸文本 `/status` 和 CR 一次写入，
+文字停留在输入框，之后单独 CR 才执行；同批输入加上 bracketed-paste 包装则立即
+执行。慢速输入、关闭 paste-burst，以及开启 Kitty 协议后的包装输入也分别验证。
+实验仅调用本地 `/status`，禁止网络，没有模型请求或用户现有窗格操作。
+
+独立 herdr 0.9.5 实测确认：子程序启用 bracketed paste 后，重绘帧仍不携带该模式，
+`pane.send_input` 会按真实模式包装文字并追加 Enter；`pane.send_text` 只是裸字节。
+因此帧模式不能依据手机本地 emulator 的 `bracketedPasteMode` 回退为裸文本加 CR，
+也不能用 `send_text` 再 `send_keys` 替代。现在正常使用 `pane.send_input`；若服务端
+或私有桥不可用，帧模式会保留草稿并提示升级 herdr、检查 python3。未知结果仍报
+“发送结果未确认”，不自动重发。原始终端传输只在能取得真实模式时保留兼容提交。
+
+这验证并保护了一条明确的降级路径；未取得用户故障当次的日志，不能断言当次一定
+走了该分支。传输确认也不等同于远端应用处理完成。底部另提供独立的远端回车键，
+用于 Codex 选择确认或已存在的远端输入；它不读取或发送本地草稿。
+
+本轮最终版本在 iPhone 18 Pro 与 iPad mini (A17 Pro) 模拟器各通过 80 项定向单测、
+3 项 UI 测试。独立 OpenSSH 接收端校验单次 CR、草稿发送前零字节、完整多行粘贴
+和追加 Enter；UI 覆盖附件弹窗恢复焦点、隐藏键盘、模拟语音转写进入草稿及后续
+光标位置。语音测试不衡量识别准确率，SSH fixture 不执行真实 Codex。
+结果为工程相邻目录的 `moshpit-input-r4-{unit,ui}-{phone,mini}.xcresult`，汇总与截图
+保存在 `build/verification/20261028-input/`，独立 Codex 对照在
+`build/verification/20261028-codex-submit/`。本轮未向手机真机安装。
 
 ## 6. 未决 / 需实机验证
 

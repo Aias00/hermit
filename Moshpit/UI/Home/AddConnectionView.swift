@@ -1,4 +1,5 @@
 import SwiftUI
+import TailcatSSH
 
 /// Screen 1 — Add Connection modal form. Also doubles as the editor for an
 /// existing connection (Home card → Edit).
@@ -41,9 +42,23 @@ struct AddConnectionView: View {
     @State private var compressOutput = false
     @State private var saveError: String?
     @State private var showKeyPicker = false
-    @State private var useSOCKSProxy = false
-    @State private var socksProxyHost = ""
-    @State private var socksProxyPort = "1080"
+    @State private var transportForm = ConnectionTransportForm()
+    @State private var showCloudflareAdvanced = false
+    @State private var accessAccount: (settings: CloudflareConnectionSettings, label: String)?
+    @State private var accessError: String?
+    @State private var accessBusy = false
+    @State private var accessTask: Task<Void, Never>?
+    @State private var accessStatusGeneration = 0
+    @State private var accessOperationGeneration = 0
+    @State private var saving = false
+    @State private var tailcatBusy = false
+    @State private var tailcatClientPrivateKey: String?
+    @State private var tailcatClientPublicKey: String?
+    @State private var tailcatError: String?
+    @State private var tailcatCredentialMissing = false
+    @State private var tailcatNeedsReplacementAddress = false
+    @State private var tailscaleAccount = TailscaleAccount.shared
+    @State private var showTailscaleSettings = false
 
     init(store: ConnectionStore, keychain: KeychainService, existing: ServerConnection? = nil,
          onConnect: ((ServerConnection) -> Void)? = nil) {
@@ -58,7 +73,7 @@ struct AddConnectionView: View {
             _username = State(initialValue: c.username)
             _authMethod = State(initialValue: c.authMethod)
             _selectedKeyId = State(initialValue: c.sshKeyId)
-            _useMosh = State(initialValue: c.connectionProtocol == .mosh)
+            _useMosh = State(initialValue: c.connectionProtocol == .mosh && c.transport?.requiresSSH != true)
             _predictMode = State(initialValue: c.predictMode)
             _roamOnCellular = State(initialValue: c.roamOnCellular ?? true)
             _multiplexer = State(initialValue: c.multiplexer)
@@ -66,9 +81,10 @@ struct AddConnectionView: View {
             _herdrPath = State(initialValue: c.herdrPath ?? "")
             _moshServerPath = State(initialValue: c.moshServerPath ?? "")
             _compressOutput = State(initialValue: c.compression)
-            _useSOCKSProxy = State(initialValue: c.useSOCKSProxy ?? false)
-            _socksProxyHost = State(initialValue: c.socksProxyHost ?? "")
-            _socksProxyPort = State(initialValue: c.socksProxyPort.map(String.init) ?? "1080")
+            _transportForm = State(initialValue: ConnectionTransportForm(connection: c))
+            _showCloudflareAdvanced = State(initialValue:
+                !(c.cloudflareTeamDomain ?? "").isEmpty || !(c.cloudflareAudience ?? "").isEmpty
+                || (!(c.cloudflareHostname ?? "").isEmpty && c.cloudflareHostname != c.host))
         }
     }
 
@@ -82,7 +98,52 @@ struct AddConnectionView: View {
         selectedKeyId.flatMap { id in keyStore.keys.first { $0.id == id } }
     }
 
-    private var canSave: Bool { !name.isEmpty && !host.isEmpty }
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !accessBusy && !saving && !tailcatBusy
+            && (transportForm.selection != .tailcat || transportForm.tailcatAddress.isEmpty || tailcatClientPrivateKey != nil)
+            && (transportForm.selection != .tailcat || !tailcatNeedsReplacementAddress || !transportForm.tailcatAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            && (transportForm.selection != .tailscale || tailscaleBindingReady)
+            && (try? configuredConnection()) != nil
+    }
+
+    private var tailscaleBindingReady: Bool {
+        transportForm.isTailscaleAccountReady(currentAccountID: tailscaleAccount.accountID, state: tailscaleAccount.state)
+    }
+
+    private func configuredConnection() throws -> ServerConnection {
+        try transportForm.validatedConnection(from: existing ?? ServerConnection(), host: host,
+                                              port: port, usesMosh: useMosh)
+    }
+
+    private var cloudflareSettings: CloudflareConnectionSettings? {
+        guard transportForm.selection == .cloudflareSSH else { return nil }
+        return try? transportForm.cloudflareSettings(host: host)
+    }
+
+    private var endpointIssue: String? {
+        if transportForm.selection == .tailcat, host.hasPrefix("tc"), host.utf8.count > 40 {
+            return ConnectionTransportError.invalidTailcatHostAlias.localizedDescription
+        }
+        if !host.isEmpty, !ServerConnection.isSSHHostname(host.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return ConnectionTransportError.invalidSSHHost.localizedDescription
+        }
+        guard let port = Int(port.trimmingCharacters(in: .whitespacesAndNewlines)), (1...65535).contains(port) else {
+            return ConnectionTransportError.invalidSSHPort.localizedDescription
+        }
+        return nil
+    }
+
+    private var transportIssue: String? {
+        var connection = existing ?? ServerConnection()
+        connection.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        connection.connectionProtocol = useMosh ? .mosh : .ssh
+        do {
+            _ = try transportForm.applying(to: connection)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -95,14 +156,48 @@ struct AddConnectionView: View {
                     FieldRow(placeholder: "Name", text: $name)
                 }
                 FormGroup(title: "连接") {
-                    FieldRow(placeholder: "Host", text: $host)
+                    if transportForm.selection == .tailscale, tailscaleBindingReady {
+                        tailscaleDevicePicker
+                    }
+                    if transportForm.selection == .tailcat {
+                        FieldRow(placeholder: "SSH 主机别名（可留空）", text: $host)
+                            .accessibilityIdentifier("tailcat-host-alias")
+                        Text("例如 mac-mini。这里只用于显示，无需公网 IP 或域名。")
+                            .font(.footnote).foregroundStyle(Ink.meta)
+                    } else if transportForm.selection == .tailscale {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("SSH address").font(.caption).foregroundStyle(Ink.meta)
+                            FieldRow(placeholder: "Host", text: $host)
+                                .accessibilityIdentifier("tailscale-ssh-host")
+                        }
+                    } else {
+                        FieldRow(placeholder: "Host", text: $host)
+                    }
                     NumberFieldRow(label: "Port", placeholder: "22", text: $port)
                     FieldRow(placeholder: "Username", text: $username)
                     Picker("连接模式", selection: $useMosh) {
                         Text("SSH").tag(false)
                         Text("Mosh").tag(true)
                     }
+                    .accessibilityIdentifier("connection-protocol-picker")
+                    .disabled(transportForm.selection?.requiresSSH == true)
+                    if transportForm.selection == .cloudflareSSH {
+                        Text("Cloudflare 仅承载 SSH TCP，Mosh 的 UDP 不会经过此入口。")
+                            .font(.footnote).foregroundStyle(Ink.meta)
+                    } else if transportForm.selection == .tailcat {
+                        Text("此 Tailcat 连接仅承载 SSH TCP，仍使用下方的 SSH 密码或密钥。")
+                            .font(.footnote).foregroundStyle(Ink.meta)
+                    } else if transportForm.selection == .tailscale {
+                        Text("This connection uses Tailscale inside Moshpit. SSH still requires the username and password or key below.")
+                            .font(.footnote).foregroundStyle(Ink.meta)
+                    }
+                    if let endpointIssue {
+                        Text(endpointIssue).font(.footnote).foregroundStyle(.orange)
+                            .accessibilityIdentifier("connection-endpoint-error")
+                    }
                 }
+
+                transportSection
 
                 FormGroup(title: "AUTHENTICATION") {
                     PillSegmentedControl(
@@ -175,6 +270,7 @@ struct AddConnectionView: View {
                         subtitle: "Wrap SSH with mosh-server (UDP)",
                         identifier: "toggle-use-mosh",
                         isOn: $useMosh)
+                        .disabled(transportForm.selection?.requiresSSH == true)
                     // The tuning rows only exist when Mosh does. With
                     // the toggle off they were pure expert noise — and
                     // "Roam on Cellular: ON" under a disabled Mosh was
@@ -216,20 +312,6 @@ struct AddConnectionView: View {
                 }
 
                 FormGroup(
-                    title: "PROXY",
-                    footer: "Only unauthenticated SOCKS5 proxies are supported. This proxies the SSH connection only — if Mosh is also enabled above, its UDP session connects directly once bootstrapped and is not proxied."
-                ) {
-                    ToggleRow(
-                        label: "Use SOCKS5 Proxy",
-                        subtitle: "Route this connection through a local or corporate SOCKS5 proxy",
-                        isOn: $useSOCKSProxy)
-                    if useSOCKSProxy {
-                        FieldRow(placeholder: "Proxy Host", text: $socksProxyHost)
-                        NumberFieldRow(label: "Proxy Port", placeholder: "1080", text: $socksProxyPort)
-                    }
-                }
-
-                FormGroup(
                     title: "ADVANCED",
                     footer: "tmux and herdr hold separate, unrelated sessions. If the host doesn't have the one you pick, Moshpit says so and drops to a plain shell — it never quietly attaches the other. With Mosh, herdr runs its own terminal UI; native rendering needs SSH."
                 ) {
@@ -248,6 +330,7 @@ struct AddConnectionView: View {
                 }
                 }.accessibilityIdentifier("connection-advanced")
             }
+            .disabled(saving)
             .moshpitForm()
             .navigationTitle(existing == nil ? "新建 Host" : "编辑 Host")
             .navigationBarTitleDisplayMode(.inline)
@@ -255,6 +338,7 @@ struct AddConnectionView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .foregroundStyle(Ink.accent)
+                        .disabled(saving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { Task { await save() } }
@@ -300,25 +384,364 @@ struct AddConnectionView: View {
             }.preferredColorScheme(.dark)
         }
         .preferredColorScheme(.dark)
+        .appSheet(isPresented: $showTailscaleSettings) {
+            TailscaleSettingsView()
+        }
+        .interactiveDismissDisabled(saving)
+        .onChange(of: transportForm.selection) { _, selection in
+            if selection?.requiresSSH == true { useMosh = false }
+            accessError = nil
+        }
+        .task(id: transportForm.selection) {
+            if transportForm.selection == .tailcat { await prepareTailcatIdentity() }
+            if transportForm.selection == .tailscale {
+                await tailscaleAccount.resume()
+                bindInitialTailscaleAccount()
+            }
+        }
+        .onChange(of: tailscaleAccount.state) { _, _ in bindInitialTailscaleAccount() }
+        .onChange(of: tailscaleAccount.accountID) { _, _ in bindInitialTailscaleAccount() }
+        .onChange(of: cloudflareSettings) { _, _ in
+            cancelAccessOperation()
+            accessAccount = nil
+            accessError = nil
+        }
+        .task(id: cloudflareSettings) {
+            accessAccount = nil
+            accessError = nil
+            let generation = accessStatusGeneration
+            guard let settings = cloudflareSettings else { return }
+            let label = await CloudflareAccessAuth.shared.accountLabel(settings: settings)
+            guard !Task.isCancelled, generation == accessStatusGeneration,
+                  cloudflareSettings == settings, let label else { return }
+            accessAccount = (settings, label)
+        }
+        .onDisappear { cancelAccessOperation() }
+    }
+
+    private var transportSection: some View {
+        FormGroup(title: "连接方式", footer: "选择此连接使用的网络入口。") {
+            Group {
+                Picker("传输", selection: $transportForm.selection) {
+                    if transportForm.selection == nil {
+                        Text("不支持的连接方式 — 请重新选择").tag(Optional<ConnectionTransport>.none)
+                    }
+                    ForEach(ConnectionTransport.allCases, id: \.self) { transport in
+                        Text(transport.label).tag(Optional(transport))
+                    }
+                }
+                .accessibilityIdentifier("connection-transport-picker")
+                if transportForm.selection == .socks5 {
+                    FieldRow(placeholder: "Proxy Host", text: $transportForm.socksHost)
+                        .accessibilityIdentifier("socks-proxy-host")
+                    NumberFieldRow(label: "Proxy Port", placeholder: "1080", text: $transportForm.socksPort)
+                        .accessibilityIdentifier("socks-proxy-port")
+                    Text("仅支持无需认证的 SOCKS5。Mosh 启用后，其 UDP 数据仍然直连远端。")
+                        .font(.footnote).foregroundStyle(Ink.meta)
+                } else if transportForm.selection == .cloudflareSSH {
+                    Text("使用上方主机域名登录 Cloudflare。可以先保存，稍后再登录。")
+                        .font(.footnote).foregroundStyle(Ink.meta)
+                    DisclosureGroup(isExpanded: $showCloudflareAdvanced) {
+                        FieldRow(placeholder: "入口域名覆盖（留空使用上方主机）", text: $transportForm.cloudflareHostname)
+                            .accessibilityIdentifier("cloudflare-hostname")
+                        Toggle("手动配置 Access", isOn: $transportForm.cloudflareManualConfiguration)
+                            .accessibilityIdentifier("cloudflare-manual-access-toggle")
+                        if transportForm.cloudflareManualConfiguration {
+                            FieldRow(placeholder: "Access 团队域名，例如 team.cloudflareaccess.com", text: $transportForm.cloudflareTeamDomain)
+                                .accessibilityIdentifier("cloudflare-team-domain")
+                            FieldRow(placeholder: "Access 应用 Audience（AUD）", text: $transportForm.cloudflareAudience)
+                                .accessibilityIdentifier("cloudflare-audience")
+                        } else {
+                            Text("Access 配置将在登录时自动获取并验证。")
+                                .font(.footnote).foregroundStyle(Ink.meta)
+                        }
+                    } label: {
+                        Text("高级 Cloudflare 配置")
+                            .accessibilityIdentifier("cloudflare-advanced-toggle")
+                    }
+                } else if transportForm.selection == .tailcat {
+                    tailcatControls
+                } else if transportForm.selection == .tailscale {
+                    tailscaleControls
+                }
+            }
+            .disabled(accessBusy)
+            if transportForm.selection == .cloudflareSSH {
+                Text("实验功能，兼容性仍在验证。SSH 密码或密钥仍需单独设置。")
+                    .font(.footnote).foregroundStyle(Ink.meta)
+                    .accessibilityIdentifier("cloudflare-experimental-notice")
+                accessControls
+            }
+            if let transportIssue {
+                Text(transportIssue).font(.footnote).foregroundStyle(.orange)
+                    .accessibilityIdentifier("connection-transport-error")
+            }
+        }
+    }
+
+    private var tailscaleControls: some View {
+        Group {
+            LabeledContent("Tailscale status", value: tailscaleAccount.state.displayLabel)
+                .accessibilityIdentifier("tailscale-connection-status")
+            Button("Manage Tailscale") { showTailscaleSettings = true }
+                .accessibilityIdentifier("tailscale-manage-account")
+            if tailscaleAccount.state == .connected,
+               let accountID = tailscaleAccount.accountID,
+               let boundID = transportForm.tailscaleAccountID, accountID != boundID {
+                Text(TailscaleAccountError.accountMismatch.localizedDescription)
+                    .font(.footnote).foregroundStyle(.orange)
+                    .accessibilityIdentifier("tailscale-account-mismatch")
+                Button("Use current Tailscale account") {
+                    transportForm.bindTailscaleAccount(accountID)
+                    host = ""
+                }
+                .accessibilityIdentifier("tailscale-rebind-account")
+            }
+            if tailscaleBindingReady {
+                if tailscaleAccount.peers.isEmpty {
+                    Text("No visible devices. Check your tailnet's access rules. You can also enter a Tailscale IP or MagicDNS name when adding a host.")
+                        .font(.footnote).foregroundStyle(Ink.meta)
+                }
+                Button("Refresh devices") { Task { await tailscaleAccount.refresh() } }
+                    .accessibilityIdentifier("tailscale-refresh-peers")
+            }
+            Text("Experimental. Only this app's SSH connections use the built-in Tailscale connection; Mosh is not supported here yet.")
+                .font(.footnote).foregroundStyle(Ink.meta)
+                .accessibilityIdentifier("tailscale-experimental-notice")
+        }
+    }
+
+    private var selectedTailscalePeerID: String? {
+        transportForm.effectiveTailscalePeerID(host: host)
+    }
+
+    private var tailscaleDeviceTitle: String {
+        if let id = selectedTailscalePeerID {
+            return tailscaleAccount.peers.first { $0.id == id }.map(tailscalePeerTitle)
+                ?? String(localized: "Saved Tailscale device")
+        }
+        return host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? String(localized: "Choose a Tailscale device")
+            : String(localized: "Manually entered address")
+    }
+
+    private func tailscalePeerTitle(_ peer: TailscaleAccountPeer) -> String {
+        peer.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? peer.connectionHost ?? String(localized: "Saved Tailscale device") : peer.name
+    }
+
+    private var tailscaleDevicePicker: some View {
+        Menu {
+            ForEach(tailscaleAccount.peers) { peer in
+                if let endpoint = peer.connectionHost {
+                    Button {
+                        transportForm.selectTailscalePeer(id: peer.id, host: endpoint)
+                        host = endpoint
+                        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { name = peer.name }
+                    } label: {
+                        Label(tailscalePeerTitle(peer), systemImage: selectedTailscalePeerID == peer.id ? "checkmark"
+                              : peer.isOnline ? "desktopcomputer" : "desktopcomputer.trianglebadge.exclamationmark")
+                    }
+                    .accessibilityIdentifier("tailscale-peer-" + peer.id)
+                    .accessibilityAddTraits(selectedTailscalePeerID == peer.id ? .isSelected : [])
+                }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "network").foregroundStyle(Ink.accent)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Tailscale device").font(.caption).foregroundStyle(Ink.meta)
+                    Text(tailscaleDeviceTitle).foregroundStyle(Ink.accent)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption).foregroundStyle(Ink.accent)
+            }
+        }
+        .disabled(tailscaleAccount.peers.isEmpty)
+        .accessibilityIdentifier("tailscale-choose-peer")
+        .accessibilityLabel(Text("Tailscale device"))
+        .accessibilityValue(tailscaleDeviceTitle)
+        .accessibilityHint(Text("Choosing a device fills in the SSH address below."))
+    }
+
+    private func bindInitialTailscaleAccount() {
+        guard transportForm.selection == .tailscale, transportForm.tailscaleAccountID == nil,
+              tailscaleAccount.state == .connected, let accountID = tailscaleAccount.accountID else { return }
+        transportForm.bindTailscaleAccount(accountID)
+    }
+
+    private var tailcatControls: some View {
+        Group {
+            FieldRow(placeholder: existing?.tailcatCredentialRef == nil || tailcatNeedsReplacementAddress
+                     ? "Tailcat 地址（tc…）" : "Tailcat 地址（留空保留已保存地址）",
+                     text: $transportForm.tailcatAddress, secure: true)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .privacySensitive()
+                .accessibilityIdentifier("tailcat-address")
+            Text("地址含连接凭据，仅保存在此设备的钥匙串中，不随连接配置导出。")
+                .font(.footnote).foregroundStyle(Ink.meta)
+            if tailcatNeedsReplacementAddress {
+                Text(TailcatCredentialError.missingCredential.localizedDescription)
+                    .font(.footnote).foregroundStyle(.orange)
+            }
+            if let publicKey = tailcatClientPublicKey {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("客户端公钥").font(.footnote).foregroundStyle(Ink.meta)
+                    Text(publicKey).font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("tailcat-client-public-key")
+                    Button("复制客户端公钥") { UIPasteboard.general.string = publicKey }
+                        .accessibilityIdentifier("tailcat-copy-client-key")
+                    Text("可将此公钥加入 Mac 上 Tailcat 的 --allow 白名单。保存后此设备会继续使用同一身份。")
+                        .font(.footnote).foregroundStyle(Ink.meta)
+                }
+            }
+            if tailcatBusy { ProgressView("正在读取 Tailcat 身份…") }
+            if let tailcatError {
+                Text(tailcatError).font(.footnote).foregroundStyle(.orange)
+                    .accessibilityIdentifier("tailcat-credential-error")
+                Button("重试读取 Tailcat 身份") { Task { await prepareTailcatIdentity() } }
+                    .disabled(tailcatBusy)
+                if tailcatCredentialMissing {
+                    Button("生成新的客户端身份") {
+                        tailcatNeedsReplacementAddress = true
+                        generateTailcatIdentity()
+                    }
+                        .disabled(tailcatBusy)
+                    Text("重新生成后，需要在 Mac 的白名单中添加新的客户端公钥。")
+                        .font(.footnote).foregroundStyle(Ink.meta)
+                }
+            }
+            Text("实验功能。请使用 Tailcat 转发远端的 SSH 端口，保留 SSH 登录认证。")
+                .font(.footnote).foregroundStyle(Ink.meta)
+                .accessibilityIdentifier("tailcat-experimental-notice")
+        }
+    }
+
+    @MainActor private func prepareTailcatIdentity() async {
+        guard tailcatClientPrivateKey == nil, !tailcatBusy else { return }
+        tailcatBusy = true
+        defer { tailcatBusy = false }
+        tailcatError = nil
+        tailcatCredentialMissing = false
+        guard let ref = existing?.tailcatCredentialRef else {
+            generateTailcatIdentity()
+            return
+        }
+        do {
+            let credential = try await TailcatCredentials.shared.load(ref: ref)
+            guard !Task.isCancelled, transportForm.selection == .tailcat else { return }
+            tailcatClientPrivateKey = credential.clientPrivateKey
+            tailcatClientPublicKey = credential.clientPublicKey
+        } catch {
+            guard !Task.isCancelled, transportForm.selection == .tailcat else { return }
+            tailcatError = error.localizedDescription
+            tailcatCredentialMissing = (error as? TailcatCredentialError) == .missingCredential
+        }
+    }
+
+    private func generateTailcatIdentity() {
+        do {
+            let identity = try TailcatIdentity.generateClientKey()
+            tailcatClientPrivateKey = identity.privateKey
+            tailcatClientPublicKey = identity.publicKey
+            tailcatError = nil
+            tailcatCredentialMissing = false
+        } catch {
+            tailcatError = TailcatCredentialError.invalidClientIdentity.localizedDescription
+        }
+    }
+
+    private var accessControls: some View {
+        Group {
+            if let account = accessAccount, account.settings == cloudflareSettings {
+                LabeledContent("Access 账号", value: account.label)
+                    .accessibilityIdentifier("cloudflare-access-account")
+                Button("退出此 Access 应用") { updateAccessAccount(signOut: true) }
+                    .disabled(accessBusy)
+                    .accessibilityIdentifier("cloudflare-access-sign-out")
+            } else {
+                Text("尚未登录此 Access 应用")
+                    .font(.footnote).foregroundStyle(Ink.meta)
+            }
+            Button { updateAccessAccount(signOut: false) } label: {
+                Label("登录 Cloudflare Access", systemImage: "person.crop.circle.badge.checkmark")
+            }
+            .disabled(cloudflareSettings == nil || accessBusy)
+            .accessibilityIdentifier("cloudflare-access-login")
+            if accessBusy { ProgressView("正在处理 Access 登录…") }
+            if let accessError {
+                Text(accessError).font(.footnote).foregroundStyle(.orange)
+                    .accessibilityIdentifier("cloudflare-access-error")
+            }
+        }
+    }
+
+    private func updateAccessAccount(signOut: Bool) {
+        guard !accessBusy, let settings = cloudflareSettings else { return }
+        accessBusy = true
+        accessError = nil
+        accessStatusGeneration += 1
+        accessOperationGeneration += 1
+        let generation = accessOperationGeneration
+        accessTask = Task { @MainActor in
+            defer {
+                if generation == accessOperationGeneration { accessBusy = false; accessTask = nil }
+            }
+            do {
+                if signOut {
+                    try await CloudflareAccessAuth.shared.signOut(settings: settings)
+                    if generation == accessOperationGeneration, cloudflareSettings == settings { accessAccount = nil }
+                } else {
+                    let label = try await CloudflareAccessAuth.shared.authorize(settings: settings)
+                    guard !Task.isCancelled, generation == accessOperationGeneration,
+                          cloudflareSettings == settings else { return }
+                    accessAccount = (settings, label)
+                }
+            } catch {
+                guard !Task.isCancelled, generation == accessOperationGeneration,
+                      cloudflareSettings == settings else { return }
+                accessError = error.localizedDescription
+            }
+        }
+    }
+
+    private func cancelAccessOperation() {
+        accessOperationGeneration += 1
+        accessStatusGeneration += 1
+        accessTask?.cancel()
+        accessTask = nil
+        accessBusy = false
     }
 
     private func save(connectAfter: Bool = false) async {
-        var connection = existing ?? ServerConnection()
+        guard !accessBusy, !saving, !tailcatBusy else { return }
+        guard transportForm.selection != .tailscale || tailscaleBindingReady else { return }
+        saving = true
+        defer { saving = false }
+        store.reloadIfNeeded()
+        guard store.isAuthoritative else {
+            saveError = TailcatCredentialError.storageUnavailable.localizedDescription
+            return
+        }
+        var connection: ServerConnection
+        do {
+            connection = try configuredConnection()
+        } catch {
+            saveError = error.localizedDescription
+            return
+        }
         connection.name = name
-        connection.host = host
-        connection.port = Int(port) ?? 22
-        connection.sshPort = Int(port) ?? 22
         connection.username = username
         connection.authMethod = authMethod
-        connection.connectionProtocol = useMosh ? .mosh : .ssh
         connection.moshPortRangeStart = settings.udpRangeStart
         connection.moshPortRangeEnd = settings.udpRangeEnd
         // Per-connection mosh-server (`--server`). Empty → nil → bootstrap uses
         // `mosh-server` on PATH (more portable than a hardcoded absolute path).
         connection.moshServerPath = moshServerPath.isEmpty ? nil : moshServerPath
-        connection.useSOCKSProxy = useSOCKSProxy
-        connection.socksProxyHost = socksProxyHost.isEmpty ? nil : socksProxyHost
-        connection.socksProxyPort = Int(socksProxyPort) ?? 1080
         connection.predictMode = predictMode
         connection.roamOnCellular = roamOnCellular
         connection.tmuxPath = tmuxPath.isEmpty ? nil : tmuxPath
@@ -327,7 +750,16 @@ struct AddConnectionView: View {
         // Also keeps the legacy `useTmux` flag in sync — see `multiplexer`.
         connection.multiplexer = multiplexer
 
+        var stagedTailcatRef: String?
         do {
+            if connection.transport == .tailcat, !transportForm.tailcatAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                guard let privateKey = tailcatClientPrivateKey else { throw TailcatCredentialError.invalidClientIdentity }
+                let credential = try TailcatCredential.create(address: transportForm.tailcatAddress, clientPrivateKey: privateKey)
+                let ref = try await TailcatCredentials.shared.save(credential)
+                stagedTailcatRef = ref
+                connection.tailcatCredentialRef = ref
+                connection.tailcatServerPublicKey = credential.serverPublicKey
+            }
             if let secret = ConnectionCredential.apply(
                 to: &connection, authMethod: authMethod, selectedKeyId: selectedKeyId,
                 keys: keyStore.keys, password: password, privateKeyPEM: privateKeyPEM,
@@ -342,14 +774,35 @@ struct AddConnectionView: View {
             // Drop any cached (possibly stale) credential so the new one is used.
             await SSHService.shared.clearCachedSecret(for: connection.id)
         } catch {
-            saveError = String(describing: error)
+            if let stagedTailcatRef { try? await TailcatCredentials.shared.delete(ref: stagedTailcatRef) }
+            saveError = error.localizedDescription
             return
         }
 
+        // Keychain writes suspend this task. A host can have been removed in
+        // the meantime; do not report a silent no-op update as a successful
+        // save or retire credentials still belonging to the original record.
+        store.reloadIfNeeded()
+        if connection.transport == .tailscale,
+           (tailscaleAccount.state != .connected || connection.tailscaleAccountID != tailscaleAccount.accountID) {
+            saveError = TailscaleAccountError.accountChanged.localizedDescription
+            return
+        }
+        if !store.isAuthoritative || (existing != nil && !store.connections.contains(where: { $0.id == connection.id })) {
+            if let stagedTailcatRef { try? await TailcatCredentials.shared.delete(ref: stagedTailcatRef) }
+            saveError = (store.isAuthoritative ? TailcatCredentialError.connectionRemoved : .storageUnavailable).localizedDescription
+            return
+        }
         if existing == nil {
             store.add(connection)
         } else {
             store.update(connection)
+        }
+        // Commit the new reference first. Replaced credentials remain intact
+        // through every earlier validation / Keychain failure.
+        if let previous = existing?.tailcatCredentialRef, previous != connection.tailcatCredentialRef,
+           !store.connections.contains(where: { $0.tailcatCredentialRef == previous }) {
+            try? await TailcatCredentials.shared.delete(ref: previous)
         }
         dismiss()
         if connectAfter { onConnect?(connection) }

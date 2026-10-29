@@ -1,5 +1,6 @@
 import Observation
 import SwiftUI
+import MoshpitKit
 
 /// The hardware-keyboard chords of whichever screen currently owns them.
 ///
@@ -13,6 +14,7 @@ import SwiftUI
 /// the Home toolbar's shortcuts outright.) The scene's `.commands` menu is
 /// dispatched by the menu system, focused or not, so `TerminalCommands`
 /// declares the chords once and the screen on duty registers what they do.
+/// The empty iPad home/detail layout needs the same scene-level dispatch.
 @MainActor @Observable
 final class HardwareKeys {
     static let shared = HardwareKeys()
@@ -25,8 +27,11 @@ final class HardwareKeys {
 
     @ObservationIgnored private var owner: UUID?
     @ObservationIgnored private var actions: [Character: () -> Void] = [:]
+    @ObservationIgnored private var homeOwner: UUID?
+    @ObservationIgnored private var homeActions: [Character: () -> Void] = [:]
     /// Whether a screen has chords registered; the menu greys out otherwise.
     private(set) var isActive = false
+    private(set) var isHomeActive = false
 
     /// Replaces the set. `owner` lets a screen that is being swapped for
     /// another instance of itself (iPad sidebar, `.id`) release only its own
@@ -52,14 +57,55 @@ final class HardwareKeys {
         action()
         return true
     }
+
+    /// Home can remain mounted beside a terminal on iPad. Keep its lifecycle
+    /// separate so a sidebar appearing/disappearing cannot replace terminal
+    /// commands or unregister their owner.
+    func installHome(owner: UUID, _ list: [Command]) {
+        homeOwner = owner
+        homeActions = Dictionary(uniqueKeysWithValues: list.map { ($0.key, $0.action) })
+        isHomeActive = !homeActions.isEmpty
+        Log.input.info("hardware home: registered")
+    }
+
+    func uninstallHome(owner: UUID) {
+        guard homeOwner == owner else { return }
+        homeOwner = nil
+        homeActions = [:]
+        isHomeActive = false
+        Log.input.info("hardware home: unregistered")
+    }
+
+    @discardableResult
+    func performHome(_ key: Character) -> Bool {
+        guard let action = homeActions[key] else {
+            Log.input.info("hardware home: no active action")
+            return false
+        }
+        Log.input.info("hardware home: action \(String(key), privacy: .public)")
+        action()
+        return true
+    }
 }
 
-/// ⌘K / ⌘W / ⌘1–9 while a terminal is on screen. Titles show in the iPad
-/// ⌘-hold overlay under "Terminal".
+/// Home's ⌘, / ⌘N and the terminal's ⌘K / ⌘W / ⌘1–9. Titles show in the
+/// iPad ⌘-hold overlay, and each screen registers only its own actions.
 struct TerminalCommands: Commands {
     private static let numbers: [Character] = Array("123456789")
 
     var body: some Commands {
+        // These chords already belong to the system's Settings/New groups.
+        // Replace those entries rather than competing from another menu. Keep
+        // registration static like the terminal commands: the current owner
+        // checks availability at dispatch, even before any editor has focus.
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings") { HardwareKeys.shared.performHome(",") }
+                .keyboardShortcut(",", modifiers: .command)
+        }
+        CommandGroup(replacing: .newItem) {
+            Button("Add Host") { HardwareKeys.shared.performHome("n") }
+                .keyboardShortcut("n", modifiers: .command)
+        }
         CommandMenu("Terminal") {
             Button("Switch Window") { HardwareKeys.shared.perform("k") }
                 .keyboardShortcut("k", modifiers: .command)

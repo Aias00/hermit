@@ -22,8 +22,11 @@ import MoshpitKit
 @main
 struct MoshpitIslandBundle: WidgetBundle {
     var body: some Widget {
+        ConnectionLiveActivityWidget()
+        #if !MOSHPIT_CONNECTION_ACTIVITY_ONLY
         MoshpitIslandLiveActivity()
         MoshpitStatusWidget()   // home- / lock-screen agent status (App Group pull)
+        #endif
     }
 }
 #endif

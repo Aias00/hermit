@@ -101,6 +101,30 @@ struct HerdrFrameChannelTests {
         #expect(!message.hasSuffix("\r"))
     }
 
+    @Test("Rejected stdin is a recoverable warning and following screen frames remain usable",
+          arguments: ["expected value at line 1 column 1", "invalid command containing {"])
+    func inputIgnoredDoesNotMeanAttachEnded(detail: String) {
+        var parser = HerdrFrameParser()
+        let message = "terminal session control input ignored: invalid json command: " + detail
+        let warning = Data(("herdr: " + message + "\r\n").utf8)
+        let cut = warning.count / 2
+        #expect(parser.consume(warning.prefix(cut)).isEmpty)
+        let frames = parser.consume(warning.suffix(from: cut)
+            + Data((frameLine(seq: 2, payload: "still attached") + "\n").utf8))
+        #expect(frames == [.inputIgnored(message: message),
+                          .screen(seq: 2, width: 60, height: 20, full: false,
+                                  bytes: Data("still attached".utf8))])
+    }
+
+    @Test("A terminal close and the shell's subsequent stdin handoff are distinct events")
+    func readerReadyFollowsProcessExit() {
+        var parser = HerdrFrameParser()
+        #expect(parser.consume(Data("{\"type\":\"terminal.closed\"}\n".utf8))
+                == [.closed(reason: nil)])
+        #expect(parser.consume(Data((HerdrFrameCommand.readerReadyMarker + "\r\n").utf8))
+                == [.readerReady])
+    }
+
     @Test("A JSON error envelope is a fault too — protocol_mismatch is the live case")
     func parsesErrorEnvelope() throws {
         var parser = HerdrFrameParser()
@@ -265,7 +289,7 @@ struct HerdrFrameChannelTests {
         #expect(command.contains("terminal session control \"$1\""))
         #expect(command.contains("--takeover"))
         // EOF ends the loop; a failed attach does not.
-        #expect(command.contains("read -r t c r || break"))
+        #expect(command.contains("read -r tag t c r || exit"))
         // The marker is what tells the app the loop is really there.
         #expect(command.contains(HerdrFrameCommand.readyMarker))
     }
@@ -290,8 +314,8 @@ struct HerdrFrameChannelTests {
     @Test("A retarget is one line the loop's `read` can split")
     func retargetLine() {
         let line = HerdrFrameCommand.retarget(target: "term_abc", cols: 52, rows: 30)
-        #expect(line == "term_abc 52 30")
+        #expect(line == "moshpit.target term_abc 52 30")
         // The loop passes these straight to --cols/--rows, which reject 0.
-        #expect(HerdrFrameCommand.retarget(target: "t", cols: 0, rows: -3) == "t 1 1")
+        #expect(HerdrFrameCommand.retarget(target: "t", cols: 0, rows: -3) == "moshpit.target t 1 1")
     }
 }

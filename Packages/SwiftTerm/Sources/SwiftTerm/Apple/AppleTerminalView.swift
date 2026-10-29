@@ -566,7 +566,7 @@ extension TerminalView {
         
         mutating func append(text: String, attributes: [NSAttributedString.Key: Any]) {
             attributedString.append(NSAttributedString(string: text, attributes: attributes))
-            characterCount += 1
+            characterCount += text.count
         }
         
         func buildIfNeeded() -> ViewLineSegment? {
@@ -1280,12 +1280,12 @@ extension TerminalView {
             }
 
             // Pre-create CTLines and runs once per row to avoid duplicate creation
-            let preparedSegments: [(segment: ViewLineSegment, ctLine: CTLine, runs: [CTRun])] =
+            let preparedSegments: [(segment: ViewLineSegment, layout: TerminalGlyphLayout, runs: [CTRun])] =
                 lineInfo.segments.compactMap { segment in
                     guard segment.attributedString.length > 0 else { return nil }
                     let ctLine = CTLineCreateWithAttributedString(segment.attributedString)
                     guard let runs = CTLineGetGlyphRuns(ctLine) as? [CTRun] else { return nil }
-                    return (segment, ctLine, runs)
+                    return (segment, TerminalGlyphLayout(text: segment.attributedString.string, line: ctLine), runs)
                 }
 
             // Background fill loop — uses cached CTLines
@@ -1295,15 +1295,15 @@ extension TerminalView {
             context.setLineWidth(0)
 
             for prepared in preparedSegments {
-                var processedGlyphs = 0
                 for run in prepared.runs {
                     let runGlyphsCount = CTRunGetGlyphCount(run)
                     if runGlyphsCount == 0 {
                         continue
                     }
                     let runAttributes = CTRunGetAttributes(run) as? [NSAttributedString.Key: Any] ?? [:]
-                    let startColumn = prepared.segment.column + (processedGlyphs * prepared.segment.columnWidth)
-                    let endColumn = startColumn + (runGlyphsCount * prepared.segment.columnWidth)
+                    let cells = prepared.layout.cells(in: CTRunGetStringRange(run))
+                    let startColumn = prepared.segment.column + cells.lowerBound * prepared.segment.columnWidth
+                    let endColumn = prepared.segment.column + cells.upperBound * prepared.segment.columnWidth
                     var backgroundColor: TTColor?
                     if runAttributes.keys.contains(.selectionBackgroundColor) {
                         backgroundColor = runAttributes[.selectionBackgroundColor] as? TTColor
@@ -1342,7 +1342,6 @@ extension TerminalView {
                             #endif
                         }
                     }
-                    processedGlyphs += runGlyphsCount
                 }
             }
 
@@ -1379,7 +1378,6 @@ extension TerminalView {
 
             // Glyph drawing loop — reuses cached CTLines
             for prepared in preparedSegments {
-                var processedGlyphs = 0
                 for run in prepared.runs {
                     let runGlyphsCount = CTRunGetGlyphCount(run)
                     if runGlyphsCount == 0 {
@@ -1387,23 +1385,15 @@ extension TerminalView {
                     }
                     let runAttributes = CTRunGetAttributes(run) as? [NSAttributedString.Key: Any] ?? [:]
                     let runFont = runAttributes[.font] as! TTFont
-                    let startColumn = prepared.segment.column + (processedGlyphs * prepared.segment.columnWidth)
-
                     let runGlyphs = [CGGlyph](unsafeUninitializedCapacity: runGlyphsCount) { (bufferPointer, count) in
                         CTRunGetGlyphs(run, CFRange(), bufferPointer.baseAddress!)
                         count = runGlyphsCount
                     }
 
-                    var coreTextPositions = [CGPoint](repeating: .zero, count: runGlyphsCount)
-                    CTRunGetPositions(run, CFRange(), &coreTextPositions)
-
-                    var positions = [CGPoint](repeating: .zero, count: runGlyphsCount)
-                    for i in 0..<runGlyphsCount {
-                        let ctPosition = coreTextPositions[i]
-                        let glyphColumn = startColumn + (i * prepared.segment.columnWidth)
-                        positions[i] = CGPoint(
-                            x: lineOrigin.x + CGFloat(glyphColumn) * cellDimension.width,
-                            y: lineOrigin.y + yOffset + ctPosition.y)
+                    let positions = prepared.layout.positions(in: run).map { glyph in
+                        let column = prepared.segment.column + glyph.cell * prepared.segment.columnWidth
+                        return CGPoint(x: lineOrigin.x + CGFloat(column) * cellDimension.width + glyph.offset.x,
+                                       y: lineOrigin.y + yOffset + glyph.offset.y)
                     }
 
                     nativeForegroundColor.set()
@@ -1417,12 +1407,19 @@ extension TerminalView {
                         context.setFillColor(cgColor)
                     }
 
-                    CTFontDrawGlyphs(runFont, runGlyphs, &positions, positions.count, context)
+                    CTFontDrawGlyphs(runFont, runGlyphs, positions, positions.count, context)
 
-                    // Draw other attributes
-                    drawRunAttributes(runAttributes, glyphPositions: positions, in: context)
+                    // Decorations cover cells, including both halves of a
+                    // wide character, rather than repeating for every mark.
+                    let cells = prepared.layout.cells(in: CTRunGetStringRange(run))
+                    let firstColumn = prepared.segment.column + cells.lowerBound * prepared.segment.columnWidth
+                    let endColumn = prepared.segment.column + cells.upperBound * prepared.segment.columnWidth
+                    let decorationPositions = (firstColumn..<endColumn).map { column in
+                        CGPoint(x: lineOrigin.x + CGFloat(column) * cellDimension.width,
+                                y: lineOrigin.y + yOffset)
+                    }
+                    drawRunAttributes(runAttributes, glyphPositions: decorationPositions, in: context)
 
-                    processedGlyphs += runGlyphsCount
                 }
             }
 

@@ -299,6 +299,9 @@ final class ShortcutStore {
     }
 
     /// Read again if the last read could not be trusted; a no-op otherwise.
+    /// Re-read a validated iCloud import and publish the new collection.
+    func reloadAfterCloudSync() { load() }
+
     func reloadIfNeeded() {
         if !isAuthoritative { load() }
     }
@@ -431,6 +434,16 @@ final class ShortcutStore {
         // `reconcileBuiltins()` — refuses to write over a read it cannot trust.
         isAuthoritative = readiness.isReadable(defaults)
         if isAuthoritative { readiness.markReadable(defaults) }
+        // Keep malformed persisted data intact. Otherwise seeding the default
+        // toolbar here would disguise a decode failure as a deliberate edit
+        // and an iCloud pass could overwrite the user's cloud toolbar with it.
+        if let object = defaults.object(forKey: Self.storageKey) {
+            guard let data = object as? Data,
+                  (try? JSONDecoder().decode([TerminalShortcut].self, from: data)) != nil else {
+                shortcuts = Self.builtins
+                return
+            }
+        }
         if let data = defaults.data(forKey: Self.storageKey),
            let decoded = try? JSONDecoder().decode([TerminalShortcut].self, from: data),
            !decoded.isEmpty {
@@ -645,6 +658,7 @@ final class ShortcutStore {
             // summary-keyed catch-all in `reconcileBuiltins`, at the trailing
             // end, so nothing already in the bar moves.
             special(.files, "files", "Browse files", inBar: true),
+            combo("⇧←", "Shift + Left", mods: [.shift], key: "left"),
             // Return, and the Claude Code two-step. Tab accepts whatever
             // Claude Code is suggesting and Return sends it, which is two taps
             // in the one place you least want them — so `⇥⏎` sends 0x09 0x0D

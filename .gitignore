@@ -43,6 +43,9 @@ xcuserdata/
 /Packages/*/.build/
 /Packages/*/.swiftpm/
 
+# Rebuilt from pinned sources by scripts/build-tailcat.sh before XcodeGen.
+/Packages/TailcatSSH/Artifacts/
+
 # The Xcode project is a GENERATED artifact — project.yml is the source of
 # truth and CI regenerates it from scratch (`xcodegen generate`). Only the
 # SwiftPM lockfile inside it is real state worth versioning: it pins the

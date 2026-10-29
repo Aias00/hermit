@@ -176,6 +176,7 @@ struct ShortcutStoreTests {
         // files chip tripped the same wire.
         ShortcutStore.builtins
             .filter { $0.kind != .mic && $0.kind != .arrows && $0.kind != .image && $0.kind != .files }
+            .filter { $0.summary != "Shift + Left" }
             .map { shortcut in
                 var restored = shortcut
                 if restored.summary == "Clear screen" { restored.inToolbar = true }
@@ -190,7 +191,7 @@ struct ShortcutStoreTests {
         return ShortcutStore(defaults: defaults)
     }
 
-    @Test("seeds a lean default toolbar: esc, tab, interrupt, paste, arrows, mic, img, files")
+    @Test("seeds a lean default toolbar including Shift + Left")
     func defaultToolbar() throws {
         let store = freshStore()
         let labels = store.toolbar.map(\.chipLabel)
@@ -203,9 +204,8 @@ struct ShortcutStoreTests {
         // chip trails even that — same "attach something" family as the mic,
         // added to the defaults with the M1 image-attach feature. The files
         // chip trails the image: the way back out to what an agent wrote.
-        #expect(store.toolbarCount == 8)
-        #expect(labels == ["esc", "tab", "^C", "paste", "✛", "mic", "img", "files"])
-        #expect(store.toolbar.last?.kind == .files)
+        #expect(store.toolbarCount == 9)
+        #expect(labels == ["esc", "tab", "^C", "paste", "✛", "mic", "img", "files", "⇧←"])
         #expect(store.available.contains { $0.kind == .ctrl })
         #expect(store.available.contains { $0.kind == .scroll })
         #expect(allBuiltin)
@@ -216,8 +216,36 @@ struct ShortcutStoreTests {
         let store = freshStore()
         let saved = store.toolbar
         let extra = store.supplementaryToolbar(forHost: "test", inMultiplexer: true)
-        #expect(extra.map(\.chipLabel) == ["tab", "^C", "paste"])
+        #expect(extra.map(\.chipLabel) == ["tab", "^C", "paste", "⇧←"])
+        #expect(extra.last?.encodedStages() == [Data("\u{1B}[1;2D".utf8)])
         #expect(store.toolbar == saved)
+    }
+
+    @Test("Shift + Left upgrades preserve existing keys, toolbar capacity and later hiding", arguments: [false, true])
+    func shiftLeftUpgrade(fullToolbar: Bool) throws {
+        let suite = "test.shortcuts.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var previous = ShortcutStore.builtins.filter { $0.summary != "Shift + Left" }
+        if fullToolbar {
+            for index in previous.filter(\.inToolbar).count ..< ShortcutStore.toolbarLimit {
+                var custom = TerminalShortcut()
+                custom.key = "x"
+                custom.chipLabel = "custom\(index)"
+                previous.append(custom)
+            }
+        }
+        let existingIDs = previous.filter(\.inToolbar).map(\.id)
+        defaults.set(try JSONEncoder().encode(previous), forKey: "moshpit.shortcuts.v1")
+
+        let migrated = ShortcutStore(defaults: defaults)
+        let shortcut = try #require(migrated.shortcuts.first { $0.summary == "Shift + Left" })
+        #expect(migrated.toolbar.filter { $0.id != shortcut.id }.map(\.id) == existingIDs)
+        #expect(shortcut.inToolbar == !fullToolbar)
+        migrated.removeFromToolbar(id: shortcut.id)
+        let reloaded = ShortcutStore(defaults: defaults)
+        #expect(reloaded.shortcuts.filter { $0.summary == "Shift + Left" }.map(\.id) == [shortcut.id])
+        #expect(reloaded.available.contains { $0.id == shortcut.id })
     }
 
     @Test("Overflow preserves host-scoped custom shortcuts and removes raw Escape aliases")
@@ -265,7 +293,7 @@ struct ShortcutStoreTests {
         #expect(width <= 402 - 54, "core keys overflow: \(width)pt")
         // And the feature chips are where the contract expects them — at the
         // trailing edge, where clipping only ever hides a re-openable door.
-        #expect(store.toolbar.last?.kind == .files)
+        #expect(store.toolbar.suffix(2).map(\.chipLabel) == ["files", "⇧←"])
     }
 
     @Test("the tap-first cluster ships available but out of the bar")
@@ -292,7 +320,9 @@ struct ShortcutStoreTests {
         // was the only way to move a cursor sideways, which is the press-and-
         // hold complaint in its purest form.
         for key in ["up", "down", "left", "right"] {
-            let sc = try #require(store.shortcuts.first { $0.kind == .keyCombo && $0.key == key },
+            let sc = try #require(store.shortcuts.first {
+                $0.kind == .keyCombo && $0.key == key && $0.modifiers.isEmpty
+            },
                                   "no builtin chip for \(key)")
             #expect(sc.repeatOnHold, "\(key) should hold-to-repeat like a hardware key")
             #expect(!sc.inToolbar, "the cluster covers all four; single chips stay available")
@@ -338,8 +368,8 @@ struct ShortcutStoreTests {
         // At the trailing edge, which is where the pinned key already sat — so
         // no existing chip shifts under the user's thumb. The image and files
         // chips (later builtins, injected by the summary-keyed catch-all AFTER
-        // this migration) land behind it, so the tail reads [mic, img, files].
-        #expect(store.toolbar.suffix(3).map(\.kind) == [.mic, .image, .files])
+        // this migration) land behind it, followed by the newer Shift + Left.
+        #expect(store.toolbar.suffix(4).map(\.chipLabel) == ["mic", "img", "files", "⇧←"])
         // And it makes room for itself rather than overflowing the row.
         #expect(!store.toolbar.contains { $0.chipLabel == "^L" })
         #expect(store.available.contains { $0.chipLabel == "^L" })
@@ -361,11 +391,11 @@ struct ShortcutStoreTests {
         defaults.set(try JSONEncoder().encode(previous), forKey: "moshpit.shortcuts.v1")
 
         let store = ShortcutStore(defaults: defaults)
-        // Six after ^L leaves, plus the image and files chips the catch-all
+        // Six after ^L leaves, plus image, files and Shift + Left the catch-all
         // injects behind the mic (they postdate this whole migration era).
-        #expect(store.toolbarCount == 8)
+        #expect(store.toolbarCount == 9)
         #expect(!store.toolbar.contains { $0.chipLabel == "^L" })
-        #expect(store.toolbar.suffix(3).map(\.kind) == [.mic, .image, .files])
+        #expect(store.toolbar.suffix(4).map(\.chipLabel) == ["mic", "img", "files", "⇧←"])
     }
 
     @Test("a customized toolbar keeps every key the user put in it")
