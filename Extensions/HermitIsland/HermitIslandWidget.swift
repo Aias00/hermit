@@ -196,6 +196,7 @@ struct LockScreenView: View {
         // vertical crowding is what reads as unfinished. 18 was the earlier
         // value, chosen when the card's height was believed rather than
         // measured; it was being paid for with content that fell off the end.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }

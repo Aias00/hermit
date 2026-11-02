@@ -188,19 +188,53 @@ struct ConnectionLiveActivityTests {
     @Test("connection activity fits the lock screen at phone and tablet widths",
           arguments: [320.0, 360.0, 600.0])
     func lockScreenFits(width: Double) {
-        for stale in [false, true] {
-            var value = content()
-            value.headlineName = String(repeating: "long-host-", count: 8)
-            value.attentionCount = 10
-            value.workingCount = 10
-            value.programName = "Claude Code"
-            value.workspaceName = String(repeating: "workspace-", count: 8)
-            value.transportName = "Cloudflare"
-            value.taskState = .attention
-            let renderer = ImageRenderer(content: ConnectionActivityLockScreen(state: value,
-                isStale: stale).frame(width: width))
-            let height = renderer.uiImage?.size.height ?? .infinity
-            #expect(height > 20 && height <= 160)
+        var long = content()
+        long.headlineName = String(repeating: "long-host-", count: 8)
+        long.attentionCount = 10
+        long.workingCount = 10
+        long.programName = "Claude Code"
+        long.workspaceName = String(repeating: "workspace-", count: 8)
+        long.transportName = "Cloudflare"
+        long.taskState = .attention
+        var working = content()
+        working.headlineName = "Mac mini"
+        working.programName = "Codex"
+        working.workspaceName = "Hermit · main"
+        working.transportName = "Relay"
+        working.taskState = .working
+        working.workingCount = 2
+        var plain = content()
+        plain.headlineName = "Mac mini"
+        plain.transportName = "SSH"
+        var failed = working
+        failed.programName = "Shell"
+        failed.taskState = .done
+        failed.workingCount = 0
+        failed.doneCount = 1
+        failed.commandExitCode = 127
+        var reconnecting = plain
+        reconnecting.connectionState = .reconnecting
+        let variants = [("long-attention", long), ("working", working),
+                        ("plain-ssh", plain), ("command-failed", failed), ("reconnecting", reconnecting)]
+        for (name, value) in variants {
+            for stale in [false, true] {
+                let renderer = ImageRenderer(content: ConnectionActivityLockScreen(state: value, isStale: stale)
+                    .environment(\.colorScheme, .dark)
+                    .background(Color.black))
+                // Propose the system card width instead of forcing an outer
+                // frame that could conceal an intrinsically narrow layout.
+                renderer.proposedSize = ProposedViewSize(width: width, height: nil)
+                let image = renderer.uiImage
+                let height = image?.size.height ?? .infinity
+                #expect(height > 20 && height <= 160, "\(name) must fit the system card")
+                #expect(image?.size.width == CGFloat(width), "\(name) must use the available card width")
+                if let directory = ProcessInfo.processInfo.environment["MOSHPIT_ACTIVITY_LAYOUT_OUTPUT"],
+                   let png = image?.pngData() {
+                    let output = URL(fileURLWithPath: directory, isDirectory: true)
+                    try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+                    try? png.write(to: output.appendingPathComponent("\(name)-\(Int(width))-\(stale ? "stale" : "live").png"))
+                }
+            }
         }
     }
 

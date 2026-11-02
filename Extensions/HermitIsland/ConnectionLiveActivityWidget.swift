@@ -89,16 +89,25 @@ struct ConnectionActivityLockScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label(state.headlineName ?? "Hermit", systemImage: "terminal")
-                    .font(.headline).lineLimit(1)
+                Label {
+                    Text(state.headlineName ?? "Hermit").truncationMode(.middle)
+                } icon: {
+                    Image(systemName: "terminal").foregroundStyle(.cyan)
+                }
+                .font(.headline).lineLimit(1)
                 Spacer(minLength: 8)
                 Text("\(state.connectionCount) connections")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.white.opacity(0.07), in: Capsule())
+                    .fixedSize()
             }
             ConnectionActivityDetails(state: state, isStale: isStale)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(.white)
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("connection-live-activity-card")
     }
@@ -109,39 +118,69 @@ private struct ConnectionActivityDetails: View {
     let isStale: Bool
     private var presentation: ActivityPresentation { .init(state: state, isStale: isStale) }
 
+    private var context: String {
+        // Plain SSH already uses the transport as its title.
+        let transport = state.programName == nil ? nil : state.transportName
+        return [transport, state.workspaceName].compactMap { $0 }.joined(separator: " · ")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                if let program = state.programName {
-                    Text(verbatim: program).fontWeight(.semibold)
-                    Text("·").foregroundStyle(.secondary)
+        VStack(spacing: 9) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(verbatim: state.programName ?? state.transportName ?? "Hermit")
+                        .font(.subheadline.weight(.semibold)).lineLimit(1)
+                    if !context.isEmpty {
+                        Text(verbatim: context)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
                 }
-                Label(presentation.label, systemImage: presentation.symbol)
-                    .foregroundStyle(presentation.color)
-            }
-            .font(.subheadline).lineLimit(1).minimumScaleFactor(0.85)
-            let context = [state.transportName, state.workspaceName].compactMap { $0 }.joined(separator: " · ")
-            if !context.isEmpty {
-                Text(verbatim: context).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .trailing, spacing: 6) {
+                    Label(presentation.label, systemImage: presentation.symbol)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(presentation.color)
+                        .lineLimit(3).multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(presentation.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                    taskCounts
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             HStack(spacing: 8) {
-                if state.attentionCount > 0 {
-                    Label("\(state.attentionCount) need attention", systemImage: "exclamationmark.circle")
-                        .foregroundStyle(presentation.historical ? Color.secondary : Color.orange)
-                }
-                if state.workingCount > 0 {
-                    Label("\(state.workingCount) working", systemImage: "gearshape.2")
-                }
-                if state.doneCount > 0 && state.attentionCount == 0 && state.workingCount == 0 {
-                    Label("\(state.doneCount) completed", systemImage: "checkmark.circle")
-                }
-            }
-            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            HStack(spacing: 4) {
                 Text(presentation.historical ? String(localized: "Last known status") : String(localized: "State as of"))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
                 Text(state.statusDate, format: .dateTime.hour().minute())
+                    .monospacedDigit().fixedSize()
             }
-            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            .font(.caption2).foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var taskCounts: some View {
+        HStack(spacing: 10) {
+            if state.attentionCount > 0 {
+                Label("\(state.attentionCount)", systemImage: "exclamationmark.circle")
+                    .foregroundStyle(presentation.historical ? Color.secondary : Color.orange)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text("\(state.attentionCount) need attention"))
+            }
+            if state.workingCount > 0 {
+                Label("\(state.workingCount)", systemImage: "gearshape.2")
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text("\(state.workingCount) working"))
+            }
+            if state.doneCount > 0 && state.attentionCount == 0 && state.workingCount == 0 {
+                Label("\(state.doneCount)", systemImage: "checkmark.circle")
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text("\(state.doneCount) completed"))
+            }
+        }
+        .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
     }
 }
