@@ -31,6 +31,7 @@ enum ConnectionTransport: String, Codable, CaseIterable, Sendable {
     case cloudflareSSH
     case tailcat
     case tailscale
+    case relay
 
     var label: String {
         switch self {
@@ -39,10 +40,11 @@ enum ConnectionTransport: String, Codable, CaseIterable, Sendable {
         case .cloudflareSSH: return String(localized: "Cloudflare SSH (Experimental)")
         case .tailcat: return String(localized: "Tailcat (Experimental)")
         case .tailscale: return String(localized: "Tailscale (Experimental)")
+        case .relay: return "RemoteForge Relay"
         }
     }
 
-    var requiresSSH: Bool { self == .cloudflareSSH || self == .tailcat || self == .tailscale }
+    var requiresSSH: Bool { self == .cloudflareSSH || self == .tailcat || self == .tailscale || self == .relay }
 }
 
 /// Binds a saved host to the app's Tailscale account and, when selected from
@@ -138,6 +140,7 @@ enum SSHTransportConfiguration: Equatable, Sendable {
     case cloudflare(CloudflareConnectionSettings)
     case tailcat(TailcatConnectionSettings)
     case tailscale(TailscaleConnectionSettings)
+    case relay(RelayConnectionSettings)
 }
 
 /// Configuration errors are permanent until the user edits the connection;
@@ -158,6 +161,8 @@ enum ConnectionTransportError: Error, Equatable, LocalizedError, Sendable {
     case invalidTailcatHostAlias
     case tailscaleRequiresSSH
     case invalidTailscaleConfiguration
+    case relayRequiresSSH
+    case invalidRelayConfiguration
 
     var errorDescription: String? {
         switch self {
@@ -189,6 +194,10 @@ enum ConnectionTransportError: Error, Equatable, LocalizedError, Sendable {
             return String(localized: "Use a name such as mac-mini for the SSH host alias. Paste the secret tc address only in the Tailcat address field.")
         case .tailscaleRequiresSSH:
             return String(localized: "This Tailscale connection carries SSH over TCP. Select SSH instead of Mosh.")
+        case .relayRequiresSSH:
+            return "Relay carries SSH over TCP. Select SSH instead of Mosh."
+        case .invalidRelayConfiguration:
+            return "Import a valid Relay invitation and pair this device first."
         case .invalidTailscaleConfiguration:
             return String(localized: "Sign in to Tailscale in this app and select an account for this connection.")
         }
@@ -344,6 +353,10 @@ struct ServerConnection: Identifiable, Codable, Equatable {
     var tailcatServerPublicKey: String?
     var tailscaleAccountID: String?
     var tailscalePeerID: String?
+    var relayServer: String?
+    var relayDeviceID: String?
+    var relayService: String?
+    var relayCredentialRef: String?
 
     var transport: ConnectionTransport? {
         if let transportRaw { return ConnectionTransport(rawValue: transportRaw) }
@@ -388,6 +401,10 @@ struct ServerConnection: Identifiable, Codable, Equatable {
             guard connectionProtocol == .ssh else { throw ConnectionTransportError.tailscaleRequiresSSH }
             return .tailscale(try TailscaleConnectionSettings.validated(
                 accountID: tailscaleAccountID, peerID: tailscalePeerID))
+        case .relay:
+            guard connectionProtocol == .ssh else { throw ConnectionTransportError.relayRequiresSSH }
+            return .relay(try RelayConnectionSettings.validated(server: relayServer, deviceID: relayDeviceID,
+                service: relayService, credentialRef: relayCredentialRef))
         }
     }
 
@@ -470,7 +487,11 @@ struct ServerConnection: Identifiable, Codable, Equatable {
         tailcatCredentialRef: String? = nil,
         tailcatServerPublicKey: String? = nil,
         tailscaleAccountID: String? = nil,
-        tailscalePeerID: String? = nil
+        tailscalePeerID: String? = nil,
+        relayServer: String? = nil,
+        relayDeviceID: String? = nil,
+        relayService: String? = nil,
+        relayCredentialRef: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -508,6 +529,10 @@ struct ServerConnection: Identifiable, Codable, Equatable {
         self.tailcatServerPublicKey = tailcatServerPublicKey
         self.tailscaleAccountID = tailscaleAccountID
         self.tailscalePeerID = tailscalePeerID
+        self.relayServer = relayServer
+        self.relayDeviceID = relayDeviceID
+        self.relayService = relayService
+        self.relayCredentialRef = relayCredentialRef
     }
 
     var displayName: String {

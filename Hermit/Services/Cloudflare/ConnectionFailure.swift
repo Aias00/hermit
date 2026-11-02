@@ -1,3 +1,5 @@
+import RemoteForgeRelay
+import RemoteForgeRelayNIO
 import CloudflareAccess
 import CloudflareSSH
 import TailcatSSH
@@ -25,6 +27,12 @@ struct ConnectionFailure: Equatable {
         }
         if error is ConnectionTransportError || error is HostKeyRejected || error is TailcatCredentialError {
             recovery = .userAction
+        } else if error is RelayCredentialError {
+            recovery = .userAction
+        } else if let relay = error as? RelayError {
+            recovery = RelayErrorMessage.isRetryable(relay) ? .retry : .userAction
+        } else if let relay = error as? RelayNIOError {
+            recovery = relay == .closed || relay == .activationTimedOut ? .retry : .userAction
         } else if let account = error as? TailscaleAccountError {
             recovery = account.isRetryable ? .retry : .userAction
         } else if let transport = error as? TailscaleSSHTransportError {

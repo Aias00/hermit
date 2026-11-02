@@ -12,7 +12,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The camera lets you photograph something — a whiteboard, a sketch, a screen — and attach it to your terminal session. Photos are stripped of location data on this device and uploaded only to your own server."
+            "value": "Scan Relay pairing QR codes or photograph something — a whiteboard, a sketch, a screen — and attach it to your terminal session. Photos are stripped of location data on this device and uploaded only to your own server."
           }
         },
         "es": {
@@ -48,13 +48,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "相机用来拍点东西，比如白板、草图、屏幕，然后附到终端会话里。照片会在这台设备上去掉位置信息，只上传到你自己的服务器。"
+            "value": "相机可扫描 Relay 配对二维码，也可拍摄白板、草图或屏幕并附到终端会话里。照片会在本机去掉位置信息，只上传到你自己的服务器。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "相機用來拍點東西，比如白板、草圖、螢幕，然後附加到終端機工作階段。照片會在這部裝置上移除位置資訊，只上傳到你自己的伺服器。"
+            "value": "相機可掃描 Relay 配對 QR Code，也可拍攝白板、草圖或螢幕並附加到終端機工作階段。照片會在本機移除位置資訊，只上傳到你自己的伺服器。"
           }
         }
       }

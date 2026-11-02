@@ -27,6 +27,7 @@ enum HostListPresentation {
         case .cloudflareSSH: return "Cloudflare"
         case .tailcat: return "Tailcat"
         case .tailscale: return "Tailscale"
+        case .relay: return "Relay"
         case nil: return String(localized: "Unknown transport")
         }
     }
@@ -36,6 +37,7 @@ enum HostListPresentation {
         case .direct: return "network"
         case .socks5: return "arrow.triangle.branch"
         case .cloudflareSSH: return "cloud"
+        case .relay: return "point.topleft.down.to.point.bottomright.curvepath"
         case .tailcat, .tailscale: return "point.3.connected.trianglepath.dotted"
         case nil: return "exclamationmark.triangle"
         }

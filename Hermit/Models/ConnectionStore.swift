@@ -63,10 +63,15 @@ final class ConnectionStore {
     /// cleanup. If the device is locked or deletion fails, the record remains
     /// available for retry instead of losing the only reference to its secret.
     @MainActor
-    func deleteSecurely(id: UUID, tailcatCredentials: TailcatCredentials = .shared) async throws {
+    func deleteSecurely(id: UUID, tailcatCredentials: TailcatCredentials = .shared,
+                        relayCredentials: RelayCredentials = .shared) async throws {
         reloadIfNeeded()
         guard isAuthoritative else { throw TailcatCredentialError.storageUnavailable }
         guard let connection = connections.first(where: { $0.id == id }) else { return }
+        if let ref = connection.relayCredentialRef,
+           !connections.contains(where: { $0.id != id && $0.relayCredentialRef == ref }) {
+            try await relayCredentials.delete(ref: ref)
+        }
         if let ref = connection.tailcatCredentialRef {
             // Imported/duplicated metadata can refer to one device credential.
             // Keep it until the last referencing connection is removed.

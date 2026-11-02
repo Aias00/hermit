@@ -1,3 +1,5 @@
+import RemoteForgeRelay
+import RemoteForgeRelayNIO
 import Foundation
 @preconcurrency import Citadel
 import Crypto
@@ -39,6 +41,7 @@ enum SSHError: Error, CustomStringConvertible, LocalizedError {
             case .timedOut: return .connectionFailed
             }
         }
+        if error is RelayError || error is RelayNIOError || error is RelayCredentialError { return .underlying(error) }
         if error is CloudflareAuthError || error is AccessError
             || error is CloudflareSSHTransportError || error is ConnectionTransportError
             || error is TailcatSSHTransportError || error is TailcatCredentialError
@@ -173,6 +176,7 @@ enum SSHError: Error, CustomStringConvertible, LocalizedError {
         case .credentialUnavailable:
             return String(localized: "Couldn't read the saved credential. After re-installing or re-signing the app (e.g. via SideStore), open Edit and re-enter your password / re-select your key.")
         case .underlying(let error):
+            if error is RelayError || error is RelayNIOError || error is RelayCredentialError { return RelayErrorMessage.message(error) }
             if let tailcat = error as? TailcatSSHTransportError { return tailcat.moshpitMessage }
             if let tailscale = error as? TailscaleSSHTransportError { return tailscale.moshpitMessage }
             if error is CloudflareAuthError || error is AccessError
@@ -332,9 +336,10 @@ actor SSHSession {
     /// NOT on an intentional `close()`. Drives auto-reconnect. Cleared after.
     private var onUnexpectedClose: (@Sendable () -> Void)?
 
-    init(connection: ServerConnection, client: SSHClient) {
+    init(connection: ServerConnection, client: SSHClient,
+         carrierCleanup: (@Sendable () async -> Void)? = nil) {
         self.init(connection: connection,
-                  transport: CitadelClientTransport(client: client),
+                  transport: CitadelClientTransport(client: client, carrierCleanup: carrierCleanup),
                   sftpClient: client)
     }
 
@@ -1040,9 +1045,11 @@ protocol SSHPTYWriter: Sendable {
 /// Production ``SSHClientTransport`` over a Citadel `SSHClient`.
 final class CitadelClientTransport: SSHClientTransport {
     private let client: SSHClient
+    private let carrierCleanup: (@Sendable () async -> Void)?
 
-    init(client: SSHClient) {
+    init(client: SSHClient, carrierCleanup: (@Sendable () async -> Void)? = nil) {
         self.client = client
+        self.carrierCleanup = carrierCleanup
     }
 
     func run(_ command: String) async throws -> Data {
@@ -1142,6 +1149,7 @@ final class CitadelClientTransport: SSHClientTransport {
 
     func shutdown() async {
         try? await client.close()
+        await carrierCleanup?()
     }
 }
 
@@ -1170,6 +1178,7 @@ struct SSHConnectionDiagnostic: Sendable {
         case cloudflareAccess = "cloudflare-access"
         case tailcatCredential = "tailcat-credential"
         case tailscaleAccount = "tailscale-account"
+        case relayCredential = "relay-credential"
         case sshCredential = "ssh-credential"
         case authenticationMethod = "authentication-method"
         case transportDial = "transport-dial"
@@ -1252,6 +1261,18 @@ struct SSHConnectionDiagnostic: Sendable {
             }
         }
         if error is ConnectionTransportError { return "transport.invalid-configuration" }
+        if error is RelayCredentialError { return "relay.credential" }
+        if let relay = error as? RelayError {
+            if case .httpStatus(let status) = relay { return "relay.http-\(status)" }
+            switch relay {
+            case .networkFailure: return "relay.network"
+            case .timedOut: return "relay.timeout"
+            case .closed: return "relay.closed"
+            case .invalidCredential: return "relay.invalid-credential"
+            default: return "relay.protocol-or-configuration"
+            }
+        }
+        if error is RelayNIOError { return "relay.carrier" }
         if error is TailcatCredentialError { return "tailcat.credential" }
         if error is TailcatSSHTransportError { return "tailcat.transport" }
         if error is TailscaleAccountError { return "tailscale.account" }
@@ -1283,6 +1304,7 @@ actor SSHService {
     private let cloudflareAuth: CloudflareAccessAuth
     private let tailcatCredentials: TailcatCredentials
     private let tailscaleRuntime: TailscaleRuntime
+    private let relayCredentials: RelayCredentials
     private let onConnectionDiagnostic: (@Sendable (SSHConnectionDiagnostic) -> Void)?
 
     /// In-memory credential cache, keyed by connection id. Populated after the
@@ -1341,6 +1363,7 @@ actor SSHService {
          tailcatCredentials: TailcatCredentials = .shared,
          tailscaleRuntime: TailscaleRuntime = .shared,
          cloudflareAuth: CloudflareAccessAuth = .shared,
+         relayCredentials: RelayCredentials = .shared,
          onConnectionDiagnostic: (@Sendable (SSHConnectionDiagnostic) -> Void)? = nil) {
         self.keychain = keychain
         self.validator = hostKeyValidator
@@ -1348,6 +1371,7 @@ actor SSHService {
         self.cloudflareAuth = cloudflareAuth
         self.tailcatCredentials = tailcatCredentials
         self.tailscaleRuntime = tailscaleRuntime
+        self.relayCredentials = relayCredentials
         self.onConnectionDiagnostic = onConnectionDiagnostic
     }
 
@@ -1411,6 +1435,11 @@ actor SSHService {
         // transport values and Cloudflare+Mosh must never fall back to direct.
         onPhase(.transportValidation)
         let transport = try connection.validatedTransport()
+        let relayCredential: RelayCredential?
+        if case .relay(let settings) = transport {
+            onPhase(.relayCredential)
+            relayCredential = try await relayCredentials.load(settings: settings)
+        } else { relayCredential = nil }
         let accessToken: String?
         if case .cloudflare(let settings) = transport {
             onPhase(.cloudflareAccess)
@@ -1474,18 +1503,22 @@ actor SSHService {
         // A Tailcat alias is only a display name. Pin SSH trust to the remote
         // node identity so two servers named "mac-mini" never share trust.
         let hostKeyIdentity: String
-        if case .tailcat(let settings) = transport {
+        if case .relay(let settings) = transport {
+            hostKeyIdentity = settings.hostKeyIdentity
+        } else if case .tailcat(let settings) = transport {
             hostKeyIdentity = settings.hostKeyIdentity
         } else if let tailscaleConnection {
             hostKeyIdentity = tailscaleConnection.hostKeyIdentity
         } else {
             hostKeyIdentity = connection.host
         }
+        // Relay chooses the target port by service; editable metadata cannot fork SSH trust.
+        let trustPort = connection.transport == .relay ? 22 : connection.port
         let displayHost = connection.host
         let delegate = TOFUHostKeyDelegate(
             validator: validator,
             host: hostKeyIdentity,
-            port: connection.port,
+            port: trustPort,
             onNewHost: { _, port, fingerprint in
                 await onUnknownHost(displayHost, port, fingerprint)
             },
@@ -1497,6 +1530,7 @@ actor SSHService {
 
         do {
             let client: SSHClient
+            var carrierCleanup: (@Sendable () async -> Void)?
             onPhase(.transportDial)
             // SOCKS proxies only speak TCP CONNECT — this affects the SSH
             // dial only. If Mosh is also on, its UDP session still connects
@@ -1622,6 +1656,20 @@ actor SSHService {
                     await tunnel.close()
                     throw error
                 }
+            case .relay:
+                guard let credential = relayCredential else { throw RelayCredentialError.missing }
+                let tunnel = try await RelayNIODialer.connect(using: credential, on: MultiThreadedEventLoopGroup.singleton)
+                do {
+                    onPhase(.sshAuthentication)
+                    client = try await clientProvider.connect(on: tunnel.channel, authenticationMethod: authMethod,
+                                                              hostKeyValidator: hostKeyValidator)
+                    try await SSHChannelAuthentication.complete(on: tunnel.channel) { try await tunnel.activate() }
+                    try Task.checkCancellation()
+                    carrierCleanup = { await tunnel.close() }
+                } catch {
+                    await tunnel.close()
+                    throw error
+                }
             case .direct:
                 onPhase(.directSSHConnect)
                 client = try await clientProvider.connect(
@@ -1631,7 +1679,7 @@ actor SSHService {
                     hostKeyValidator: hostKeyValidator
                 )
             }
-            return SSHSession(connection: connection, client: client)
+            return SSHSession(connection: connection, client: client, carrierCleanup: carrierCleanup)
         } catch {
             throw SSHError.map(error)
         }

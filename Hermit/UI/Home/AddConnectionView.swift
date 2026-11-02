@@ -1,5 +1,6 @@
 import SwiftUI
 import TailcatSSH
+import RemoteForgeRelay
 
 /// Screen 1 — Add Connection modal form. Also doubles as the editor for an
 /// existing connection (Home card → Edit).
@@ -59,6 +60,9 @@ struct AddConnectionView: View {
     @State private var tailcatNeedsReplacementAddress = false
     @State private var tailscaleAccount = TailscaleAccount.shared
     @State private var showTailscaleSettings = false
+    @State private var showRelayPairing = false
+    @State private var relayDraft: RelayCredential?
+    @State private var relayStatus: String?
 
     init(store: ConnectionStore, keychain: KeychainService, existing: ServerConnection? = nil,
          onConnect: ((ServerConnection) -> Void)? = nil) {
@@ -159,9 +163,9 @@ struct AddConnectionView: View {
                     if transportForm.selection == .tailscale, tailscaleBindingReady {
                         tailscaleDevicePicker
                     }
-                    if transportForm.selection == .tailcat {
+                    if transportForm.selection == .tailcat || transportForm.selection == .relay {
                         FieldRow(placeholder: "SSH 主机别名（可留空）", text: $host)
-                            .accessibilityIdentifier("tailcat-host-alias")
+                            .accessibilityIdentifier(transportForm.selection == .relay ? "relay-host-alias" : "tailcat-host-alias")
                         Text("例如 mac-mini。这里只用于显示，无需公网 IP 或域名。")
                             .font(.footnote).foregroundStyle(Ink.meta)
                     } else if transportForm.selection == .tailscale {
@@ -173,7 +177,9 @@ struct AddConnectionView: View {
                     } else {
                         FieldRow(placeholder: "Host", text: $host)
                     }
-                    NumberFieldRow(label: "Port", placeholder: "22", text: $port)
+                    if transportForm.selection != .relay {
+                        NumberFieldRow(label: "Port", placeholder: "22", text: $port)
+                    }
                     FieldRow(placeholder: "Username", text: $username)
                     Picker("连接模式", selection: $useMosh) {
                         Text("SSH").tag(false)
@@ -387,13 +393,31 @@ struct AddConnectionView: View {
         .appSheet(isPresented: $showTailscaleSettings) {
             TailscaleSettingsView()
         }
+        .appSheet(isPresented: $showRelayPairing) {
+            RelayPairingSheet { credential in
+                do {
+                    try transportForm.bindRelay(credential)
+                    relayDraft = credential
+                    relayStatus = nil
+                    if host.isEmpty { host = credential.device }
+                    if name.isEmpty { name = credential.device }
+                    port = "22"
+                    useMosh = false
+                } catch { saveError = RelayErrorMessage.message(error) }
+            }
+        }
         .interactiveDismissDisabled(saving)
         .onChange(of: transportForm.selection) { _, selection in
+            if selection != .relay, relayDraft != nil { relayDraft = nil; transportForm.relaySettings = nil }
             if selection?.requiresSSH == true { useMosh = false }
             accessError = nil
         }
         .task(id: transportForm.selection) {
             if transportForm.selection == .tailcat { await prepareTailcatIdentity() }
+            if transportForm.selection == .relay, let binding = transportForm.relaySettings, relayDraft == nil {
+                do { _ = try await RelayCredentials.shared.load(settings: binding); relayStatus = nil }
+                catch { if !Task.isCancelled { relayStatus = RelayErrorMessage.message(error) } }
+            }
             if transportForm.selection == .tailscale {
                 await tailscaleAccount.resume()
                 bindInitialTailscaleAccount()
@@ -461,6 +485,8 @@ struct AddConnectionView: View {
                     }
                 } else if transportForm.selection == .tailcat {
                     tailcatControls
+                } else if transportForm.selection == .relay {
+                    relayControls
                 } else if transportForm.selection == .tailscale {
                     tailscaleControls
                 }
@@ -476,6 +502,23 @@ struct AddConnectionView: View {
                 Text(transportIssue).font(.footnote).foregroundStyle(.orange)
                     .accessibilityIdentifier("connection-transport-error")
             }
+        }
+    }
+
+    private var relayControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let binding = transportForm.relaySettings {
+                LabeledContent("Relay", value: binding.server)
+                LabeledContent("设备", value: binding.deviceID)
+                LabeledContent("服务", value: binding.service)
+            }
+            Button(transportForm.relaySettings == nil ? "配对 Relay" : "重新配对 Relay", systemImage: "qrcode") {
+                showRelayPairing = true
+            }
+            .accessibilityIdentifier("relay-open-pairing")
+            if let relayStatus { Text(relayStatus).font(.footnote).foregroundStyle(.orange).accessibilityIdentifier("relay-credential-status") }
+            Text("通过你的 Relay 连接目标设备，仍需下方的 SSH 用户名和密码或密钥。配对完成后请保存主机。")
+                .font(.footnote).foregroundStyle(Ink.meta)
         }
     }
 
@@ -751,7 +794,13 @@ struct AddConnectionView: View {
         connection.multiplexer = multiplexer
 
         var stagedTailcatRef: String?
+        var stagedRelayRef: String?
         do {
+            if connection.transport == .relay, let credential = relayDraft {
+                let ref = try await RelayCredentials.shared.save(credential)
+                stagedRelayRef = ref
+                connection.relayCredentialRef = ref
+            }
             if connection.transport == .tailcat, !transportForm.tailcatAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 guard let privateKey = tailcatClientPrivateKey else { throw TailcatCredentialError.invalidClientIdentity }
                 let credential = try TailcatCredential.create(address: transportForm.tailcatAddress, clientPrivateKey: privateKey)
@@ -774,6 +823,7 @@ struct AddConnectionView: View {
             // Drop any cached (possibly stale) credential so the new one is used.
             await SSHService.shared.clearCachedSecret(for: connection.id)
         } catch {
+            if let stagedRelayRef { try? await RelayCredentials.shared.delete(ref: stagedRelayRef) }
             if let stagedTailcatRef { try? await TailcatCredentials.shared.delete(ref: stagedTailcatRef) }
             saveError = error.localizedDescription
             return
@@ -789,6 +839,7 @@ struct AddConnectionView: View {
             return
         }
         if !store.isAuthoritative || (existing != nil && !store.connections.contains(where: { $0.id == connection.id })) {
+            if let stagedRelayRef { try? await RelayCredentials.shared.delete(ref: stagedRelayRef) }
             if let stagedTailcatRef { try? await TailcatCredentials.shared.delete(ref: stagedTailcatRef) }
             saveError = (store.isAuthoritative ? TailcatCredentialError.connectionRemoved : .storageUnavailable).localizedDescription
             return
@@ -800,6 +851,11 @@ struct AddConnectionView: View {
         }
         // Commit the new reference first. Replaced credentials remain intact
         // through every earlier validation / Keychain failure.
+        if let previous = existing?.relayCredentialRef, previous != connection.relayCredentialRef,
+           !store.connections.contains(where: { $0.relayCredentialRef == previous }) {
+            try? await RelayCredentials.shared.delete(ref: previous)
+        }
+        relayDraft = nil
         if let previous = existing?.tailcatCredentialRef, previous != connection.tailcatCredentialRef,
            !store.connections.contains(where: { $0.tailcatCredentialRef == previous }) {
             try? await TailcatCredentials.shared.delete(ref: previous)

@@ -34,6 +34,8 @@ have since changed.
 - Configurable [Cloudflare Access](docs/design/cloudflare-herdr-access.md) and
   [embedded Tailscale](docs/design/tailcat-ssh.md) connections. Tailcat is also
   available as an experimental transport.
+- [RemoteForge Relay](docs/design/relay-access.md) with one-time QR/link pairing,
+  device-local credentials and the existing SSH authentication and host-key checks.
 - tmux control mode with native rendering, window and pane navigation, and
   session management.
 - [herdr](https://github.com/herdrdev/herdr) support for coding agents, rendered
