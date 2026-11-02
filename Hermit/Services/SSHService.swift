@@ -1400,7 +1400,8 @@ actor SSHService {
     func connect(_ connection: ServerConnection,
                  overrideSecret: String? = nil,
                  onUnknownHost: @escaping TrustNewHostHandler = { _, _, _ in false },
-                 onChangedHost: @escaping AcceptChangedHostHandler = { _, _, _, _ in false }) async throws -> SSHSession {
+                 onChangedHost: @escaping AcceptChangedHostHandler = { _, _, _, _ in false },
+                 onProgress: (@Sendable (SSHConnectionDiagnostic) -> Void)? = nil) async throws -> SSHSession {
         let attemptID = UUID()
         let route = connection.transport
         var phase = SSHConnectionDiagnostic.Phase.transportValidation
@@ -1409,6 +1410,7 @@ actor SSHService {
                 route: route, phase: phase, outcome: outcome, errorClass: error.map(SSHConnectionDiagnostic.classify))
             Log.ssh.notice("\(event.message, privacy: .public)")
             onConnectionDiagnostic?(event)
+            onProgress?(event)
         }
         do {
             let session = try await connectImplementation(connection, overrideSecret: overrideSecret,

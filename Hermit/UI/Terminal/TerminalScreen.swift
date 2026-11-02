@@ -145,9 +145,8 @@ struct TerminalScreen: View {
     @State private var seededImageDraft = false
     #endif
     @State private var filePickerPresented = false
-    @State private var fileUploadTask: Task<Void, Never>?
-    @State private var fileUploadProgress: Double = 0
-    @State private var fileUploadStatus: String?
+    @State private var showsFileUploads = false
+    private var fileUploads: FileUploadQueue { composerDraft.uploads }
     @State private var photoPickerPresented = false
     @State private var photoSelection: [PhotosPickerItem] = []
     /// Whether the clipboard currently carries an image — drives the chip
@@ -367,7 +366,7 @@ struct TerminalScreen: View {
     private var anySheetOpen: Bool {
         showWindowsSheet || showSessionsSheet || showPaneSheet || showCamera
             || quickLookURL != nil || remoteFolder != nil || remoteVideoOpen
-            || photoPickerPresented || filePickerPresented || showTerminalActions
+            || photoPickerPresented || filePickerPresented || showsFileUploads || showTerminalActions
     }
 
     /// Whether the pane behind a modal is pinned to the size it already has.
@@ -738,7 +737,12 @@ struct TerminalScreen: View {
         contentWithLifecycle
         .onChange(of: launchIsConnected, initial: true) { _, connected in
             #if DEBUG
-            if connected { seedImageDraftForUITest() }
+            if connected {
+                seedImageDraftForUITest()
+                #if targetEnvironment(simulator)
+                seedFileUploadsForUITest()
+                #endif
+            }
             #endif
             guard connected, let active, let command = active.consumeInitialCommand() else { return }
             // Consume before awaiting: an uncertain acknowledgement must never
@@ -768,15 +772,22 @@ struct TerminalScreen: View {
                     ]
                 ) { EmptyView() }
             } else {
-                HermitNoticeCard(
-                    icon: "bolt.slash.fill",
-                    title: "Connection Error",
-                    message: active?.viewModel.errorMessage ?? ""
-                ) {
-                    showError = false
-                    active?.viewModel.errorMessage = nil
-                    leave()
-                }
+                HermitModalCard(
+                    icon: "bolt.slash.fill", title: "Connection Error",
+                    message: Text(active?.viewModel.errorMessage ?? ""),
+                    buttons: [
+                        ModalButton("Close", kind: .secondary) {
+                            showError = false
+                            active?.viewModel.errorMessage = nil
+                        },
+                        ModalButton(active?.viewModel.allowsAutomaticRetry == true ? "Retry now" : "Back to hosts", kind: .primary) {
+                            showError = false
+                            active?.viewModel.errorMessage = nil
+                            if active?.viewModel.allowsAutomaticRetry == true { reconnect() }
+                            else { leave() }
+                        },
+                    ]
+                ) { EmptyView() }
             }
         }
         .moshpitCard(
@@ -795,10 +806,15 @@ struct TerminalScreen: View {
                     onReconnect: { reconnect() })
             }
         }
+        .appSheet(isPresented: $showsFileUploads) {
+            FileUploadQueueView(queue: fileUploads, canRetry: launchIsConnected) {
+                startFileUploads(retry: true)
+            }
+        }
         .fileImporter(isPresented: $filePickerPresented, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls): uploadLocalFiles(urls)
-            case .failure(let error): fileUploadStatus = error.localizedDescription
+            case .failure(let error): composerSendError = error.localizedDescription
             }
         }
         .photosPicker(isPresented: $photoPickerPresented,
@@ -1515,7 +1531,7 @@ struct TerminalScreen: View {
         ZStack {
             terminalContent
             if posterVisible {
-                TerminalConnectingView(connection: connection, state: posterState)
+                TerminalConnectingView(connection: connection, state: posterState) { recoveryFeedback }
                     // Fades both ways: beneath it is the terminal background
                     // it shares a colour with.
                     .transition(.opacity)
@@ -1527,8 +1543,7 @@ struct TerminalScreen: View {
             }
             if veilVisible {
                 ReconnectVeil(state: posterState,
-                              isMosh: connection.connectionProtocol == .mosh)
-                    .allowsHitTesting(false)
+                              isMosh: connection.connectionProtocol == .mosh) { recoveryFeedback }
                     .transition(.opacity)
             }
             if let follow = sizeFollow {
@@ -1545,6 +1560,35 @@ struct TerminalScreen: View {
             // connect's normal path (`connState` reads `.connecting` both
             // before and after, so the state change above never fires).
             coverArmed = (active?.viewModel.connState ?? .live) != .live
+        }
+    }
+
+    private var recoveryPhaseTitle: String {
+        if hub.networkUnavailable && connState != .live { return String(localized: "Waiting for network") }
+        if active?.retryScheduledAt != nil { return String(localized: "Waiting to reconnect") }
+        if connState == .live {
+            return connection.multiplexer == .none
+                ? TerminalViewModel.ConnectionStep.terminal.title
+                : TerminalViewModel.ConnectionStep.workspace.title
+        }
+        return active?.viewModel.connectionStepTitle ?? TerminalViewModel.ConnectionStep.validating.title
+    }
+
+    @ViewBuilder
+    private var recoveryFeedback: some View {
+        if let active {
+            ConnectionRecoveryFeedback(
+                phase: recoveryPhaseTitle,
+                failure: active.viewModel.connectionFailure?.message,
+                retryAt: active.retryScheduledAt,
+                actionTitle: active.viewModel.requiresAccessLogin ? String(localized: "Log in to Cloudflare")
+                    : (active.viewModel.allowsAutomaticRetry ? String(localized: "Retry now") : String(localized: "Back to hosts")),
+                showsAction: !active.isDialing && connState != .live,
+                action: {
+                    if active.viewModel.requiresAccessLogin { authorizeCloudflare() }
+                    else if active.viewModel.allowsAutomaticRetry { reconnect() }
+                    else { leave() }
+                })
         }
     }
 
@@ -1588,8 +1632,8 @@ struct TerminalScreen: View {
     /// terminal background (the dropped connection never painted, so no
     /// frame was kept; this path used to show the poster, and that is the
     /// full-screen animation that kept surfacing). It holds until the
-    /// replacement has painted, not until the transport says so. `.offline`
-    /// shows no poster: nothing is being attempted.
+    /// replacement has painted, not until the transport says so. An initial
+    /// failure retains the poster so its recovery actions remain reachable.
     private var posterVisible: Bool {
         // No session resolved yet: NOT a poster. `active` is a `@State` set
         // on appear, so every screen renders one frame without it — for a
@@ -1597,7 +1641,7 @@ struct TerminalScreen: View {
         // colour; for a screen entering a live session it must never come
         // (see `coverArmed`).
         guard active != nil, !isReconnect else { return false }
-        return connState == .connecting || connState == .reconnecting || settling
+        return connState == .connecting || connState == .reconnecting || connState == .offline || settling
     }
 
     /// The reconnect dim and status capsule — over the kept frame, the
@@ -2036,7 +2080,7 @@ struct TerminalScreen: View {
                 conversationIcon("paperplane.fill", label: String(localized: "Send + Return"), identifier: "conversation-send") { submitComposer() }
                     .accessibilityHint("Send the draft to the terminal, then press Return.")
                     .disabled(!launchIsConnected || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || composerIsSending || imageAttachment != nil || fileUploadTask != nil)
+                        || composerIsSending || imageAttachment != nil || fileUploads.isRunning)
             }
             .padding(.leading, 12).padding(.trailing, 3).padding(.vertical, 3)
             .background(TerminalChrome.control.opacity(0.85), in: RoundedRectangle(cornerRadius: 22))
@@ -2057,7 +2101,7 @@ struct TerminalScreen: View {
                     .background(TerminalChrome.control, in: Circle())
             }
             .accessibilityLabel("添加附件").accessibilityIdentifier("conversation-attachments")
-            .disabled(!launchIsConnected || fileUploadTask != nil || imageAttachment != nil)
+            .disabled(!launchIsConnected || fileUploads.isRunning || imageAttachment != nil)
             conversationIcon(terminalKeyboardActive ? "hand.draw.fill" : "hand.draw",
                              label: String(localized: "Terminal keyboard"), identifier: "conversation-direct-input",
                              selected: terminalKeyboardActive, action: toggleInputDestination)
@@ -2099,7 +2143,7 @@ struct TerminalScreen: View {
         .padding(.horizontal, 14).padding(.top, 5)
     }
     private func submitComposer() {
-        guard launchIsConnected, !composerIsSending, imageAttachment == nil, fileUploadTask == nil,
+        guard launchIsConnected, !composerIsSending, imageAttachment == nil, !fileUploads.isRunning,
               !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let active else { return }
         let draft = composerDraft
@@ -2237,17 +2281,21 @@ struct TerminalScreen: View {
                 RemotePreviewHUD(model: preview, onDismiss: { dismissRemotePreview() })
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            if let status = fileUploadStatus {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(status).font(.system(size: 13)).lineLimit(3)
-                        Spacer()
-                        Button(fileUploadTask == nil ? "关闭" : "取消") {
-                            fileUploadTask?.cancel()
-                            if fileUploadTask == nil { fileUploadStatus = nil }
-                        }
+            if !fileUploads.items.isEmpty {
+                HStack(spacing: 12) {
+                    if fileUploads.isRunning { ProgressView().tint(Ink.accent) }
+                    Button { presentSheet { showsFileUploads = true } } label: {
+                        HStack {
+                            Label("File uploads", systemImage: "arrow.up.doc")
+                            Text(verbatim: "\(fileUploads.completedCount)/\(fileUploads.items.count)")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                        }.font(.system(size: 13))
                     }
-                    if fileUploadTask != nil { ProgressView(value: fileUploadProgress) }
+                    .accessibilityIdentifier("file-upload-details")
+                    if fileUploads.isRunning {
+                        Button("Cancel") { fileUploads.cancel() }.font(.system(size: 13))
+                    }
                 }.padding(12).background(.white.opacity(0.07))
             }
             if let sendError = composerSendError ?? active?.herdrControl?.inputError {
@@ -2343,6 +2391,28 @@ struct TerminalScreen: View {
     }
     #endif
 
+    #if DEBUG && targetEnvironment(simulator)
+    /// Selection-only seam; transfer/authentication use the production path.
+    /// Requires a reset simulator and an explicitly isolated loopback host.
+    private func seedFileUploadsForUITest() {
+        let args = ProcessInfo.processInfo.arguments
+        guard args.contains("-MOSHPIT_RESET"), args.contains("-MOSHPIT_SEED_FILE_UPLOADS"),
+              connection.displayName == "Isolated-UI-Lab", connection.host == "127.0.0.1",
+              fileUploads.items.isEmpty else { return }
+        do {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hermit-upload-qa")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let first = directory.appendingPathComponent("upload-qa-one.txt")
+            let invalid = directory.appendingPathComponent("upload-qa-folder")
+            let last = directory.appendingPathComponent("upload-qa-two.txt")
+            try Data("first isolated upload".utf8).write(to: first)
+            try Data("second isolated upload".utf8).write(to: last)
+            try FileManager.default.createDirectory(at: invalid, withIntermediateDirectories: true)
+            uploadLocalFiles([first, invalid, last])
+        } catch { composerSendError = error.localizedDescription }
+    }
+    #endif
+
     /// Re-insert a previously uploaded image's path (from the chip's
     /// long-press menu) — no re-upload, the file is already on the server.
     private func insertUploadedImage(_ entry: ImageUploadLog.Entry) {
@@ -2384,46 +2454,22 @@ struct TerminalScreen: View {
 
     /// Upload through the existing private SSH upload directory, never through the PTY.
     private func uploadLocalFiles(_ urls: [URL]) {
-        guard !urls.isEmpty, fileUploadTask == nil, let active else { return }
-        fileUploadProgress = 0
-        fileUploadStatus = "准备上传…"
-        fileUploadTask = Task { @MainActor in
-            defer { fileUploadTask = nil }
-            var completed = 0
-            do {
-                let ssh = try await active.acquireFileTransferSSH()
-                for url in urls {
-                    try Task.checkCancellation()
-                    fileUploadProgress = 0
-                    fileUploadStatus = "上传 \(completed + 1)/\(urls.count)：\(url.lastPathComponent)"
-                    let data = try await Task.detached {
-                        let scoped = url.startAccessingSecurityScopedResource()
-                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-                        guard values.isRegularFile == true else {
-                            throw NSError(domain: "Attachment", code: 1, userInfo: [NSLocalizedDescriptionKey: "请选择普通文件，文件夹请先压缩。"])
-                        }
-                        guard let size = values.fileSize, size <= 20 * 1024 * 1024 else {
-                            throw NSError(domain: "Attachment", code: 2, userInfo: [NSLocalizedDescriptionKey: "单个文件不能超过 20 MB。"])
-                        }
-                        return try Data(contentsOf: url)
-                    }.value
-                    try Task.checkCancellation()
-                    let name = UUID().uuidString + "-" + url.lastPathComponent
-                    let path = try await ssh.uploadToUploadsDirectory(data, named: name) { progress in
-                        Task { @MainActor in fileUploadProgress = progress }
-                    }
-                    // Preserve every completed upload even if a later file fails.
-                    composerText += ImageAttachmentPipeline.insertText(forRemotePaths: [path], style: .barePath)
-                    completed += 1
-                }
-                fileUploadStatus = "已上传 \(completed) 个文件，路径已加入草稿。"
-                Haptics.success()
-            } catch {
-                let reason = Task.isCancelled ? "已取消上传" : "上传失败：\(error.localizedDescription)"
-                fileUploadStatus = completed > 0 ? "\(reason)；已完成的 \(completed) 个文件路径已保留在草稿。" : reason
-            }
-        }
+        guard !urls.isEmpty, !fileUploads.isRunning, active != nil else { return }
+        fileUploads.enqueue(urls)
+        startFileUploads()
+    }
+
+    private func startFileUploads(retry: Bool = false) {
+        guard let owner = active, owner.connection.id == connection.id else { return }
+        // Capture the owning draft. A later navigation/reconnect must never
+        // append a completed remote path to another host's composer.
+        let draft = composerDraft
+        let batch = FileUploadBatch { try await owner.acquireFileTransferSSH() }
+        fileUploads.start(retry: retry, upload: { url, name, progress in
+            try await batch.upload(url, named: name, progress: progress)
+        }, publish: { [weak draft] path in
+            draft?.text += ImageAttachmentPipeline.insertText(forRemotePaths: [path], style: .barePath)
+        })
     }
 
     private func cancelImageAttachment() {
@@ -3752,9 +3798,16 @@ struct Sparkline: Shape {
 /// and yields entirely to SwiftTerm
 /// the moment there's real output. Prototype: the moshpit OD project's
 /// `terminal-idle.html`.
-struct TerminalConnectingView: View {
+struct TerminalConnectingView<Feedback: View>: View {
     let connection: ServerConnection
     let state: TransportConnState
+    @ViewBuilder var feedback: () -> Feedback
+
+    init(connection: ServerConnection, state: TransportConnState, @ViewBuilder feedback: @escaping () -> Feedback) {
+        self.connection = connection
+        self.state = state
+        self.feedback = feedback
+    }
 
     /// Shared with the transport pill and the home card's row — see
     /// ``TransportConnState/transientTint``. This screen recolours everything it
@@ -3839,6 +3892,7 @@ struct TerminalConnectingView: View {
                 .background(Color.white.opacity(0.04), in: Capsule())
                 .overlay(Capsule().strokeBorder(accent.opacity(0.22), lineWidth: 1))
                 .padding(.top, 34)
+                feedback().padding(.top, 16).padding(.horizontal, 24)
             }
             .offset(y: -14)
 
@@ -3988,9 +4042,10 @@ private struct PulseDots: View {
 /// status capsule at the top, in the transport pill's colour family. Nothing
 /// else moves — the frame the person was reading stays put and comes back
 /// into focus when the replacement crossfades in over it.
-private struct ReconnectVeil: View {
+private struct ReconnectVeil<Feedback: View>: View {
     let state: TransportConnState
     let isMosh: Bool
+    @ViewBuilder var feedback: () -> Feedback
 
     private var accent: SwiftUI.Color { state.transientTint ?? Ink.accent }
 
@@ -4007,7 +4062,8 @@ private struct ReconnectVeil: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.opacity(0.45)
+            Color.black.opacity(0.45).allowsHitTesting(false)
+            VStack(spacing: 10) {
             HStack(spacing: 10) {
                 if state == .offline {
                     Circle()
@@ -4026,6 +4082,12 @@ private struct ReconnectVeil: View {
             .padding(.vertical, 9)
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(accent.opacity(0.35), lineWidth: 1))
+            feedback()
+            }
+            .padding(14)
+            .frame(maxWidth: 420)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 16)
             .padding(.top, 14)
         }
     }
@@ -4245,5 +4307,46 @@ private struct ConversationKeyStyle: ButtonStyle {
         configuration.label.frame(maxWidth: .infinity).frame(height: 34)
             .background(configuration.isPressed ? TerminalChrome.control.opacity(0.7) : TerminalChrome.control, in: Capsule())
             .contentShape(Rectangle())
+    }
+}
+
+
+extension TerminalConnectingView where Feedback == EmptyView {
+    init(connection: ServerConnection, state: TransportConnState) {
+        self.init(connection: connection, state: state) { EmptyView() }
+    }
+}
+
+private struct ConnectionRecoveryFeedback: View {
+    let phase: String
+    let failure: String?
+    let retryAt: Date?
+    let actionTitle: String
+    let showsAction: Bool
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text(phase).accessibilityIdentifier("connection-recovery-phase")
+            if let retryAt {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text("Retrying in \(max(0, Int(ceil(retryAt.timeIntervalSince(context.date))))) s")
+                        .monospacedDigit()
+                }.font(.caption).foregroundStyle(Ink.secondary)
+            }
+            if let failure {
+                Text(failure).font(.caption).foregroundStyle(Ink.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if showsAction {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.bordered)
+                    .tint(Ink.accent)
+                    .accessibilityIdentifier("connection-recovery-action")
+            }
+        }
+        .font(.subheadline)
+        .foregroundStyle(Ink.primary)
+        .multilineTextAlignment(.center)
     }
 }

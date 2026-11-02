@@ -11,6 +11,44 @@ import Testing
 @MainActor
 struct SessionDialRecoveryTests {
 
+    @Test("Progress belongs to the current primary attempt and stops at SSH completion")
+    func progressRejectsStaleAttempts() async throws {
+        let gate = DialGate()
+        let config = connection()
+        let script = DialScript { _ in try await gate.wait().get() }
+        let model = TerminalViewModel(connection: config, dial: script.dialer)
+        let first = Task { await model.start() }
+        for _ in 0..<100 {
+            if model.isAwaitingSSHConnection { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        func event(_ phase: SSHConnectionDiagnostic.Phase, id: UUID = config.id) -> SSHConnectionDiagnostic {
+            SSHConnectionDiagnostic(attemptID: UUID(), connectionID: id, route: config.transport,
+                phase: phase, outcome: .started, errorClass: nil)
+        }
+        model.receiveProgress(event(.cloudflareAccess), generation: 1)
+        #expect(model.connectionStep == .access)
+        model.receiveProgress(event(.sshAuthentication, id: UUID()), generation: 1)
+        #expect(model.connectionStep == .access)
+        model.receiveProgress(event(.transportDial), generation: 1)
+        model.receiveProgress(event(.transportValidation), generation: 1)
+        #expect(model.connectionStep == .transport, "queued earlier phases must not move progress backwards")
+        await model.disconnect()
+        model.receiveProgress(event(.sshAuthentication), generation: 1)
+        #expect(model.connectionStep == .transport)
+        model.resetForReconnect()
+        script.behavior = { connection in SSHSession(connection: connection, transport: QuietTransport()) }
+        await model.start()
+        #expect(model.status == .connected)
+        #expect(model.connectionStep == .terminal)
+        model.receiveProgress(event(.cloudflareAccess), generation: 3)
+        #expect(model.connectionStep == .terminal, "a queued diagnostic cannot overwrite terminal readiness")
+        gate.finish(.failure(DialFailed()))
+        await first.value
+        #expect(model.status == .connected)
+        await model.disconnect()
+    }
+
     @Test("Composer submit while offline throws instead of reporting success and losing a draft")
     func offlineSubmitFails() async {
         let session = SessionHub.ActiveSession(connection: connection())

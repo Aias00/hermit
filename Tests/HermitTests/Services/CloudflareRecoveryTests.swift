@@ -183,11 +183,13 @@ struct CloudflareRecoveryTests {
         let script = DialScript { _ in throw SSHError.connectionFailed }
         let session = SessionHub.ActiveSession(connection: connection(), dial: script.dialer)
         await session.start(theme: .githubDark, fontSize: 14)
+        #expect(session.retryScheduledAt != nil)
         script.behavior = { configuration in
             SSHSession(connection: configuration, transport: SessionLifecycleTests.ScriptedTransport(.reply("")))
         }
         await session.start(theme: .githubDark, fontSize: 14)
         #expect(script.dials == 2)
+        #expect(session.retryScheduledAt == nil)
         try await Task.sleep(for: .milliseconds(1350))
         #expect(script.dials == 2)
         #expect(session.viewModel.status == .connected)

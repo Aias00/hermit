@@ -212,6 +212,24 @@ struct SSHErrorMappingTests {
         assertPrivateFieldsAbsent(events, connection: connection)
     }
 
+    @Test("Per-call progress is isolated even when a shared SSH service dials different connections")
+    func progressDoesNotLeakBetweenConnections() async {
+        let global = ConnectionDiagnosticRecorder()
+        let first = ConnectionDiagnosticRecorder()
+        let second = ConnectionDiagnosticRecorder()
+        let service = diagnosticService(global)
+        let one = diagnosticConnection()
+        let two = diagnosticConnection()
+        async let a: SSHSession? = try? service.connect(one, onProgress: { first.append($0) })
+        async let b: SSHSession? = try? service.connect(two, onProgress: { second.append($0) })
+        _ = await (a, b)
+        #expect(!first.events.isEmpty && !second.events.isEmpty)
+        #expect(first.events.allSatisfy { $0.connectionID == one.id })
+        #expect(second.events.allSatisfy { $0.connectionID == two.id })
+        #expect(Set(first.events.map(\.attemptID)).isDisjoint(with: Set(second.events.map(\.attemptID))))
+        #expect(global.events.count == first.events.count + second.events.count)
+    }
+
     @Test("SSH credential and key parsing failures have separate stages and per-call attempt IDs")
     func credentialPreflightDiagnostics() async {
         let recorder = ConnectionDiagnosticRecorder()

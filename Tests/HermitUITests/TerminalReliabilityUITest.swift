@@ -12,7 +12,7 @@ final class TerminalReliabilityUITest: XCTestCase {
     @MainActor
     private func openTerminal(multiplexer: String = "herdr", seedImage: Bool = false,
                               seedVoice: Bool = false, seedVoiceFailure: Bool = false,
-                              seedVoiceReview: Bool = false) throws -> XCUIApplication {
+                              seedVoiceReview: Bool = false, seedFiles: Bool = false, portOverride: String? = nil) throws -> XCUIApplication {
         XCTAssertTrue(!seedVoiceFailure || seedVoice, "a failed voice preview also requires the voice seed")
         XCTAssertTrue(!seedVoiceReview || seedVoice, "a voice review preview also requires the voice seed")
         #if !targetEnvironment(simulator)
@@ -30,13 +30,14 @@ final class TerminalReliabilityUITest: XCTestCase {
         app.launchArguments += ["-MOSHPIT_RESET", "-MOSHPIT_AUTOCARE_OFF", "1",
             "-MOSHPIT_SEED_USER", environment["MOSHPIT_SEED_USER"] ?? "aias",
             "-MOSHPIT_SEED_HOST", environment["MOSHPIT_SEED_HOST"] ?? "127.0.0.1",
-            "-MOSHPIT_SEED_PORT", environment["MOSHPIT_SEED_PORT"] ?? "22",
+            "-MOSHPIT_SEED_PORT", portOverride ?? environment["MOSHPIT_SEED_PORT"] ?? "22",
             "-MOSHPIT_SEED_NAME", "Isolated-UI-Lab", "-MOSHPIT_SEED_QUIET", "1",
             "-MOSHPIT_SEED_MUX", multiplexer,
             "-MOSHPIT_SEED_HERDR_BIN", environment["MOSHPIT_SEED_HERDR_BIN"] ?? "/tmp/moshpit-ui-lab/herdr",
             "-MOSHPIT_SEED_TRUST_FP", environment["MOSHPIT_SEED_TRUST_FP"] ?? "SHA256:iKK6EXDfFALcYCaggiqUfP0PcryrRX4KtJgLoam+npA",
             "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         if seedImage { app.launchArguments.append("-MOSHPIT_SEED_IMAGE_DRAFT") }
+        if seedFiles { app.launchArguments.append("-MOSHPIT_SEED_FILE_UPLOADS") }
         if seedVoice {
             // Use one explicit navigation path for voice fixtures. Automatic
             // DEBUG navigation must not race a cold-launch host-card tap.
@@ -61,6 +62,71 @@ final class TerminalReliabilityUITest: XCTestCase {
         #endif
         XCTAssertTrue(terminalKeyboard.waitForExistence(timeout: 30))
         return app
+    }
+
+    @MainActor
+    func testFileUploadQueueUsesRealSFTPAndPreservesCompletedPathsOnRetry() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Upload selection fixture requires a dedicated simulator")
+        #else
+        let app = try openTerminal(multiplexer: "none", seedFiles: true)
+        let details = app.buttons["file-upload-details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate { _, _ in
+            (self.composer(app).value as? String)?.contains("upload-qa-two.txt") == true
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 30)
+        let original = try XCTUnwrap(composer(app).value as? String)
+        XCTAssertEqual(original.components(separatedBy: "upload-qa-one.txt").count - 1, 1)
+        XCTAssertEqual(original.components(separatedBy: "upload-qa-two.txt").count - 1, 1)
+        details.tap()
+        let copy = app.buttons["file-upload-copy-upload-qa-one.txt"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 10))
+        copy.tap()
+        XCTAssertTrue(app.buttons["file-upload-copy-upload-qa-one.txt"].label.contains("已复制"))
+        let retry = app.buttons["file-upload-retry"]
+        if !retry.isHittable { app.swipeUp() }
+        XCTAssertTrue(retry.isHittable)
+        retry.tap()
+        XCTAssertTrue(retry.waitForExistence(timeout: 20))
+        captureScreenshot(app, name: "file-upload-queue-phone-or-mini")
+        app.buttons["完成"].tap()
+        XCTAssertEqual(composer(app).value as? String, original, "retry must not insert duplicate successful paths")
+        // The remote SFTP starting directory is the fixture root, never a user host.
+        // Verify the actual bytes rather than trusting UI completion state.
+        let regex = try NSRegularExpression(pattern: "/[^'\\s]+upload-qa-(?:one|two)\\.txt")
+        let paths = regex.matches(in: original, range: NSRange(original.startIndex..., in: original))
+            .compactMap { Range($0.range, in: original).map { String(original[$0]) } }
+        XCTAssertEqual(paths.count, 2)
+        let root = try XCTUnwrap(ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"])
+        for path in paths {
+            XCTAssertTrue(path.hasPrefix(root + "/.moshpit/uploads/"), "uploads must remain in isolated SFTP root")
+            guard path.hasPrefix(root + "/.moshpit/uploads/") else { continue }
+            let expected = path.hasSuffix("one.txt") ? "first isolated upload" : "second isolated upload"
+            XCTAssertEqual(try String(contentsOfFile: path, encoding: .utf8), expected)
+            try FileManager.default.removeItem(atPath: path)
+        }
+        #endif
+    }
+
+    @MainActor
+    func testFailedConnectionKeepsRecoveryActionAfterClosingNotice() throws {
+        // A refused loopback port exercises the actual SSH failure path. No
+        // credentials or commands are sent to a public or user-configured host.
+        let app = try openTerminal(multiplexer: "none", portOverride: "1")
+        let close = app.buttons.matching(NSPredicate(format: "label IN %@", ["Close", "关闭"])).firstMatch
+        let action = app.buttons["connection-recovery-action"]
+        expectation(for: NSPredicate { _, _ in close.exists || action.exists }, evaluatedWith: app)
+        waitForExpectations(timeout: 35)
+        if close.exists { close.tap() }
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        XCTAssertTrue(action.isHittable)
+        XCTAssertTrue(action.label.contains("重试"))
+        captureScreenshot(app, name: "connection-failure-recovery-phone-or-mini")
+        action.tap()
+        expectation(for: NSPredicate { _, _ in close.exists || action.exists }, evaluatedWith: app)
+        waitForExpectations(timeout: 35)
+
     }
 
     @MainActor
@@ -746,7 +812,7 @@ final class TerminalReliabilityUITest: XCTestCase {
         XCTAssertEqual(field.value as? String, "typed text", "Stop only opens review; it must not commit speech")
         let stoppedBytes = try await receivedInput(receipt)
         XCTAssertEqual(stoppedBytes, [])
-        captureVoiceReview(app, name: "voice-stopped-awaiting-review")
+        captureScreenshot(app, name: "voice-stopped-awaiting-review")
 
         retryVoiceReviewInEnglish(in: app)
         XCTAssertEqual(field.value as? String, "typed text", "Re-recognition must leave the existing draft alone")
@@ -761,7 +827,7 @@ final class TerminalReliabilityUITest: XCTestCase {
                        "Restoring the original also restores its language provenance")
         XCTAssertFalse(original.exists && original.isEnabled, "Original is already displayed")
         XCTAssertEqual(editor.value as? String, "simulated voice")
-        captureVoiceReview(app, name: "voice-original-restored-before-insertion")
+        captureScreenshot(app, name: "voice-original-restored-before-insertion")
 
         app.buttons["dictation-insert"].tap()
         let staged = expectation(for: NSPredicate { _, _ in
@@ -813,7 +879,7 @@ final class TerminalReliabilityUITest: XCTestCase {
         XCTAssertEqual(field.value as? String, "existing draft")
         let editedBytes = try await receivedInput(receipt)
         XCTAssertEqual(editedBytes, [])
-        captureVoiceReview(app, name: "voice-manual-edits-protected")
+        captureScreenshot(app, name: "voice-manual-edits-protected")
 
         let undo = app.buttons["dictation-undo-edits"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
@@ -893,7 +959,7 @@ final class TerminalReliabilityUITest: XCTestCase {
     }
 
     @MainActor
-    private func captureVoiceReview(_ app: XCUIApplication, name: String) {
+    private func captureScreenshot(_ app: XCUIApplication, name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways

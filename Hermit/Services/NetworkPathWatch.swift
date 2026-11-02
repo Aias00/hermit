@@ -23,11 +23,15 @@ final class NetworkPathWatch: @unchecked Sendable {
     /// the state at start, not a change, and must not kick anything.
     private var primed = Set<Int>()
 
-    init(onChange: @escaping @Sendable () -> Void) {
+    init(onAvailability: @escaping @Sendable (Bool) -> Void = { _ in },
+         onChange: @escaping @Sendable () -> Void) {
         monitors = [NWPathMonitor(), NWPathMonitor(requiredInterfaceType: .other)]
         for (index, monitor) in monitors.enumerated() {
-            monitor.pathUpdateHandler = { [weak self] _ in
+            monitor.pathUpdateHandler = { [weak self] path in
                 guard let self else { return }
+                // Only the default path can describe internet availability;
+                // absence of a split-tunnel interface does not mean offline.
+                if index == 0 { onAvailability(path.status == .satisfied) }
                 let isFirst = self.lock.withLock { self.primed.insert(index).inserted }
                 if !isFirst { onChange() }
             }

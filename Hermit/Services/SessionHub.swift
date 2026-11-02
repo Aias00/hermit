@@ -124,6 +124,7 @@ final class SessionHub {
         var shellWasReopened = false
         @ObservationIgnored private var tunnelBackoff = CloudflareReconnectBackoff()
         @ObservationIgnored private var tunnelRetryTask: Task<Void, Never>?
+        private(set) var retryScheduledAt: Date?
         /// Rendering startup can fail repeatedly while SSH authentication works.
         /// Keep its retry budget independent of a successful transport dial.
         @ObservationIgnored private var herdrFrameRecoveryBackoff = CloudflareReconnectBackoff()
@@ -1512,6 +1513,7 @@ final class SessionHub {
             // Its success must not be torn down by an earlier retry timer.
             tunnelRetryTask?.cancel()
             tunnelRetryTask = nil
+            retryScheduledAt = nil
             herdrFrameRecoveryTask?.cancel()
             herdrFrameRecoveryTask = nil
             if !automatic {
@@ -3137,6 +3139,8 @@ final class SessionHub {
         /// with it (``inheritedPinLedger``); the replacement re-pins the same
         /// window on attach and settles the rest on the real disconnect.
         func stop(forReconnect: Bool = false) async {
+            if !forReconnect { composerDraft.uploads.cancel() }
+            retryScheduledAt = nil
             resetPlainSSHObservation()
             herdrFrameRecoveryTask?.cancel()
             herdrFrameRecoveryTask = nil
@@ -3744,15 +3748,17 @@ final class SessionHub {
         private func scheduleTunnelRetry() {
             tunnelRetryTask?.cancel()
             let delay = tunnelBackoff.failed()
+            retryScheduledAt = Date().addingTimeInterval(delay)
             let generation = startGeneration
             tunnelRetryTask = Task { @MainActor [weak self] in
                 do { try await Task.sleep(for: .seconds(delay)) }
                 catch { return }
-                guard !Task.isCancelled, let self, generation == self.startGeneration,
-                      !self.isStopping, self.canAutomaticallyReconnect else { return }
+                guard !Task.isCancelled, let self, generation == self.startGeneration else { return }
                 // stop() cancels the stored task. Disown this already-fired
                 // timer before entering reconnect so it cannot cancel itself.
                 self.tunnelRetryTask = nil
+                self.retryScheduledAt = nil
+                guard !self.isStopping, self.canAutomaticallyReconnect else { return }
                 await self.reconnect(afterBackoff: true)
             }
         }
@@ -3822,6 +3828,7 @@ final class SessionHub {
     /// delivered as one update on resume — which is exactly the case this
     /// exists for (the user left to turn Tailscale on and came back).
     @ObservationIgnored private var pathWatch: NetworkPathWatch?
+    private(set) var networkUnavailable = false
     /// Only owns the debounce wait, never an already-started recovery. A new
     /// path notification must not cancel the SSH handshake the last one began.
     @ObservationIgnored private var pathKick: Task<Void, Never>?
@@ -3928,7 +3935,9 @@ final class SessionHub {
 
     private func startPathWatchIfNeeded() {
         guard pathWatch == nil else { return }
-        let watch = NetworkPathWatch { [weak self] in
+        let watch = NetworkPathWatch(onAvailability: { [weak self] available in
+            Task { @MainActor [weak self] in self?.networkUnavailable = !available }
+        }) { [weak self] in
             Task { @MainActor [weak self] in self?.networkPathChanged() }
         }
         watch.start()

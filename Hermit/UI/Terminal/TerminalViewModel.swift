@@ -10,6 +10,7 @@ final class TerminalComposerDraft {
     var text = ""
     var isSending = false
     var errorMessage: String?
+    let uploads = FileUploadQueue()
 }
 
 /// View model that owns the SSH session lifecycle for a single terminal screen.
@@ -25,6 +26,39 @@ final class TerminalComposerDraft {
 @Observable
 @MainActor
 final class TerminalViewModel {
+    enum ConnectionStep: Equatable {
+        case validating, access, tailscale, relay, credentials, transport, authentication, hostKey, terminal, workspace
+
+        private var order: Int {
+            switch self {
+            case .validating: return 0
+            case .access, .tailscale, .relay: return 1
+            case .credentials: return 2
+            case .transport: return 3
+            case .authentication: return 4
+            case .hostKey: return 5
+            case .terminal: return 6
+            case .workspace: return 7
+            }
+        }
+
+        func follows(_ previous: Self) -> Bool { order >= previous.order }
+
+        var title: String {
+            switch self {
+            case .validating: return String(localized: "Checking connection settings")
+            case .access: return String(localized: "Checking Cloudflare Access")
+            case .tailscale: return String(localized: "Preparing Tailscale")
+            case .relay: return String(localized: "Checking relay credentials")
+            case .credentials: return String(localized: "Reading SSH credentials")
+            case .transport: return String(localized: "Connecting to server")
+            case .authentication: return String(localized: "Authenticating SSH")
+            case .hostKey: return String(localized: "Waiting for host key confirmation")
+            case .terminal: return String(localized: "Opening terminal")
+            case .workspace: return String(localized: "Restoring workspace")
+            }
+        }
+    }
     enum Status: Equatable {
         case idle
         case connecting
@@ -63,6 +97,8 @@ final class TerminalViewModel {
     private(set) var status: Status = .idle
     var errorMessage: String?
     private(set) var connectionFailure: ConnectionFailure?
+    private(set) var connectionStep: ConnectionStep = .validating
+    var connectionStepTitle: String { hostKeyPrompt == nil ? connectionStep.title : ConnectionStep.hostKey.title }
     var allowsAutomaticRetry: Bool { connectionFailure?.recovery == .retry || connectionFailure == nil }
     var requiresAccessLogin: Bool { connectionFailure?.recovery == .login }
 
@@ -121,7 +157,7 @@ final class TerminalViewModel {
     typealias Dialer = @Sendable (ServerConnection,
                                   @escaping SSHService.TrustNewHostHandler,
                                   @escaping SSHService.AcceptChangedHostHandler) async throws -> SSHSession
-    @ObservationIgnored private let dial: Dialer
+    @ObservationIgnored private let dial: Dialer?
     /// Which dial the in-flight `start()` / `connectForExec()` belongs to.
     /// `disconnect()` while a dial is still out bumps this, and that dial's
     /// eventual verdict — success or failure — is then nobody's business:
@@ -146,13 +182,36 @@ final class TerminalViewModel {
     init(connection: ServerConnection, sshService: SSHService = .shared, dial: Dialer? = nil) {
         self.connection = connection
         self.sshService = sshService
-        if let dial {
-            self.dial = dial
-        } else {
-            self.dial = { connection, onUnknown, onChanged in
-                try await sshService.connect(connection, onUnknownHost: onUnknown, onChangedHost: onChanged)
-            }
+        self.dial = dial
+    }
+
+    private func openSSH(generation: Int) async throws -> SSHSession {
+        let handlers = hostKeyHandlers()
+        if let dial { return try await dial(connection, handlers.onUnknown, handlers.onChanged) }
+        return try await sshService.connect(connection, onUnknownHost: handlers.onUnknown,
+            onChangedHost: handlers.onChanged, onProgress: { [weak self] event in
+                Task { @MainActor [weak self] in self?.receiveProgress(event, generation: generation) }
+            })
+    }
+
+    // A shared SSHService also dials sidecars and other hosts. Only this primary
+    // attempt may change its UI, and queued events may arrive after SSH returned.
+    func receiveProgress(_ event: SSHConnectionDiagnostic, generation: Int) {
+        let failed: Bool
+        if case .failed = status { failed = true } else { failed = false }
+        guard generation == dialGeneration, isAwaitingSSHConnection || failed,
+              event.connectionID == connection.id, event.outcome == .started else { return }
+        let next: ConnectionStep
+        switch event.phase {
+        case .transportValidation: next = .validating
+        case .cloudflareAccess: next = .access
+        case .tailscaleAccount: next = .tailscale
+        case .relayCredential: next = .relay
+        case .tailcatCredential, .sshCredential, .authenticationMethod: next = .credentials
+        case .transportDial, .directSSHConnect: next = .transport
+        case .sshAuthentication: next = .authentication
         }
+        if next.follows(connectionStep) { connectionStep = next }
     }
 
     /// Suspend the SSH handshake until the user answers the host-key prompt.
@@ -250,6 +309,7 @@ final class TerminalViewModel {
     func start(rows: Int = 24, cols: Int = 80) async {
         guard case .idle = status else { return }
         status = .connecting
+        connectionStep = .validating
         dialGeneration += 1
         rejectedHostKey = false
         let generation = dialGeneration
@@ -261,13 +321,13 @@ final class TerminalViewModel {
         var phase = "ssh"
         logConnectionPhase("pty-dial.started", generation: generation)
         do {
-            let handlers = hostKeyHandlers()
-            let newSession = try await dial(connection, handlers.onUnknown, handlers.onChanged)
+            let newSession = try await openSSH(generation: generation)
             if awaitingSSHGeneration == generation { awaitingSSHGeneration = nil }
             pendingSession = newSession
             guard generation == dialGeneration else { await newSession.close(); return }
             if rejectedHostKey { throw HostKeyRejected() }
             phase = "pty"
+            connectionStep = .terminal
             logConnectionPhase("ssh.connected", generation: generation)
             try await newSession.requestPTY(rows: rows, cols: cols)
             guard generation == dialGeneration else { await newSession.close(); return }
@@ -276,6 +336,7 @@ final class TerminalViewModel {
             self.status = .connected
             self.isAutoReconnectInFlight = false
             self.connectionFailure = nil
+            connectionStep = connection.multiplexer == .none ? .terminal : .workspace
             logConnectionPhase("pty.ready", generation: generation)
         } catch {
             await pendingSession?.close()
@@ -299,6 +360,7 @@ final class TerminalViewModel {
     func connectForExec() async -> SSHSession? {
         guard case .idle = status else { return session }
         status = .connecting
+        connectionStep = .validating
         dialGeneration += 1
         rejectedHostKey = false
         let generation = dialGeneration
@@ -308,12 +370,12 @@ final class TerminalViewModel {
         }
         logConnectionPhase("exec-dial.started", generation: generation)
         do {
-            let handlers = hostKeyHandlers()
-            let newSession = try await dial(connection, handlers.onUnknown, handlers.onChanged)
+            let newSession = try await openSSH(generation: generation)
             if awaitingSSHGeneration == generation { awaitingSSHGeneration = nil }
             guard generation == dialGeneration else { await newSession.close(); return nil }
             if rejectedHostKey { await newSession.close(); throw HostKeyRejected() }
             self.session = newSession
+            connectionStep = .terminal
             logConnectionPhase("exec-ssh.ready", generation: generation)
             return newSession
         } catch {
