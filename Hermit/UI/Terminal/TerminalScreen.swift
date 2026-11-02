@@ -2063,23 +2063,37 @@ struct TerminalScreen: View {
                              selected: terminalKeyboardActive, action: toggleInputDestination)
                 .accessibilityValue(terminalKeyboardActive ? Text("Terminal input") : Text("Draft"))
                 .accessibilityHint(terminalKeyboardActive ? Text("Switch back to editing the draft.") : Text("Type directly in the terminal. Your draft is kept."))
-                .disabled(!launchIsConnected)
+                .disabled(!launchIsConnected || composerIsSending)
         }.padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 6)
     }
 
     private var inputDestinationHint: some View {
         HStack(spacing: 6) {
-            Label(terminalKeyboardActive ? String(localized: "Terminal input") : String(localized: "Draft"),
-                  systemImage: terminalKeyboardActive ? "terminal" : "square.and.pencil")
+            Button(action: toggleInputDestination) {
+                HStack(spacing: 5) {
+                    Label(terminalKeyboardActive ? String(localized: "Terminal input") : String(localized: "Draft"),
+                          systemImage: terminalKeyboardActive ? "terminal" : "square.and.pencil")
+                    Image(systemName: "arrow.left.arrow.right").font(.system(size: 9))
+                }
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(TerminalChrome.selectedTab)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(terminalKeyboardActive ? Text("Terminal input") : Text("Draft"))
-                .accessibilityIdentifier("conversation-input-mode")
-            Text(terminalKeyboardActive ? String(localized: "Keys go directly to the terminal") : String(localized: "Return: new line · Plane: send"))
+                .padding(.horizontal, 8).frame(minHeight: 32)
+                .background(TerminalChrome.selectedTab.opacity(0.12), in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(terminalKeyboardActive ? Text("Terminal input") : Text("Draft"))
+            .accessibilityHint(terminalKeyboardActive ? Text("Switch back to editing the draft.") : Text("Type directly in the terminal. Your draft is kept."))
+            .accessibilityIdentifier("conversation-input-mode")
+            .disabled(!launchIsConnected || composerIsSending)
+            if composerIsSending { ProgressView().controlSize(.mini) }
+            Text(composerIsSending ? String(localized: "Sending…")
+                 : terminalKeyboardActive ? String(localized: "Keys go directly to the terminal")
+                 : String(localized: "Return: new line · Plane: send"))
                 .font(.system(size: 10))
                 .foregroundStyle(TerminalChrome.foreground.opacity(0.7))
                 .lineLimit(1).minimumScaleFactor(0.8)
+                .accessibilityIdentifier("conversation-input-hint")
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14).padding(.top, 5)

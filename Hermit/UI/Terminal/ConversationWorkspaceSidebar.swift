@@ -47,43 +47,48 @@ struct ConversationWorkspaceSidebar: View {
     private func selectedLine(_ title: String, state: String?, selected: Bool) -> some View {
         HStack(spacing: 6) {
             dot(state)
-            Text(title).fontWeight(selected ? .semibold : .regular).lineLimit(1).truncationMode(.tail)
+            Text(title).fontWeight(selected ? .semibold : .regular).lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 0)
         }
         .foregroundStyle(selected ? TerminalChrome.foreground : foreground)
-        .padding(.horizontal, 6).frame(minHeight: 18)
+        .padding(.horizontal, 10).frame(minHeight: 44)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? selection : .clear)
+        .background(selected ? selection : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .leading) {
+            if selected {
+                RoundedRectangle(cornerRadius: 2).fill(TerminalChrome.selectedTab)
+                    .frame(width: 3).padding(.vertical, 8)
+            }
+        }
     }
+    private func sectionHeader(_ title: LocalizedStringKey, count: Int) -> some View {
+        HStack {
+            Text(title)
+            Spacer(minLength: 4)
+            Text(count, format: .number).monospacedDigit()
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(muted).padding(.horizontal, 10).padding(.vertical, 8)
+    }
+
     var body: some View {
-        GeometryReader { geometry in
-            VStack(spacing: 0) {
-                VStack(spacing: 0) {
-                    HStack { Text("spaces"); Spacer() }
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(muted).padding(.horizontal, 6).padding(.vertical, 5)
-                    ScrollView {
-                        LazyVStack(spacing: 4) {
-                            ForEach(sessions) { session in
-                                Button { selectSession(session.id) } label: {
-                                    selectedLine(session.name, state: state(in: session), selected: snapshot.activeSessionId == session.id)
-                                }.buttonStyle(.plain).accessibilityIdentifier("workspace-\(session.id)")
-                            }
-                        }.padding(.vertical, 2)
+        VStack(spacing: 0) {
+            // One scroll surface leaves the lists usable when the keyboard or
+            // landscape orientation makes a fixed split too short for a row.
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    sectionHeader("Workspaces", count: sessions.count)
+                    ForEach(sessions) { session in
+                        Button { selectSession(session.id) } label: {
+                            selectedLine(session.name, state: state(in: session), selected: snapshot.activeSessionId == session.id)
+                        }
+                        .buttonStyle(.plain).accessibilityIdentifier("workspace-\(session.id)")
+                        .accessibilityAddTraits(snapshot.activeSessionId == session.id ? [.isSelected] : [])
                     }
-                    HStack {
-                        Button("new", action: create).accessibilityLabel("新建工作区")
-                        Spacer()
-                        Button("menu", action: manage).accessibilityLabel("工作区管理")
-                    }.buttonStyle(.plain).foregroundStyle(muted)
-                        .font(.system(size: 11, design: .monospaced)).padding(.horizontal, 6).padding(.vertical, 8)
-                }.frame(height: geometry.size.height * 0.46)
-                Rectangle().fill(muted.opacity(0.18)).frame(height: 1).padding(.horizontal, 6)
-                HStack { Text("agents"); Spacer(); Text("grouped") }
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(muted).padding(.horizontal, 6).padding(.vertical, 7)
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 5) {
+                    if !agents.isEmpty {
+                        Rectangle().fill(muted.opacity(0.18)).frame(height: 1)
+                            .padding(.horizontal, 10).padding(.top, 8)
+                        sectionHeader("Agents", count: agents.count)
                         ForEach(agents) { pane in
                             let hook = hooks[pane.id]
                             let workspace = workspaceID(of: pane)
@@ -91,29 +96,49 @@ struct ConversationWorkspaceSidebar: View {
                             let siblings = agents.filter { workspaceID(of: $0) == workspace }
                             let ordinal = (siblings.firstIndex(where: { $0.id == pane.id }) ?? 0) + 1
                             Button { selectPane(pane.id) } label: {
-                                VStack(alignment: .leading, spacing: 2) {
+                                VStack(alignment: .leading, spacing: 0) {
                                     selectedLine(name + (siblings.count > 1 ? " · \(ordinal)" : ""),
                                         state: hook?.state, selected: snapshot.activePaneId == pane.id)
                                     Text(hook?.agent ?? pane.displayCommand)
                                         .font(.system(size: 12, design: .monospaced)).foregroundStyle(muted)
-                                        .lineLimit(1).padding(.leading, 18).padding(.trailing, 6)
-                                }.frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
-                            }.buttonStyle(.plain).accessibilityIdentifier("agent-\(pane.id)")
+                                        .lineLimit(1).padding(.leading, 22).padding(.trailing, 10).padding(.bottom, 8)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).accessibilityIdentifier("agent-\(pane.id)")
+                            .accessibilityAddTraits(snapshot.activePaneId == pane.id ? [.isSelected] : [])
                         }
                     }
                 }
-                HStack {
-                    Spacer()
-                    Button(action: collapse) { Image(systemName: "chevron.left.2").frame(width: 30, height: 24) }
-                        .buttonStyle(.plain).foregroundStyle(muted).accessibilityLabel("收起工作区侧栏")
-                        .accessibilityIdentifier("conversation-sidebar-collapse")
-                }
+                .padding(.horizontal, 4).padding(.bottom, 8)
             }
-        }.font(.system(size: 13, design: .monospaced)).foregroundStyle(foreground)
-            .background(TerminalChrome.background)
-            .overlay(alignment: .trailing) { Rectangle().fill(muted.opacity(0.18)).frame(width: 1) }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("conversation-workspaces")
+            .scrollDismissesKeyboard(.never)
+            .accessibilityIdentifier("conversation-workspace-list")
+            Rectangle().fill(muted.opacity(0.18)).frame(height: 1)
+            HStack(spacing: 0) {
+                Button(action: create) {
+                    Label("New workspace", systemImage: "plus").labelStyle(.iconOnly)
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("conversation-workspace-create")
+                Button(action: manage) {
+                    Label("Manage workspaces", systemImage: "ellipsis").labelStyle(.iconOnly)
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("conversation-workspace-manage")
+                Button(action: collapse) {
+                    Label("Collapse workspaces", systemImage: "chevron.left.2").labelStyle(.iconOnly)
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("conversation-sidebar-collapse")
+            }
+            .buttonStyle(.plain).font(.system(size: 16)).foregroundStyle(foreground)
+        }
+        .font(.system(size: 14)).foregroundStyle(foreground)
+        .background(TerminalChrome.background)
+        .overlay(alignment: .trailing) { Rectangle().fill(muted.opacity(0.18)).frame(width: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("conversation-workspaces")
     }
 }

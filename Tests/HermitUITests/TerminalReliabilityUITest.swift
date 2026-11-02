@@ -169,6 +169,48 @@ final class TerminalReliabilityUITest: XCTestCase {
     }
 
     @MainActor
+    func testNamedInputModeSwitchPreservesDraftAndRoutesTyping() async throws {
+        let receipt = try inputReceiptURL()
+        let app = try openTerminal(multiplexer: "none")
+        let field = composer(app)
+        field.tap()
+        field.typeText("draft before switching")
+        let mode = app.buttons["conversation-input-mode"]
+        let hand = app.buttons["conversation-direct-input"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 5))
+        let draftLabel = mode.label
+        try await resetInputReceipt(receipt)
+        waitForKeyboardToolbar(mode, in: app, keyboardVisible: true)
+        mode.tap()
+        let direct = expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: hand)
+        await fulfillment(of: [direct], timeout: 5)
+        XCTAssertNotEqual(mode.label, draftLabel)
+        app.typeText("direct-mode")
+        let expected = Array("direct-mode".utf8).map(Int.init)
+        var received: [Int] = []
+        for _ in 0..<50 {
+            received = try await receivedInput(receipt)
+            if received == expected { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(received, expected, "The named mode switch must route typing to the actual SSH stream")
+        XCTAssertEqual(field.value as? String, "draft before switching")
+        waitForKeyboardToolbar(mode, in: app, keyboardVisible: true)
+        mode.tap()
+        let local = expectation(for: NSPredicate(format: "selected == false"), evaluatedWith: hand)
+        await fulfillment(of: [local], timeout: 5)
+        XCTAssertEqual(mode.label, draftLabel)
+        app.typeText(" local")
+        XCTAssertEqual((field.value as? String)?.replacingOccurrences(of: " local", with: ""), "draft before switching")
+        let afterReturning = try await receivedInput(receipt)
+        XCTAssertEqual(afterReturning, expected, "Returning to the draft must stop remote typing")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "named-input-mode-preserves-draft"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    @MainActor
     func testHerdrKeyboardCtrlAndDraftPreservation() throws {
         let app = try openTerminal()
         let field = composer(app)

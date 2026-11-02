@@ -32,6 +32,50 @@ final class TerminalSessionSwitchingUITest: XCTestCase {
     }
 
     @MainActor
+    func testWorkspaceSidebarTouchTargetsAndSwitchingPreserveDraftFocus() throws {
+        let (app, _) = try launch(multiplexer: "herdr", name: "Workspace Touch Lab")
+        defer { app.terminate() }
+        let sidebar = app.buttons["conversation-sidebar"]
+        let ready = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: sidebar)
+        wait(for: [ready], timeout: 25)
+        let field = app.descendants(matching: .any).matching(identifier: "terminal-composer").firstMatch
+        field.tap()
+        field.typeText("draft while switching")
+        XCTAssertTrue(FormInteraction.waitForStableFrame(sidebar))
+        sidebar.tap()
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "workspace-"))
+        let current = rows.matching(NSPredicate(format: "selected == true")).firstMatch
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
+        let originalID = current.identifier
+        let originalCount = rows.count
+        XCTAssertGreaterThanOrEqual(current.frame.height, 44)
+        for id in ["conversation-workspace-create", "conversation-workspace-manage", "conversation-sidebar-collapse"] {
+            let control = app.buttons[id]
+            XCTAssertTrue(control.isHittable)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        }
+        app.buttons["conversation-workspace-create"].tap()
+        let created = expectation(for: NSPredicate { _, _ in
+            rows.count == originalCount + 1 && current.exists && current.identifier != originalID
+        }, evaluatedWith: nil)
+        wait(for: [created], timeout: 20)
+        XCTAssertEqual(field.value as? String, "draft while switching")
+        app.typeText(" after new")
+        XCTAssertEqual(field.value as? String, "draft while switching after new",
+                       "Creating a workspace must preserve composer focus")
+        let original = app.buttons[originalID]
+        XCTAssertTrue(original.isHittable)
+        original.tap()
+        let returned = expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: original)
+        wait(for: [returned], timeout: 10)
+        app.typeText(" after return")
+        XCTAssertEqual(field.value as? String, "draft while switching after new after return")
+        capture("workspace-sidebar-touch-targets-and-selected-row")
+        app.buttons["conversation-sidebar-collapse"].tap()
+        XCTAssertFalse(sidebar.isSelected)
+    }
+
+    @MainActor
     func testSSHToMoshAndBackDeliversInput() throws {
         let (app, directory) = try launch(multiplexer: "none", name: "Protocol Switch Lab")
         let receipt = directory.appendingPathComponent("protocol-switch-\(UUID().uuidString).txt")
