@@ -11,6 +11,8 @@ untouched. This verifies the app's SSH input bytes, not a remote TUI's behavior.
 
 The runner receives TEST_RUNNER_MOSHPIT_SEED_* environment variables. A GET of
 MOSHPIT_INPUT_RECEIPT_URL returns {"bytes": [13, ...]}; POST clears the receipt.
+POST /output accepts {"text": "..."} to emit synthetic terminal output on the
+existing PTY. It never executes a shell or interprets received input as commands.
 Keep test runs sequential: the receiver deliberately has one aggregate log.
 """
 
@@ -26,6 +28,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import select
 import socket
 import subprocess
 import sys
@@ -78,15 +81,25 @@ def terminal(root):
     tty.setraw(0)
     try:
         os.write(1, b"\x1b[?2004h\x1b[2J\x1b[HIsolated input receiver\r\n> ")
+        output_offset = 0
         while True:
-            data = os.read(0, 4096)
-            if not data:
-                return
-            receipt(root, data=data)
-            # Echo safely for visual inspection; never interpret as a command.
-            printable = b"".join(bytes([b]) if b >= 32 and b != 127 else
-                                  (b"\r\n> " if b == 13 else b"") for b in data)
-            os.write(1, printable)
+            ready, _, _ = select.select([0], [], [], 0.05)
+            if ready:
+                data = os.read(0, 4096)
+                if not data:
+                    return
+                receipt(root, data=data)
+                # Echo safely for visual inspection; never execute received input.
+                printable = b"".join(bytes([b]) if b >= 32 and b != 127 else
+                                      (b"\r\n> " if b == 13 else b"") for b in data)
+                os.write(1, printable)
+            with open(root / "output.bytes", "rb") as output:
+                fcntl.flock(output, fcntl.LOCK_SH)
+                output.seek(output_offset)
+                emitted = output.read()
+                output_offset += len(emitted)
+            if emitted:
+                os.write(1, emitted)
     finally:
         termios.tcsetattr(0, termios.TCSANOW, old)
 
@@ -94,6 +107,7 @@ def terminal(root):
 def serve(state_path):
     state = json.loads(state_path.read_text())
     root = Path(state["fixture_dir"])
+    private_write(root / "output.bytes", "")
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -117,6 +131,24 @@ def serve(state_path):
             self.answer()
 
         def do_POST(self):
+            if self.path == "/output":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= 65536:
+                        raise ValueError("invalid output size")
+                    payload = json.loads(self.rfile.read(length))
+                    if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
+                        raise ValueError("invalid output payload")
+                    emitted = payload["text"].encode("utf-8")
+                    with open(root / "output.bytes", "ab", buffering=0) as output:
+                        fcntl.flock(output, fcntl.LOCK_EX)
+                        output.write(emitted)
+                except (ValueError, TypeError, KeyError):
+                    self.send_error(400)
+                    return
+                self.send_response(204)
+                self.end_headers()
+                return
             self.answer(reset=True)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

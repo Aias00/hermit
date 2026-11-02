@@ -12,7 +12,7 @@ final class TerminalReliabilityUITest: XCTestCase {
     @MainActor
     private func openTerminal(multiplexer: String = "herdr", seedImage: Bool = false,
                               seedVoice: Bool = false, seedVoiceFailure: Bool = false,
-                              seedVoiceReview: Bool = false, seedFiles: Bool = false, portOverride: String? = nil) throws -> XCUIApplication {
+                              seedVoiceReview: Bool = false, seedFiles: Bool = false, portOverride: String? = nil, explicitNavigation: Bool = false) throws -> XCUIApplication {
         XCTAssertTrue(!seedVoiceFailure || seedVoice, "a failed voice preview also requires the voice seed")
         XCTAssertTrue(!seedVoiceReview || seedVoice, "a voice review preview also requires the voice seed")
         #if !targetEnvironment(simulator)
@@ -38,6 +38,7 @@ final class TerminalReliabilityUITest: XCTestCase {
             "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         if seedImage { app.launchArguments.append("-MOSHPIT_SEED_IMAGE_DRAFT") }
         if seedFiles { app.launchArguments.append("-MOSHPIT_SEED_FILE_UPLOADS") }
+        if explicitNavigation { app.launchArguments += ["-MOSHPIT_SEED_HOME", "1"] }
         if seedVoice {
             // Use one explicit navigation path for voice fixtures. Automatic
             // DEBUG navigation must not race a cold-launch host-card tap.
@@ -47,13 +48,18 @@ final class TerminalReliabilityUITest: XCTestCase {
         if seedVoiceReview { app.launchArguments.append("-MOSHPIT_SEED_VOICE_REVIEW") }
         // A simulator may retain a process started during installation. The
         // voice fixture must start a fresh process with its explicit seed args.
-        if seedVoice { app.terminate() }
+        if seedVoice || explicitNavigation { app.terminate() }
         app.launch()
         let terminalKeyboard = app.buttons["conversation-keyboard-toggle"]
         #if targetEnvironment(simulator)
-        if seedVoice {
+        if seedVoice || explicitNavigation {
             XCTAssertEqual(environment["MOSHPIT_SEED_HOST"] ?? "127.0.0.1", "127.0.0.1")
             let host = app.buttons["connection-card-Isolated-UI-Lab"]
+            if explicitNavigation, !host.waitForExistence(timeout: 3) {
+                let sidebar = app.buttons.matching(NSPredicate(format: "label IN %@",
+                    ["显示边栏", "Show Sidebar", "Show sidebar"])).firstMatch
+                if sidebar.exists { sidebar.tap() }
+            }
             XCTAssertTrue(host.waitForExistence(timeout: 15))
             XCTAssertTrue(app.buttons["home-settings"].exists)
             XCTAssertTrue(host.label.contains("127.0.0.1"), "only open the isolated loopback host")
@@ -62,6 +68,142 @@ final class TerminalReliabilityUITest: XCTestCase {
         #endif
         XCTAssertTrue(terminalKeyboard.waitForExistence(timeout: 30))
         return app
+    }
+
+    @MainActor
+    private func emitReaderOutput(_ text: String, receipt: URL) async throws {
+        var request = URLRequest(url: receipt.deletingLastPathComponent().appendingPathComponent("output"))
+        request.httpMethod = "POST"
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text])
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (_, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 204)
+    }
+
+    @MainActor
+    func testOutputReaderSearchRefreshAndCopyNeverSendSSHInput() async throws {
+        let receipt = try inputReceiptURL()
+        let app = try openTerminal(multiplexer: "none", explicitNavigation: true)
+        let field = composer(app)
+        field.tap()
+        field.typeText("kept reader draft")
+        try await emitReaderOutput("\u{1b}[2J\u{1b}[3J\u{1b}[HREADER 中文 alpha ALPHA 中文 end\r\n", receipt: receipt)
+        try await resetInputReceipt(receipt)
+        app.buttons["conversation-menu"].tap()
+        app.buttons["阅读／搜索输出"].tap()
+        let query = app.textFields["terminal-output-query"]
+        XCTAssertTrue(query.waitForExistence(timeout: 10))
+        query.tap()
+        query.typeText("alpha")
+        let count = app.staticTexts["terminal-output-match-count"]
+        await fulfillment(of: [expectation(for: NSPredicate(format: "label == '1/2'"), evaluatedWith: count)], timeout: 10)
+        app.buttons["terminal-output-next"].tap()
+        XCTAssertEqual(count.label, "2/2")
+        app.buttons["terminal-output-previous"].tap()
+        XCTAssertEqual(count.label, "1/2")
+        app.switches["terminal-output-case"].tap()
+        let sensitive = expectation(for: NSPredicate(format: "label == '1/1'"), evaluatedWith: count)
+        await fulfillment(of: [sensitive], timeout: 10)
+        app.buttons["terminal-output-clear"].tap()
+        query.tap()
+        query.typeText("中文")
+        let chinese = expectation(for: NSPredicate(format: "label == '1/2'"), evaluatedWith: count)
+        await fulfillment(of: [chinese], timeout: 10)
+        try await emitReaderOutput("\r\n中文 NEW_READER_OUTPUT\r\n", receipt: receipt)
+        let refresh = app.buttons["terminal-output-refresh"]
+        XCTAssertTrue(refresh.waitForExistence(timeout: 10))
+        let snapshotText = app.textViews["terminal-output-text"]
+        XCTAssertFalse((snapshotText.value as? String ?? "").contains("NEW_READER_OUTPUT"))
+        refresh.tap()
+        let updated = expectation(for: NSPredicate { _, _ in
+            (snapshotText.value as? String)?.contains("NEW_READER_OUTPUT") == true
+        }, evaluatedWith: app)
+        await fulfillment(of: [updated], timeout: 10)
+        app.buttons["terminal-output-copy"].tap()
+        XCTAssertTrue(app.buttons["terminal-output-copy"].label.contains("已复制"))
+        captureScreenshot(app, name: "terminal-output-reader-search-refresh")
+        app.buttons["完成"].tap()
+        XCTAssertEqual(field.value as? String, "kept reader draft")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        app.typeText(" after reader")
+        XCTAssertEqual(field.value as? String, "kept reader draft after reader")
+        let remoteInput = try await receivedInput(receipt)
+        XCTAssertTrue(remoteInput.isEmpty, "search, copy and refresh must remain local")
+    }
+
+    @MainActor
+    func testBackToLatestFlushesNewOutputWithoutSendingKeys() async throws {
+        let receipt = try inputReceiptURL()
+        let app = try openTerminal(multiplexer: "none", explicitNavigation: true)
+        if app.keyboards.firstMatch.exists {
+            app.buttons["conversation-keyboard-toggle"].tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        }
+        let output = "\u{1b}[2J\u{1b}[3J\u{1b}[H" + (0..<120).map { "READING_ROW_\($0)\r\n" }.joined()
+        try await emitReaderOutput(output, receipt: receipt)
+        try await resetInputReceipt(receipt)
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.30))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.57))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        let latest = app.buttons["terminal-back-to-latest"]
+        XCTAssertTrue(latest.waitForExistence(timeout: 8))
+        try await emitReaderOutput("NEW_TAIL_OUTPUT\r\n", receipt: receipt)
+        let newOutput = expectation(for: NSPredicate(format: "label CONTAINS %@", "有新输出"), evaluatedWith: latest)
+        await fulfillment(of: [newOutput], timeout: 8)
+        captureScreenshot(app, name: "terminal-reading-new-output-cue")
+        latest.tap()
+        XCTAssertTrue(latest.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        app.buttons["conversation-menu"].tap()
+        app.buttons["阅读／搜索输出"].tap()
+        let text = app.textViews["terminal-output-text"]
+        XCTAssertTrue(text.waitForExistence(timeout: 10))
+        XCTAssertTrue((text.value as? String ?? "").contains("NEW_TAIL_OUTPUT"))
+        app.buttons["完成"].tap()
+        start.press(forDuration: 0.05, thenDragTo: end)
+        XCTAssertTrue(latest.waitForExistence(timeout: 8))
+        app.buttons["conversation-menu"].tap()
+        app.buttons["阅读／搜索输出"].tap()
+        XCTAssertTrue(text.waitForExistence(timeout: 10))
+        try await emitReaderOutput("PENDING_READER_TAIL\r\n", receipt: receipt)
+        let refresh = app.buttons["terminal-output-refresh"]
+        XCTAssertTrue(refresh.waitForExistence(timeout: 10))
+        XCTAssertFalse((text.value as? String ?? "").contains("PENDING_READER_TAIL"))
+        refresh.tap()
+        expectation(for: NSPredicate { _, _ in
+            (text.value as? String)?.contains("PENDING_READER_TAIL") == true
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        let input = try await receivedInput(receipt)
+        XCTAssertTrue(input.isEmpty)
+    }
+
+    @MainActor
+    func testHerdrReaderUsesScreenScopeAndKeepsDraft() throws {
+        guard ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"] != nil else {
+            throw XCTSkip("requires the isolated real HERDR session fixture")
+        }
+        let app = try openTerminal(multiplexer: "herdr", explicitNavigation: true)
+        submit("stty -echo; printf '\\033[2J\\033[H%s\\n' 'HERDR_READER_CONTENT'; stty echo", in: app)
+        let field = composer(app)
+        field.tap()
+        field.typeText("kept herdr draft")
+        app.buttons["conversation-menu"].tap()
+        app.buttons["阅读／搜索输出"].tap()
+        let text = app.textViews["terminal-output-text"]
+        XCTAssertTrue(text.waitForExistence(timeout: 10))
+        XCTAssertTrue((text.value as? String ?? "").contains("HERDR_READER_CONTENT"))
+        XCTAssertTrue(app.staticTexts["搜索当前画面快照，更多历史仍由远端保存。"].exists)
+        let query = app.textFields["terminal-output-query"]
+        query.tap()
+        query.typeText("HERDR_READER_CONTENT")
+        let count = app.staticTexts["terminal-output-match-count"]
+        expectation(for: NSPredicate(format: "label == '1/1'"), evaluatedWith: count)
+        waitForExpectations(timeout: 10)
+        captureScreenshot(app, name: "herdr-current-screen-reader")
+        app.buttons["完成"].tap()
+        XCTAssertEqual(field.value as? String, "kept herdr draft")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
     }
 
     @MainActor

@@ -554,6 +554,22 @@ struct SwiftTerminalView: UIViewRepresentable {
         private var heldFeed: [Data] = []
         private var heldBytes = 0
         private let heldByteLimit = 1_000_000
+        private let readingVersion = TerminalOutputVersion()
+        var outputRevision: UInt64 { readingVersion.value }
+        private(set) var outputGeneration = UUID()
+        var isReadingLocalHistory: Bool {
+            onScroll == nil && terminalView?.canScroll == true
+                && (terminalView?.scrollPosition ?? 1) < 0.999
+        }
+        var hasHeldOutput: Bool { heldBytes > 0 }
+
+        /// Local-only navigation: never send End, Escape or mouse bytes to an app.
+        func returnToLatestLocalOutput() {
+            guard onScroll == nil, let terminalView else { return }
+            terminalView.closeSelection()
+            releaseScrollHold()
+            if terminalView.canScroll { terminalView.scroll(toPosition: 1) }
+        }
 
         /// The user's cursor style + colour (Settings), re-asserted after
         /// every feed. Remote output carries DECSCUSR / OSC 12 (vim mode
@@ -778,6 +794,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// any thread — SwiftTerm explicitly documents `feed` as
         /// background-thread safe.
         func feed(data: Data) {
+            readingVersion.advance()
             lastFedAt = ProcessInfo.processInfo.systemUptime
             guard let terminalView else {
                 // Buffer until a view attaches so no early output is lost.
@@ -1194,6 +1211,8 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// Feed a string (for seeding banners, status text, etc.). Same
         /// thread-safety note applies.
         func feed(text: String) {
+            readingVersion.advance()
+            lastFedAt = ProcessInfo.processInfo.systemUptime
             guard let terminalView else { return }
             liftingPredictions(on: terminalView) {
                 terminalView.feed(text: text)
@@ -1218,6 +1237,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// ("重连后满屏乱码"). Screen, scrollback and modes stay untouched.
         /// Call at every (re)connect boundary, before the new stream feeds.
         func resetInputParser() {
+            outputGeneration = UUID()
             cancelPendingWheel()
             terminalView?.getTerminal().discardPendingInput()
         }

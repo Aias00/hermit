@@ -146,6 +146,43 @@ struct TerminalScreen: View {
     #endif
     @State private var filePickerPresented = false
     @State private var showsFileUploads = false
+    @State private var outputReader: OutputReaderContext?
+
+    private struct OutputReaderContext: Identifiable {
+        let id = UUID()
+        let title: String
+        let snapshot: TerminalOutputSnapshot
+        let refresh: () -> TerminalOutputSnapshot?
+        let revision: () -> UInt64?
+    }
+
+    private func openOutputReader() {
+        guard let coordinator = typingCoordinator else { return }
+        let screenOnly = connection.multiplexer != .none || connection.connectionProtocol == .mosh
+        guard let snapshot = TerminalOutputSnapshot.capture(coordinator, screenOnly: screenOnly) else { return }
+        let owner = active
+        let pane = tmuxSnapshot?.activePaneId
+        let generation = coordinator.outputGeneration
+        let stillOwnsSource = { [weak coordinator, weak owner, weak hub] in
+            guard let owner, let hub, let coordinator,
+                  hub.sessions[owner.connection.id] === owner,
+                  coordinator.outputGeneration == generation else { return false }
+            let currentPane = owner.herdrControl?.snapshot.activePaneId
+                ?? owner.tmuxController?.snapshot.activePaneId ?? owner.moshControl?.snapshot.activePaneId
+            return currentPane == pane
+                && (owner.tmuxController?.activeCoordinator ?? owner.coordinator) === coordinator
+        }
+        let context = OutputReaderContext(title: terminalLocationTitle, snapshot: snapshot,
+            refresh: { [weak coordinator] in
+                guard stillOwnsSource(), let coordinator else { return nil }
+                // Explicit refresh includes output held while the local reader
+                // was above the tail. Remote scroll owners remain untouched.
+                if !screenOnly { coordinator.returnToLatestLocalOutput() }
+                return TerminalOutputSnapshot.capture(coordinator, screenOnly: screenOnly)
+            }, revision: { [weak coordinator] in stillOwnsSource() ? coordinator?.outputRevision : nil })
+        presentSheet { outputReader = context }
+    }
+
     private var fileUploads: FileUploadQueue { composerDraft.uploads }
     @State private var photoPickerPresented = false
     @State private var photoSelection: [PhotosPickerItem] = []
@@ -366,7 +403,7 @@ struct TerminalScreen: View {
     private var anySheetOpen: Bool {
         showWindowsSheet || showSessionsSheet || showPaneSheet || showCamera
             || quickLookURL != nil || remoteFolder != nil || remoteVideoOpen
-            || photoPickerPresented || filePickerPresented || showsFileUploads || showTerminalActions
+            || photoPickerPresented || filePickerPresented || showsFileUploads || outputReader != nil || showTerminalActions
     }
 
     /// Whether the pane behind a modal is pinned to the size it already has.
@@ -806,6 +843,10 @@ struct TerminalScreen: View {
                     onReconnect: { reconnect() })
             }
         }
+        .appSheet(item: $outputReader) { context in
+            TerminalOutputReader(title: context.title, refresh: context.refresh,
+                                 currentRevision: context.revision, snapshot: context.snapshot)
+        }
         .appSheet(isPresented: $showsFileUploads) {
             FileUploadQueueView(queue: fileUploads, canRetry: launchIsConnected) {
                 startFileUploads(retry: true)
@@ -1074,6 +1115,9 @@ struct TerminalScreen: View {
                 terminalAction("切换", icon: "network", action: switchProtocol)
                 terminalAction("取消", icon: "xmark") { }
             } else {
+                terminalAction("Read / search output", icon: "doc.text.magnifyingglass", enabled: typingCoordinator?.terminalView != nil) {
+                    openOutputReader()
+                }
                 terminalAction("选择会话", icon: "rectangle.stack", enabled: tmuxSnapshot != nil) {
                     presentSheet { showSessionsSheet = true }
                 }
@@ -1545,6 +1589,28 @@ struct TerminalScreen: View {
                 ReconnectVeil(state: posterState,
                               isMosh: connection.connectionProtocol == .mosh) { recoveryFeedback }
                     .transition(.opacity)
+            }
+            if connState == .live, !posterVisible, !veilVisible {
+                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                    if let coordinator = typingCoordinator, coordinator.isReadingLocalHistory {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Spacer()
+                                Button {
+                                    coordinator.returnToLatestLocalOutput()
+                                } label: {
+                                    Label(coordinator.hasHeldOutput ? String(localized: "New output · Back to latest")
+                                          : String(localized: "Back to latest"), systemImage: "arrow.down.to.line")
+                                        .font(.subheadline.weight(.medium))
+                                        .padding(.horizontal, 14).padding(.vertical, 12)
+                                        .background(.regularMaterial, in: Capsule())
+                                }
+                                .accessibilityIdentifier("terminal-back-to-latest")
+                            }
+                        }.padding(12)
+                    }
+                }
             }
             if let follow = sizeFollow {
                 SizeFollowVeil(ownerLabel: follow.ownerLabel) {
