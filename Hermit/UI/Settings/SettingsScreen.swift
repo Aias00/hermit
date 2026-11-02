@@ -609,10 +609,12 @@ struct SettingsScreen: View {
             }
             ChevronRow(label: "Server binary",
                        value: settings.wrappedValue.moshServerBinary) { showServerBinaryEditor = true }
+                .accessibilityIdentifier("settings-mosh-binary")
             ChevronRow(
                 label: "UDP port range",
                 value: "\(settings.wrappedValue.udpRangeStart) – \(settings.wrappedValue.udpRangeEnd)"
             ) { showUDPEditor = true }
+                .accessibilityIdentifier("settings-mosh-ports")
         }
     }
 }

@@ -152,7 +152,11 @@ final class FunctionalSwitchingUITest: XCTestCase {
     @MainActor
     func testRemoteFoldersAndHomeSettingsRoundTrips() throws {
         let env = ProcessInfo.processInfo.environment
-        let fixture = try XCTUnwrap(env["MOSHPIT_SWITCH_FIXTURE_DIR"], "Requires the SFTP-enabled isolated fixture")
+        guard let fixture = env["MOSHPIT_SWITCH_FIXTURE_DIR"], !fixture.isEmpty else {
+            throw XCTSkip("Requires the SFTP-enabled isolated terminal-session-fixture.py runner")
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture + "/nested/subfolder"),
+                      "A configured SFTP fixture must contain its expected directory tree")
         let rootName = URL(fileURLWithPath: fixture).lastPathComponent
         let app = try openTerminal()
         let field = composer(app)
@@ -175,8 +179,7 @@ final class FunctionalSwitchingUITest: XCTestCase {
         XCTAssertEqual(field.value as? String, "kept around folders after folders")
 
         // Hide the keyboard, reopen the folder, and ensure dismissal keeps it hidden.
-        app.buttons["conversation-keyboard-toggle"].tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        hideKeyboard(app)
         app.buttons["conversation-attachments"].tap()
         app.buttons["服务器文件"].tap()
         XCTAssertTrue(bar.waitForExistence(timeout: 20))
@@ -213,8 +216,7 @@ final class FunctionalSwitchingUITest: XCTestCase {
             }, "Editing must insert the new text without losing or changing the restored draft")
             pendingDraft = edited
             XCTAssertTrue(app.buttons["conversation-send"].isEnabled)
-            app.buttons["conversation-keyboard-toggle"].tap()
-            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+            hideKeyboard(app)
         }
         capture("home-settings-terminal-round-trips")
     }
@@ -280,6 +282,16 @@ final class FunctionalSwitchingUITest: XCTestCase {
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
         start.press(forDuration: 0.1, thenDragTo: end)
         XCTAssertTrue(navigationBar.waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func hideKeyboard(_ app: XCUIApplication) {
+        let toggle = app.buttons["conversation-keyboard-toggle"]
+        // Returning from Home recreates the terminal while the keyboard raises
+        // its toolbar. A stale hit point can land on the keyboard itself.
+        XCTAssertTrue(FormInteraction.waitForStableFrame(toggle))
+        toggle.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
     }
 
     @MainActor

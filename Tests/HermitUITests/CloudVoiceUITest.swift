@@ -250,7 +250,10 @@ final class CloudVoiceUITest: XCTestCase {
         XCTAssertTrue(reveal(element("voice-test-comparisons", in: app), in: app))
         capture(app, name: "voice-local-comparison-and-timing")
         XCTAssertTrue(reveal(editor, in: app))
-        editor.tap()
+        guard FormInteraction.focus(editor, in: app) else {
+            XCTFail("The recording review editor must receive focus before editing")
+            return
+        }
         editor.typeText(" edited")
         let compare = app.buttons["voice-test-compare"]
         XCTAssertTrue(reveal(compare, in: app))
@@ -324,34 +327,12 @@ final class CloudVoiceUITest: XCTestCase {
     private func tap(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(reveal(element, in: app), "Element must be visible: \(element.identifier)")
         waitUntil("Control must finish its pending operation: \(element.identifier)") { element.isEnabled }
-        element.tap()
+        XCTAssertTrue(FormInteraction.tap(element, in: app), "Control must remain visible before tapping")
     }
 
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
-        var towardTop = false
-        for attempt in 0..<24 {
-            let form = app.collectionViews.firstMatch.exists
-                ? app.collectionViews.firstMatch : app.scrollViews.firstMatch
-            if !form.exists { return element.exists && element.isHittable }
-            var visible = form.frame.intersection(app.frame).insetBy(dx: 8, dy: 8)
-            let keyboard = app.keyboards.firstMatch
-            if keyboard.exists {
-                visible.size.height = max(0, min(visible.maxY, keyboard.frame.minY - 40) - visible.minY)
-            }
-            guard visible.height > 70 else { return element.exists && element.isHittable }
-            let frame = element.exists ? element.frame : .zero
-            if !frame.isEmpty {
-                if visible.contains(CGPoint(x: frame.midX, y: frame.midY)), element.isHittable { return true }
-                towardTop = frame.midY < visible.midY
-            } else if attempt == 12 { towardTop.toggle() }
-            let origin = app.coordinate(withNormalizedOffset: .zero)
-            let from = CGPoint(x: visible.minX + 4, y: visible.minY + visible.height * (towardTop ? 0.25 : 0.8))
-            let to = CGPoint(x: visible.minX + 4, y: visible.minY + visible.height * (towardTop ? 0.8 : 0.25))
-            origin.withOffset(CGVector(dx: from.x, dy: from.y)).press(forDuration: 0.05,
-                thenDragTo: origin.withOffset(CGVector(dx: to.x, dy: to.y)))
-        }
-        return element.exists && element.isHittable
+        FormInteraction.reveal(element, in: app)
     }
 
     @MainActor
