@@ -24,6 +24,10 @@ final class TerminalReliabilityUITest: XCTestCase {
         guard !password.isEmpty || !key.isEmpty else {
             throw XCTSkip("requires an isolated SSH test host and MOSHPIT_SEED_PASSWORD or MOSHPIT_SEED_KEY_B64")
         }
+        // Reset/seed awaits Keychain work. A unique name keeps an old home
+        // card from satisfying navigation before the new seed is installed.
+        let seedName = explicitNavigation && !seedVoice && !seedImage && !seedFiles
+            ? "Isolated-UI-Lab-" + String(UUID().uuidString.prefix(8)) : "Isolated-UI-Lab"
         let app = XCUIApplication()
         if !key.isEmpty { app.launchEnvironment["MOSHPIT_SEED_KEY_B64"] = key }
         else { app.launchEnvironment["MOSHPIT_SEED_PASSWORD"] = password }
@@ -31,7 +35,7 @@ final class TerminalReliabilityUITest: XCTestCase {
             "-MOSHPIT_SEED_USER", environment["MOSHPIT_SEED_USER"] ?? "aias",
             "-MOSHPIT_SEED_HOST", environment["MOSHPIT_SEED_HOST"] ?? "127.0.0.1",
             "-MOSHPIT_SEED_PORT", portOverride ?? environment["MOSHPIT_SEED_PORT"] ?? "22",
-            "-MOSHPIT_SEED_NAME", "Isolated-UI-Lab", "-MOSHPIT_SEED_QUIET", "1",
+            "-MOSHPIT_SEED_NAME", seedName, "-MOSHPIT_SEED_QUIET", "1",
             "-MOSHPIT_SEED_MUX", multiplexer,
             "-MOSHPIT_SEED_HERDR_BIN", environment["MOSHPIT_SEED_HERDR_BIN"] ?? "/tmp/moshpit-ui-lab/herdr",
             "-MOSHPIT_SEED_TRUST_FP", environment["MOSHPIT_SEED_TRUST_FP"] ?? "SHA256:iKK6EXDfFALcYCaggiqUfP0PcryrRX4KtJgLoam+npA",
@@ -54,11 +58,17 @@ final class TerminalReliabilityUITest: XCTestCase {
         #if targetEnvironment(simulator)
         if seedVoice || explicitNavigation {
             XCTAssertEqual(environment["MOSHPIT_SEED_HOST"] ?? "127.0.0.1", "127.0.0.1")
-            let host = app.buttons["connection-card-Isolated-UI-Lab"]
+            let host = app.buttons["connection-card-" + seedName]
             if explicitNavigation, !host.waitForExistence(timeout: 3) {
-                let sidebar = app.buttons.matching(NSPredicate(format: "label IN %@",
-                    ["显示边栏", "Show Sidebar", "Show sidebar"])).firstMatch
-                if sidebar.exists { sidebar.tap() }
+                // iPad may restore either an empty detail or an open terminal.
+                // The latter owns its own sidebar button instead of the native one.
+                let terminalSidebar = app.buttons["terminal-sidebar"]
+                if terminalSidebar.exists && terminalSidebar.isHittable { terminalSidebar.tap() }
+                if !host.waitForExistence(timeout: 3) {
+                    let sidebar = app.buttons.matching(NSPredicate(format: "label IN %@",
+                        ["显示边栏", "Show Sidebar", "Show sidebar"])).firstMatch
+                    if sidebar.waitForExistence(timeout: 3) && sidebar.isHittable { sidebar.tap() }
+                }
             }
             XCTAssertTrue(host.waitForExistence(timeout: 15))
             XCTAssertTrue(app.buttons["home-settings"].exists)
@@ -67,6 +77,11 @@ final class TerminalReliabilityUITest: XCTestCase {
         }
         #endif
         XCTAssertTrue(terminalKeyboard.waitForExistence(timeout: 30))
+        if explicitNavigation {
+            let title = app.staticTexts["terminal-host-title"].firstMatch
+            expectation(for: NSPredicate(format: "label == %@", seedName), evaluatedWith: title)
+            waitForExpectations(timeout: 10)
+        }
         return app
     }
 
@@ -630,7 +645,7 @@ final class TerminalReliabilityUITest: XCTestCase {
 
     @MainActor
     func testRejectedHerdrSubmissionRetainsDraft() throws {
-        let app = try openTerminal()
+        let app = try openTerminal(explicitNavigation: true)
         let field = composer(app)
         field.tap()
         field.typeText("__MOSHPIT_REJECT_DRAFT__")
@@ -638,7 +653,7 @@ final class TerminalReliabilityUITest: XCTestCase {
         let send = app.buttons["conversation-send"]
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: send)
         waitForExpectations(timeout: 20)
-        send.tap()
+        app.typeText("\n")
         let error = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '草稿已保留'")).firstMatch
         XCTAssertTrue(error.waitForExistence(timeout: 15))
         XCTAssertTrue(String(describing: field.value ?? "").contains("__MOSHPIT_REJECT_DRAFT__"))
@@ -649,104 +664,122 @@ final class TerminalReliabilityUITest: XCTestCase {
     }
 
     @MainActor
-    func testReturnAddsNewlineThenPlaneSendsForHerdrAndSSH() throws {
+    func testExplicitNewlineThenReturnSendsForHerdrAndSSH() throws {
+        guard let root = ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"] else {
+            throw XCTSkip("requires the isolated terminal session fixture")
+        }
+        guard root == "/private/tmp/moshpit-ui-lab" || root == "/tmp/moshpit-ui-lab"
+                || root.hasPrefix("/private/tmp/moshpit-ui-lab-") || root.hasPrefix("/tmp/moshpit-ui-lab-") else {
+            throw XCTSkip("requires a dedicated temporary terminal session fixture")
+        }
         for mux in ["herdr", "none"] {
-            let app = try openTerminal(multiplexer: mux)
+            let app = try openTerminal(multiplexer: mux, explicitNavigation: true)
+            XCTAssertTrue(app.staticTexts[mux == "herdr" ? "herdr" : "SSH"].firstMatch.waitForExistence(timeout: 15))
             let field = composer(app)
             field.tap()
-            let command = "printf 'PLANE_AFTER_NEWLINE_" + mux.uppercased() + "_OK\\n' >> /tmp/moshpit-ui-lab/received.log"
+            let receipt = URL(fileURLWithPath: root).appendingPathComponent("return-" + UUID().uuidString + ".log")
+            defer { try? FileManager.default.removeItem(at: receipt) }
+            let command = "printf 'RETURN_SENT_ONCE\\n' >> '" + receipt.path + "'"
             field.typeText(command)
-            XCTAssertEqual(field.value as? String, command)
-            field.typeText("\n")
-            XCTAssertEqual(field.value as? String, command + "\n")
-            field.typeText("# second line")
+            app.buttons["conversation-newline"].tap()
+            app.typeText("# second line")
             XCTAssertEqual(field.value as? String, command + "\n# second line")
-            app.buttons["conversation-send"].tap()
-            expectation(for: NSPredicate { _, _ in (field.value as? String)?.isEmpty == true }, evaluatedWith: field)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: receipt.path), "New line must not execute the draft")
+            app.typeText("\n")
+            expectation(for: NSPredicate { _, _ in
+                (field.value as? String)?.isEmpty == true && FileManager.default.fileExists(atPath: receipt.path)
+            }, evaluatedWith: app)
             waitForExpectations(timeout: 15)
+            XCTAssertEqual(try String(contentsOf: receipt, encoding: .utf8), "RETURN_SENT_ONCE\n")
+            app.typeText("next local draft")
+            XCTAssertEqual(field.value as? String, "next local draft")
+            captureScreenshot(app, name: "return-submits-" + mux)
             app.terminate()
         }
     }
 
     @MainActor
-    func testRemoteEnterSendsOneKeyAndPreservesComposerFocus() async throws {
+    func testReturnSendsDraftAndDirectInputWithNoSendModeChange() async throws {
         let receipt = try inputReceiptURL()
-        let app = try openTerminal(multiplexer: "none")
+        let app = try openTerminal(multiplexer: "none", explicitNavigation: true)
         let field = composer(app)
         let enter = app.buttons["conversation-enter"]
-        XCTAssertTrue(enter.waitForExistence(timeout: 10))
-        let enabled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: enter)
-        await fulfillment(of: [enabled], timeout: 20)
+        let direct = app.buttons["conversation-direct-input"]
         field.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["conversation-send"].isEnabled,
-                       "the plane sends drafts; an empty draft is not a remote Enter")
-
+        field.typeText("local first")
+        app.buttons["conversation-newline"].tap()
+        app.typeText("local second")
+        let multiline = "local first\nlocal second"
+        XCTAssertEqual(field.value as? String, multiline)
         try await resetInputReceipt(receipt)
-        waitForKeyboardToolbar(enter, in: app, keyboardVisible: true)
-        enter.tap()
-        try await assertOneRemoteReturn(receipt)
-        XCTAssertEqual(field.value as? String, "")
-        app.typeText("kept draft")
-        XCTAssertEqual(field.value as? String, "kept draft", "remote Enter must not take keyboard focus")
-
-        try await resetInputReceipt(receipt)
-        waitForKeyboardToolbar(enter, in: app, keyboardVisible: true)
-        enter.tap()
-        try await assertOneRemoteReturn(receipt)
-        XCTAssertEqual(field.value as? String, "kept draft")
-        app.typeText("\nsecond line")
-        XCTAssertEqual(field.value as? String, "kept draft\nsecond line",
-                       "keyboard Return still edits the draft after using remote Enter")
-
-        app.buttons["conversation-keyboard-toggle"].tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
-        try await resetInputReceipt(receipt)
-        waitForKeyboardToolbar(enter, in: app, keyboardVisible: false)
-        enter.tap()
-        try await assertOneRemoteReturn(receipt)
-        XCTAssertFalse(app.keyboards.firstMatch.exists, "remote Enter must also work with the keyboard hidden")
-        XCTAssertEqual(field.value as? String, "kept draft\nsecond line")
-
-        // The restored hand button changes the input destination without
-        // sending or discarding the local draft. Verify actual SSH bytes.
-        let directInput = app.buttons["conversation-direct-input"]
-        XCTAssertTrue(directInput.isHittable)
-        XCTAssertFalse(directInput.isSelected)
-        let inputMode = app.descendants(matching: .any).matching(identifier: "conversation-input-mode").firstMatch
-        XCTAssertTrue(inputMode.exists)
-        let draftModeLabel = inputMode.label
-        try await resetInputReceipt(receipt)
-        directInput.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(directInput.isSelected, "the hand must clearly identify direct terminal input")
-        XCTAssertNotEqual(inputMode.label, draftModeLabel)
-        app.typeText("direct input\n")
-        let expected = Array("direct input\r".utf8).map(Int.init)
-        for _ in 0..<50 {
+        app.typeText("\n")
+        let expected = Array(("\u{1b}[200~" + multiline + "\u{1b}[201~\r").utf8).map(Int.init)
+        for _ in 0..<80 {
             if try await receivedInput(receipt) == expected { break }
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .milliseconds(50))
         }
-        let remoteInput = try await receivedInput(receipt)
-        XCTAssertEqual(remoteInput, expected)
-        XCTAssertEqual(field.value as? String, "kept draft\nsecond line")
-
-        directInput.tap()
-        XCTAssertFalse(directInput.isSelected, "the hand toggles back to the preserved draft")
-        XCTAssertEqual(inputMode.label, draftModeLabel)
-        app.typeText(" local again")
-        XCTAssertEqual((field.value as? String)?.replacingOccurrences(of: " local again", with: ""),
-                       "kept draft\nsecond line")
-        let afterReturningToDraft = try await receivedInput(receipt)
-        XCTAssertEqual(afterReturningToDraft, expected, "Returning to the draft must stop remote typing")
-        directInput.tap()
-        XCTAssertTrue(directInput.isSelected)
-        field.tap()
-        XCTAssertFalse(directInput.isSelected, "tapping the draft must also clear direct-input selection")
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "hand-button-terminal-and-draft-focus"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        let actual = try await receivedInput(receipt)
+        XCTAssertEqual(actual, expected, "Return must deliver one paste and one remote Return")
+        XCTAssertEqual(field.value as? String, "")
+        app.typeText("parked local draft")
+        direct.tap()
+        XCTAssertTrue(direct.isSelected)
+        try await resetInputReceipt(receipt)
+        app.typeText("direct input\n")
+        let directExpected = Array("direct input\r".utf8).map(Int.init)
+        for _ in 0..<80 {
+            if try await receivedInput(receipt) == directExpected { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let directBytes = try await receivedInput(receipt)
+        XCTAssertEqual(directBytes, directExpected)
+        XCTAssertEqual(field.value as? String, "parked local draft")
+        // The shortcut Return follows direct input too, preserving a parked draft.
+        try await resetInputReceipt(receipt)
+        enter.tap()
+        try await assertOneRemoteReturn(receipt)
+        XCTAssertEqual(field.value as? String, "parked local draft")
+        direct.tap()
+        XCTAssertFalse(direct.isSelected)
+        app.typeText(" again")
+        try await resetInputReceipt(receipt)
+        app.typeText("\n")
+        let returned = Array("\u{1b}[200~parked local draft again\u{1b}[201~\r".utf8).map(Int.init)
+        for _ in 0..<80 {
+            if try await receivedInput(receipt) == returned { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let returnedBytes = try await receivedInput(receipt)
+        XCTAssertEqual(returnedBytes, returned)
+        XCTAssertEqual(field.value as? String, "")
+        // No local draft: Return can confirm input already sitting remotely.
+        try await resetInputReceipt(receipt)
+        app.typeText("\n")
+        try await assertOneRemoteReturn(receipt)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        // The shortcut bar uses the same draft submission, even with keyboard hidden.
+        app.typeText("shortcut draft")
+        app.buttons["conversation-keyboard-toggle"].tap()
+        try await resetInputReceipt(receipt)
+        enter.tap()
+        let shortcut = Array("\u{1b}[200~shortcut draft\u{1b}[201~\r".utf8).map(Int.init)
+        for _ in 0..<80 {
+            if try await receivedInput(receipt) == shortcut { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let shortcutBytes = try await receivedInput(receipt)
+        XCTAssertEqual(shortcutBytes, shortcut)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        direct.tap()
+        XCTAssertTrue(direct.isSelected)
+        try await resetInputReceipt(receipt)
+        app.buttons["conversation-newline"].tap()
+        XCTAssertFalse(direct.isSelected)
+        app.typeText("draft after new line")
+        XCTAssertEqual(field.value as? String, "\ndraft after new line")
+        let afterNewline = try await receivedInput(receipt)
+        XCTAssertTrue(afterNewline.isEmpty, "New line transfers editing to the draft without sending bytes")
+        captureScreenshot(app, name: "unified-return-draft-and-terminal")
     }
 
     @MainActor
@@ -771,7 +804,8 @@ final class TerminalReliabilityUITest: XCTestCase {
         openAndCancelPicker()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         // Do not tap the composer here: that would hide a focus-restoration bug.
-        app.typeText("\nafter picker")
+        app.buttons["conversation-newline"].tap()
+        app.typeText("after picker")
         XCTAssertEqual(field.value as? String, "before picker\nafter picker")
 
         app.buttons["conversation-keyboard-toggle"].tap()
@@ -822,11 +856,12 @@ final class TerminalReliabilityUITest: XCTestCase {
 
         // Recognition quality is outside this test: the seeded transcript only
         // verifies the same editing/submit path used by a real recognizer result.
-        app.typeText("\nchecked")
+        app.buttons["conversation-newline"].tap()
+        app.typeText("checked")
         let draft = "typed text simulated voice\nchecked"
         XCTAssertEqual(field.value as? String, draft)
         let afterReturn = try await receivedInput(receipt)
-        XCTAssertEqual(afterReturn, [], "keyboard Return must remain local after voice insertion")
+        XCTAssertEqual(afterReturn, [], "the explicit New line action must remain local after voice insertion")
         send.tap()
         let cleared = expectation(for: NSPredicate { _, _ in
             (field.value as? String)?.isEmpty == true
@@ -1113,7 +1148,8 @@ final class TerminalReliabilityUITest: XCTestCase {
         let app = try openTerminal()
         let field = composer(app)
         field.tap()
-        field.typeText("__MOSHPIT_REJECT_DRAFT__\n")
+        field.typeText("__MOSHPIT_REJECT_DRAFT__")
+        app.buttons["conversation-newline"].tap()
         XCTAssertEqual(field.value as? String, "__MOSHPIT_REJECT_DRAFT__\n")
         app.buttons["conversation-send"].tap()
         let error = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '草稿已保留'")).firstMatch

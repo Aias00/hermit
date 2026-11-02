@@ -15,6 +15,7 @@ struct TerminalScreen: View {
     /// (transport pill, breadcrumb, reconnect) picks up the switch immediately.
     @State private var connection: ServerConnection
     let hub: SessionHub
+    @State private var composerEditor = TerminalComposerEditor()
     @State private var composerDraft: TerminalComposerDraft
     private var composerText: String {
         get { composerDraft.text }
@@ -2140,7 +2141,7 @@ struct TerminalScreen: View {
                     }, onKeyboardDismiss: {
                         composerFocused = false
                         keyboardIntent = .down
-                    })
+                    }, onSubmit: { submitCurrentInput(fromDraft: true) }, editor: composerEditor)
                     .frame(maxWidth: .infinity)
                     .accessibilityIdentifier("terminal-composer")
                 conversationIcon("paperplane.fill", label: String(localized: "Send + Return"), identifier: "conversation-send") { submitComposer() }
@@ -2198,16 +2199,44 @@ struct TerminalScreen: View {
             .disabled(!launchIsConnected || composerIsSending)
             if composerIsSending { ProgressView().controlSize(.mini) }
             Text(composerIsSending ? String(localized: "Sending…")
-                 : terminalKeyboardActive ? String(localized: "Keys go directly to the terminal")
-                 : String(localized: "Return: new line · Plane: send"))
+                 : terminalKeyboardActive ? String(localized: "Return: submit terminal input")
+                 : String(localized: "Return: send · Shift+Return: new line"))
                 .font(.system(size: 10))
                 .foregroundStyle(TerminalChrome.foreground.opacity(0.7))
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .accessibilityIdentifier("conversation-input-hint")
             Spacer(minLength: 0)
+            Button {
+                // Invalidate a queued terminal focus request before handing
+                // editing to the draft, just like the named mode switch.
+                typingCoordinator?.hostContainer?.requestFocus(.allow)
+                dictationReviewOwnsKeyboard = false
+                disarmStickyCtrlIfNeeded()
+                composerEditor.insertNewline()
+                keyboardIntent = .up
+                composerFocused = true
+            } label: {
+                Label(terminalKeyboardActive ? String(localized: "Draft new line") : String(localized: "New line"),
+                      systemImage: "text.badge.plus")
+                    .font(.system(size: 11)).frame(minHeight: 32)
+            }
+            .accessibilityIdentifier("conversation-newline")
+            .disabled(composerIsSending)
         }
         .padding(.horizontal, 14).padding(.top, 5)
     }
+
+    /// One Return action for the draft keyboard and shortcut bar. In direct
+    /// terminal mode Return belongs to the remote application; keep a parked
+    /// local draft intact. An empty draft can submit remote input without a
+    /// focus change (for example an approval or text entered on another device).
+    private func submitCurrentInput(fromDraft: Bool = false) {
+        guard launchIsConnected, !composerIsSending, imageAttachment == nil, !fileUploads.isRunning else { return }
+        disarmStickyCtrlIfNeeded()
+        if !composerText.isEmpty, fromDraft || !terminalKeyboardActive { submitComposer() }
+        else { active?.sendInput(Data([0x0D])) }
+    }
+
     private func submitComposer() {
         guard launchIsConnected, !composerIsSending, imageAttachment == nil, !fileUploads.isRunning,
               !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -2294,11 +2323,10 @@ struct TerminalScreen: View {
                 .accessibilityLabel("向右").accessibilityIdentifier("conversation-arrow-right")
                 .disabled(!launchIsConnected)
             Button {
-                disarmStickyCtrlIfNeeded()
-                active?.sendInput(Data([0x0D]))
+                submitCurrentInput()
             } label: { Image(systemName: "return") }
-                .accessibilityLabel("Remote Return")
-                .accessibilityHint("Press Return in the terminal without sending the draft.")
+                .accessibilityLabel("Send with Return")
+                .accessibilityHint("Submit the current input. Use New line to add a draft line.")
                 .accessibilityIdentifier("conversation-enter")
                 .disabled(!launchIsConnected || composerIsSending)
             if settings.voiceInputEnabled {

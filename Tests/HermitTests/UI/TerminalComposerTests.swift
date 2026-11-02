@@ -7,6 +7,100 @@ import UIKit
 @MainActor
 @Suite("Terminal composer multiline drafts", .serialized)
 struct TerminalComposerTests {
+    @Test("Return submits the latest draft once without inserting a line break")
+    func returnSubmitsDraft() {
+        var draft = ""
+        var submissions: [String] = []
+        let editor = TerminalComposerView(text: Binding(get: { draft }, set: { draft = $0 }),
+            isFocused: .constant(true), onFocus: {}, onSubmit: { submissions.append(draft) })
+        let coordinator = editor.makeCoordinator()
+        let view = ComposerTextView()
+        view.delegate = coordinator
+        coordinator.configureReturn(view)
+        view.insertText("中文 😀 complete draft")
+        view.insertText("\n")
+        #expect(submissions == ["中文 😀 complete draft"])
+        #expect(view.text == "中文 😀 complete draft", "the send owner alone clears acknowledged text")
+        #expect(view.returnKeyType == .send)
+    }
+
+    @Test("A second Return cannot resurrect a draft acknowledged before the next UI render")
+    func acknowledgedDraftIsNotRestoredFromStaleView() {
+        var draft = ""
+        var submissions: [String] = []
+        let editor = TerminalComposerView(text: Binding(get: { draft }, set: { draft = $0 }),
+            isFocused: .constant(false), onFocus: {}, onSubmit: {
+                submissions.append(draft)
+                draft = ""
+            })
+        let coordinator = editor.makeCoordinator()
+        let view = ComposerTextView()
+        view.delegate = coordinator
+        coordinator.configureReturn(view)
+        view.insertText("send once")
+        view.insertText("\n")
+        #expect(draft.isEmpty)
+        #expect(view.text == "send once", "simulate the pending SwiftUI update")
+        view.insertText("\n")
+        #expect(submissions == ["send once", ""])
+        #expect(draft.isEmpty)
+    }
+
+    @Test("Shift+Return and the explicit New line action edit at the caret without submitting")
+    func explicitLineBreakDoesNotSubmit() throws {
+        var draft = ""
+        var submissions = 0
+        let editor = TerminalComposerView(text: Binding(get: { draft }, set: { draft = $0 }),
+            isFocused: .constant(false), onFocus: {}, onSubmit: { submissions += 1 })
+        let coordinator = editor.makeCoordinator()
+        let view = ComposerTextView()
+        view.delegate = coordinator
+        coordinator.configureReturn(view)
+        view.insertText("first second")
+        view.selectedRange = NSRange(location: 5, length: 0)
+        view.insertDraftLineBreak()
+        #expect(draft == "first\n second")
+        let shift = try #require(view.keyCommands?.first { $0.input == "\r" && $0.modifierFlags == .shift })
+        _ = view.perform(shift.action, with: shift)
+        #expect(draft == "first\n\n second")
+        #expect(submissions == 0)
+    }
+
+    @Test("A Return confirms marked Chinese text without submitting; the next Return submits")
+    func compositionConfirmationDoesNotSend() {
+        var draft = ""
+        var submissions: [String] = []
+        let editor = TerminalComposerView(text: Binding(get: { draft }, set: { draft = $0 }),
+            isFocused: .constant(false), onFocus: {}, onSubmit: { submissions.append(draft) })
+        let coordinator = editor.makeCoordinator()
+        let view = ComposerTextView()
+        view.delegate = coordinator
+        coordinator.configureReturn(view)
+        view.setMarkedText("正在确认", selectedRange: NSRange(location: 4, length: 0))
+        #expect(view.markedTextRange != nil)
+        view.insertText("\n")
+        #expect(submissions.isEmpty)
+        #expect(view.markedTextRange == nil)
+        #expect(view.text == "正在确认")
+        view.insertText("\n")
+        #expect(submissions == ["正在确认"])
+    }
+
+    @Test("Pasting paragraphs or a single newline never invokes the Return submit action")
+    func pasteDoesNotSend() {
+        let view = ComposerTextView()
+        var submissions = 0
+        view.onReturn = { submissions += 1 }
+        UIPasteboard.general.string = "first\nsecond\n"
+        defer { UIPasteboard.general.items = [] }
+        view.paste(nil)
+        #expect(view.text == "first\nsecond\n")
+        UIPasteboard.general.string = "\n"
+        view.paste(nil)
+        #expect(view.text == "first\nsecond\n\n")
+        #expect(submissions == 0)
+    }
+
     @Test("Review language also applies to the Apple fallback without changing the saved request")
     func reviewLanguageMatchesFallback() {
         let saved = DictationRequest(engine: .whisper, appleLocaleId: "en-US", whisperLanguage: "en")

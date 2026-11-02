@@ -3,19 +3,31 @@ import SwiftTerm
 import UIKit
 import MoshpitKit
 
-/// Multiline draft editor. Return inserts a newline; the paper-plane button sends.
+/// The screen keeps a weak handle for its explicit New line action.
+@MainActor
+final class TerminalComposerEditor {
+    weak var view: ComposerTextView?
+    func insertNewline() { view?.insertDraftLineBreak() }
+}
+
+/// Multiline editor. With a submit handler, Return sends; Shift+Return adds a line.
 struct TerminalComposerView: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
     let onFocus: () -> Void
     let onKeyboardDismiss: () -> Void
+    let onSubmit: (() -> Void)?
+    let editor: TerminalComposerEditor?
 
     init(text: Binding<String>, isFocused: Binding<Bool>, onFocus: @escaping () -> Void,
-         onKeyboardDismiss: @escaping () -> Void = {}) {
+         onKeyboardDismiss: @escaping () -> Void = {},
+         onSubmit: (() -> Void)? = nil, editor: TerminalComposerEditor? = nil) {
         self._text = text
         self._isFocused = isFocused
         self.onFocus = onFocus
         self.onKeyboardDismiss = onKeyboardDismiss
+        self.onSubmit = onSubmit
+        self.editor = editor
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -34,18 +46,21 @@ struct TerminalComposerView: UIViewRepresentable {
         view.spellCheckingType = .no
         view.smartQuotesType = .no
         view.smartDashesType = .no
-        view.returnKeyType = .default
+        view.returnKeyType = onSubmit == nil ? .default : .send
         view.enablesReturnKeyAutomatically = false
         view.isScrollEnabled = true
         view.accessibilityIdentifier = "terminal-composer"
         view.accessibilityLabel = "待发送内容"
-        view.accessibilityHint = String(localized: "Return inserts a new line. Use Send + Return to submit the draft.")
+        context.coordinator.configureReturn(view)
+        editor?.view = view
         return view
     }
 
     func updateUIView(_ view: ComposerTextView, context: Context) {
         let coordinator = context.coordinator
         coordinator.parent = self
+        coordinator.configureReturn(view)
+        editor?.view = view
         view.updateDraftText(text)
         view.updatePlaceholder()
         coordinator.updateFocus(view)
@@ -64,6 +79,20 @@ struct TerminalComposerView: UIViewRepresentable {
         private var preservesFocusForPendingEnd = false
         private var resolvingEndEditing = false
         init(_ parent: TerminalComposerView) { self.parent = parent }
+
+        func configureReturn(_ view: ComposerTextView) {
+            let keyType: UIReturnKeyType = parent.onSubmit == nil ? .default : .send
+            if view.returnKeyType != keyType { view.returnKeyType = keyType }
+            view.accessibilityHint = parent.onSubmit == nil
+                ? String(localized: "Return inserts a new line. Use Send + Return to submit the draft.")
+                : String(localized: "Return sends the draft. Shift+Return or New line inserts a line break.")
+            view.onReturn = parent.onSubmit == nil ? nil : { [weak self] in
+                // didChange publishes edits as they happen. The binding may
+                // already have been cleared by an acknowledged send before
+                // UIKit paints it; never resurrect the old editor value here.
+                self?.parent.onSubmit?()
+            }
+        }
 
         func updateFocus(_ view: ComposerTextView) {
             focusGeneration += 1
@@ -169,6 +198,8 @@ struct TerminalComposerView: UIViewRepresentable {
 
 final class ComposerTextView: UITextView {
     private let placeholder = UILabel()
+    var onReturn: (() -> Void)?
+    private var insertingDictation = false
 
     init() {
         super.init(frame: .zero, textContainer: nil)
@@ -180,6 +211,47 @@ final class ComposerTextView: UITextView {
         addSubview(placeholder)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var keyCommands: [UIKeyCommand]? {
+        var commands = (super.keyCommands ?? []).filter { !($0.input == "\r" && $0.modifierFlags == .shift) }
+        let newline = UIKeyCommand(input: "\r", modifierFlags: .shift, action: #selector(shiftReturn(_:)))
+        newline.discoverabilityTitle = String(localized: "New line")
+        newline.wantsPriorityOverSystemBehavior = true
+        commands.append(newline)
+        return commands
+    }
+
+    @objc private func shiftReturn(_ command: UIKeyCommand) { insertDraftLineBreak() }
+
+    func insertDraftLineBreak() {
+        if markedTextRange != nil { unmarkText() }
+        super.insertText("\n")
+    }
+
+    override func insertText(_ text: String) {
+        if (text == "\n" || text == "\r" || text == "\r\n"), let onReturn, !insertingDictation {
+            if markedTextRange != nil {
+                // The first Return confirms composition; it must never send a
+                // half-composed Chinese word or accept a remote prompt.
+                unmarkText()
+            } else { onReturn() }
+            return
+        }
+        super.insertText(text)
+    }
+
+    override func paste(_ sender: Any?) {
+        // A deliberate paste is text even when the clipboard is exactly one
+        // newline. Bypass the keyboard Return shortcut and keep all paragraphs.
+        if let text = UIPasteboard.general.string { super.insertText(text) }
+        else { super.paste(sender) }
+    }
+
+    override func insertDictationResult(_ dictationResult: [UIDictationPhrase]) {
+        insertingDictation = true
+        defer { insertingDictation = false }
+        super.insertDictationResult(dictationResult)
+    }
 
     /// External additions (voice and attachments) follow a caret at the end.
     /// An in-progress edit or selection elsewhere keeps its position.
