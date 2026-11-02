@@ -46,7 +46,13 @@ rm -rf "$SOURCE"
 mkdir -p "$SOURCE"
 tar -xzf "$ARCHIVE" -C "$SOURCE" --strip-components=1
 cmp "$PACKAGE/Native/tailcat.h" "$SOURCE/cmd/libtailcat/tailcat.h"
+# `go list -m` can return an empty .Dir for an undownloaded module on a
+# clean runner. Materialize the pinned, checksum-verified source first.
+go -C "$SOURCE" mod download tailscale.com
 TAILSCALE_MODULE="$(go -C "$SOURCE" list -m -f '{{.Dir}}' tailscale.com)"
+[[ -n "$TAILSCALE_MODULE" && -f "$TAILSCALE_MODULE/go.mod" ]] || {
+  echo "Tailscale module source is unavailable after download." >&2; exit 1;
+}
 # Go intentionally forbids overlays inside GOMODCACHE. Clone the immutable,
 # checksum-verified dependency into disposable build space, then use a relative
 # replacement (no developer filesystem paths in embedded Go build metadata).
