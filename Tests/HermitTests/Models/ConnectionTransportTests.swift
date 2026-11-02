@@ -9,6 +9,10 @@ struct ConnectionTransportTests {
         connection.selectTransport(.cloudflareSSH)
         connection.cloudflareHostname = "ssh.example.com"
         connection.cloudflareTeamDomain = "example-team.cloudflareaccess.com"
+        connection.relayServer = "https://relay.example.com"
+        connection.relayDeviceID = "mini"
+        connection.relayService = "ssh"
+        connection.relayCredentialRef = RelayCredentials.newReference()
         connection.cloudflareAudience = "application-aud_123"
         return connection
     }

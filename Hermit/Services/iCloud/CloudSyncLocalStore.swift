@@ -127,6 +127,7 @@ final class CloudSyncLocalStore {
 
     static func portableHost(_ value: ServerConnection) -> ServerConnection {
         var value = value
+        value.relayCredentialRef = nil
         value.tailcatCredentialRef = nil
         value.tailscaleAccountID = nil
         value.lastConnectedAt = nil
@@ -257,6 +258,10 @@ final class CloudSyncLocalStore {
                     var value = try decode(ServerConnection.self, data)
                     guard value.id == id, value == Self.portableHost(value) else { throw CloudSyncError.invalidData }
                     if let old {
+                        if old.relayServer == value.relayServer, old.relayDeviceID == value.relayDeviceID,
+                           old.relayService == value.relayService {
+                            value.relayCredentialRef = old.relayCredentialRef
+                        }
                         if old.tailcatServerPublicKey == value.tailcatServerPublicKey {
                             value.tailcatCredentialRef = old.tailcatCredentialRef
                         }

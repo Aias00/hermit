@@ -112,23 +112,23 @@ final class SettingsSwitchingUITest: XCTestCase {
         apple.tap()
         back(from: "Recognition", in: app)
 
-        tap(app.staticTexts["Server binary"], in: app, towardTop: true)
+        tap(app.buttons["settings-mosh-binary"], in: app, towardTop: true)
         XCTAssertTrue(app.navigationBars["Server Binary"].waitForExistence(timeout: 5))
         let binary = app.textFields.firstMatch
         let originalBinary = binary.value as? String
         fill(binary, with: "/test-cancelled", in: app)
         app.navigationBars["Server Binary"].buttons["Cancel"].tap()
-        tap(app.staticTexts["Server binary"], in: app)
+        tap(app.buttons["settings-mosh-binary"], in: app)
         XCTAssertEqual(app.textFields.firstMatch.value as? String, originalBinary)
         app.navigationBars["Server Binary"].buttons["Cancel"].tap()
 
-        tap(app.staticTexts["UDP port range"], in: app)
+        tap(app.buttons["settings-mosh-ports"], in: app)
         XCTAssertTrue(app.navigationBars["UDP Port Range"].waitForExistence(timeout: 5))
         let from = app.textFields.firstMatch
         let originalPort = from.value as? String
         fill(from, with: "9", in: app)
         app.navigationBars["UDP Port Range"].buttons["Cancel"].tap()
-        tap(app.staticTexts["UDP port range"], in: app)
+        tap(app.buttons["settings-mosh-ports"], in: app)
         XCTAssertEqual(app.textFields.firstMatch.value as? String, originalPort)
         app.navigationBars["UDP Port Range"].buttons["Cancel"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].exists)
@@ -264,18 +264,7 @@ final class SettingsSwitchingUITest: XCTestCase {
 
     @MainActor
     private func fill(_ field: XCUIElement, with value: String, in app: XCUIApplication) {
-        var focused = false
-        for _ in 0..<2 {
-            XCTAssertTrue(reveal(field, in: app))
-            field.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
-            let focus = XCTNSPredicateExpectation(
-                predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
-            if XCTWaiter.wait(for: [focus], timeout: 2) == .completed {
-                focused = true
-                break
-            }
-        }
-        guard focused else {
+        guard FormInteraction.focus(field, in: app) else {
             let hierarchy = XCTAttachment(string: app.debugDescription)
             hierarchy.name = "form-field-focus-failure"
             hierarchy.lifetime = .keepAlways
@@ -288,40 +277,12 @@ final class SettingsSwitchingUITest: XCTestCase {
 
     @MainActor
     private func tap(_ element: XCUIElement, in app: XCUIApplication, towardTop: Bool = false) {
-        XCTAssertTrue(reveal(element, in: app, towardTop: towardTop))
-        element.tap()
+        XCTAssertTrue(FormInteraction.tap(element, in: app, towardTop: towardTop))
     }
 
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, towardTop: Bool = false) -> Bool {
-        var upward = towardTop
-        for attempt in 0...28 {
-            // A visible picker popup also contains a collection view. Keep
-            // scrolling the host form, never that transient option list.
-            let hostForm = app.collectionViews.containing(.any, identifier: "connection-transport-picker").firstMatch
-            let form = hostForm.exists ? hostForm : app.collectionViews.firstMatch
-            guard form.exists else { return false }
-            var visible = form.frame.intersection(app.frame).insetBy(dx: 8, dy: 8)
-            if app.keyboards.firstMatch.exists {
-                visible.size.height = max(0, min(visible.maxY, app.keyboards.firstMatch.frame.minY - 54) - visible.minY)
-            }
-            guard visible.height > 70 else { return false }
-            let frame = element.exists ? element.frame : .zero
-            if !frame.isEmpty {
-                // A row can be partly hittable while its coordinate-tap point
-                // is still under the keyboard or the input accessory.
-                if visible.contains(CGPoint(x: frame.midX, y: frame.midY)), element.isHittable { return true }
-                upward = frame.midY < visible.midY
-            }
-            else if attempt == 12 { upward.toggle() }
-            let x = visible.minX + 4 // Gutter avoids sliders and switches while scrolling.
-            let fromY = visible.minY + visible.height * (upward ? 0.25 : 0.8)
-            let toY = visible.minY + visible.height * (upward ? 0.8 : 0.25)
-            let origin = app.coordinate(withNormalizedOffset: .zero)
-            origin.withOffset(CGVector(dx: x, dy: fromY)).press(forDuration: 0.05,
-                thenDragTo: origin.withOffset(CGVector(dx: x, dy: toY)))
-        }
-        return false
+        FormInteraction.reveal(element, in: app, towardTop: towardTop)
     }
 
     @MainActor

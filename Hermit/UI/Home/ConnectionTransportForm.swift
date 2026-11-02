@@ -1,5 +1,6 @@
 import Foundation
 import TailcatSSH
+import RemoteForgeRelay
 
 /// Shared by save, button enablement, and the Access login controls. Keeping
 /// text parsing here prevents invalid ports from silently becoming defaults.
@@ -17,6 +18,7 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
     /// Draft-only secret input. This form is never encoded or persisted.
     /// An empty value while editing keeps the existing Keychain item.
     var tailcatAddress = ""
+    var relaySettings: RelayConnectionSettings?
     var tailscaleAccountID: String?
     var tailscalePeerID: String?
     private(set) var tailscalePeerHost: String?
@@ -24,6 +26,8 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
 
     init(connection: ServerConnection? = nil) {
         guard let connection else { return }
+        relaySettings = try? RelayConnectionSettings.validated(server: connection.relayServer, deviceID: connection.relayDeviceID,
+            service: connection.relayService, credentialRef: connection.relayCredentialRef)
         selection = connection.transport
         unsupportedRaw = selection == nil ? connection.transportRaw : nil
         socksHost = connection.socksProxyHost ?? ""
@@ -35,6 +39,10 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
         tailscaleAccountID = connection.tailscaleAccountID
         tailscalePeerID = connection.tailscalePeerID
         tailscalePeerHost = connection.tailscalePeerID == nil ? nil : connection.host
+    }
+
+    mutating func bindRelay(_ credential: RelayCredential) throws {
+        relaySettings = try RelayConnectionSettings.paired(credential, ref: RelayCredentials.newReference())
     }
 
     mutating func bindTailscaleAccount(_ accountID: String) {
@@ -107,6 +115,10 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
         }
         connection.tailscaleAccountID = selection == .tailscale ? tailscaleAccountID : nil
         connection.tailscalePeerID = selection == .tailscale ? tailscalePeerID : nil
+        connection.relayServer = selection == .relay ? relaySettings?.server : nil
+        connection.relayDeviceID = selection == .relay ? relaySettings?.deviceID : nil
+        connection.relayService = selection == .relay ? relaySettings?.service : nil
+        connection.relayCredentialRef = selection == .relay ? relaySettings?.credentialRef : nil
         let validated = try connection.validatedTransport()
         if case .cloudflare(let settings) = validated {
             // An absent override follows the Host field on subsequent edits.
@@ -120,7 +132,9 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
     func validatedConnection(from original: ServerConnection, host: String, port: String,
                              usesMosh: Bool) throws -> ServerConnection {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        if selection == .tailcat {
+        if selection == .relay {
+            guard host.isEmpty || ServerConnection.isSSHHostname(host) else { throw ConnectionTransportError.invalidSSHHost }
+        } else if selection == .tailcat {
             guard (host.isEmpty || ServerConnection.isSSHHostname(host)),
                   !(host.hasPrefix("tc") && host.utf8.count > 40) else {
                 throw ConnectionTransportError.invalidTailcatHostAlias
@@ -128,7 +142,7 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
         } else {
             guard ServerConnection.isSSHHostname(host) else { throw ConnectionTransportError.invalidSSHHost }
         }
-        guard let port = Int(port.trimmingCharacters(in: .whitespacesAndNewlines)), (1...65535).contains(port) else {
+        guard let port = selection == .relay ? 22 : Int(port.trimmingCharacters(in: .whitespacesAndNewlines)), (1...65535).contains(port) else {
             throw ConnectionTransportError.invalidSSHPort
         }
         var connection = original
@@ -136,7 +150,9 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
         connection.port = port
         connection.sshPort = port
         connection.connectionProtocol = usesMosh ? .mosh : .ssh
+        if selection == .relay { connection.port = 22; connection.sshPort = 22 }
         connection = try applying(to: connection)
+        if selection == .relay, host.isEmpty { connection.host = relaySettings?.deviceID ?? "" }
         if selection == .tailscale {
             // Manual endpoint edits must not retain a stale peer identity.
             connection.tailscalePeerID = effectiveTailscalePeerID(host: host)

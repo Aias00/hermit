@@ -316,6 +316,7 @@ struct CloudSyncTests {
     func deviceSecretsStayLocal() async throws {
         let fixture = Fixture(); defer { fixture.close() }
         var host = ServerConnection(name: "Private transport", host: "host.example", username: "test")
+        host.relayCredentialRef = RelayCredentials.newReference()
         host.tailcatCredentialRef = "moshpit.tailcat." + UUID().uuidString
         host.tailscaleAccountID = UUID().uuidString
         fixture.local.connections.add(host)
@@ -325,12 +326,13 @@ struct CloudSyncTests {
         let capture = try await fixture.local.capture(includeCredentials: true, allowAuthentication: true)
         let serialized = try JSONEncoder().encode(Array(capture.values.values))
         let text = String(decoding: serialized, as: UTF8.self)
+        #expect(!text.contains(host.relayCredentialRef!))
         #expect(!text.contains(host.tailcatCredentialRef!))
         #expect(!text.contains(host.tailscaleAccountID!))
         #expect(!capture.values.keys.contains("credential/" + ref))
         let object = try #require(capture.values["host/" + host.id.uuidString])
         let restored = try JSONDecoder().decode(ServerConnection.self, from: #require(object.payload))
-        #expect(restored.tailcatCredentialRef == nil && restored.tailscaleAccountID == nil)
+        #expect(restored.relayCredentialRef == nil && restored.tailcatCredentialRef == nil && restored.tailscaleAccountID == nil)
         await #expect(throws: KeychainError.invalidData) {
             try await fixture.keychain.exportSSHSecret(ref: "moshpit.knownHosts", allowAuthentication: true)
         }

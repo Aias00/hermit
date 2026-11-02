@@ -71,6 +71,7 @@ enum ConnectionActivitySnapshot {
         case .cloudflareSSH: return "Cloudflare"
         case .tailscale: return "Tailscale"
         case .tailcat: return "Tailcat"
+        case .relay: return "Relay"
         case nil: return nil
         }
     }
