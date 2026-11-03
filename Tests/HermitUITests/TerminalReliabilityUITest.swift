@@ -718,6 +718,41 @@ final class TerminalReliabilityUITest: XCTestCase {
     }
 
     @MainActor
+    func testVisibleHerdrReconnectKeepsPresentationAndDraft() throws {
+        guard let root = ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"],
+              root.hasPrefix("/private/tmp/moshpit-ui-lab-") || root.hasPrefix("/tmp/moshpit-ui-lab-") else {
+            throw XCTSkip("requires a dedicated temporary terminal session fixture")
+        }
+        let app = try openTerminal(explicitNavigation: true)
+        let field = composer(app)
+        let receipt = URL(fileURLWithPath: root).appendingPathComponent("visible-reconnect-" + UUID().uuidString + ".log")
+        defer { try? FileManager.default.removeItem(at: receipt) }
+        let draft = "printf 'VISIBLE_RECONNECT_OK\\n' >> '" + receipt.path + "'"
+        field.tap()
+        app.typeText(draft)
+        app.buttons["conversation-menu"].tap()
+        app.buttons["重新连接"].tap()
+        XCTAssertEqual(field.value as? String, draft)
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: app.buttons["conversation-send"])
+        waitForExpectations(timeout: 20)
+        app.buttons["conversation-send"].tap()
+        expectation(for: NSPredicate { _, _ in
+            FileManager.default.fileExists(atPath: receipt.path) && (field.value as? String)?.isEmpty == true
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
+        XCTAssertEqual(try String(contentsOf: receipt, encoding: .utf8), "VISIBLE_RECONNECT_OK\n")
+        let backendLog = URL(fileURLWithPath: root).appendingPathComponent("config/herdr/sessions/ui/herdr-server.log")
+        expectation(for: NSPredicate { _, _ in
+            guard let log = try? String(contentsOf: backendLog, encoding: .utf8),
+                  let connected = log.components(separatedBy: "\n").last(where: { $0.contains("terminal attach client connected") }),
+                  let token = connected.components(separatedBy: " ").first(where: { $0.hasPrefix("client_id=") }) else { return false }
+            return !log.components(separatedBy: "\n").contains { $0.contains("client detached " + token) }
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
+        captureScreenshot(app, name: "visible-herdr-reconnect")
+    }
+
+    @MainActor
     func testExplicitNewlineThenReturnSendsForHerdrAndSSH() throws {
         guard let root = ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"] else {
             throw XCTSkip("requires the isolated terminal session fixture")

@@ -647,7 +647,11 @@ final class SessionHub {
         /// placed for the phone grid would strand a desktop client sharing those
         /// windows at the phone width. Hand the pins back here; `repinForeground()`
         /// re-applies them when the terminal returns. Covers SSH + the mosh sidecar.
-        func releaseWindowPinsForBackground() {
+        func releaseWindowPinsForBackground(reason: String = "background") {
+            if connection.multiplexer == .herdr {
+                Log.ssh.debug("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr presentation: released reason=\(reason, privacy: .public)")
+            }
+            herdrPresentationRequested = false
             tmuxController?.releaseWindowPins()
             moshControl?.releaseWindowPins()
             herdrFrameSuspended = true
@@ -692,6 +696,7 @@ final class SessionHub {
         /// A release ACK may be lost when iOS suspends the socket. Never leave
         /// reattachment gated forever on that old ACK; rebuild after a bound.
         func resumeHerdrFrames() {
+            herdrPresentationRequested = true
             herdrFrameSuspended = false
             herdrControl?.quicken()
             guard herdrFrameSSH != nil, herdrExpectedCloses > 0,
@@ -865,6 +870,9 @@ final class SessionHub {
         /// Authoritative grid of the latest frame; the foreground viewport requests its own size.
         private(set) var herdrRemoteGrid: (cols: Int, rows: Int)?
         @ObservationIgnored private var herdrFrameSuspended = false
+        /// Visibility survives transport replacement. A metadata reconnect
+        /// must not silently reacquire the remote terminal at the phone size.
+        @ObservationIgnored private var herdrPresentationRequested = true
         @ObservationIgnored private var herdrForegroundRecovery: Task<Void, Never>?
         @ObservationIgnored var herdrForegroundRecoveryDeadline: Duration = .seconds(30)
         @ObservationIgnored private var herdrFrameGeneration = UUID()
@@ -1850,7 +1858,7 @@ final class SessionHub {
         /// so mosh+herdr keeps running herdr's own TUI.
         private func startHerdrFrames(over session: SSHSession) {
             herdrFrameSSH = session
-            herdrFrameSuspended = false
+            herdrFrameSuspended = !herdrPresentationRequested
             herdrFrameGeneration = UUID()
             herdrTargetGeneration = UUID()
             herdrReaderReady = false
@@ -1965,6 +1973,7 @@ final class SessionHub {
                         case .closed:
                             await MainActor.run {
                                 guard let self, self.herdrFrameGeneration == generation else { return }
+                                Log.ssh.debug("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: closed expected=\(self.herdrExpectedCloses, privacy: .public) suspended=\(self.herdrFrameSuspended, privacy: .public)")
                                 self.herdrAcceptsFrames = false
                                 self.herdrFramePainted = false
                                 if self.herdrExpectedCloses > 0 {
@@ -3861,6 +3870,15 @@ final class SessionHub {
     /// for desktop clients for no benefit.
     weak var visibleSession: ActiveSession?
 
+    /// A dial can finish after its screen disappeared or the app backgrounded.
+    /// Late completion must not turn metadata recovery into terminal ownership.
+    @discardableResult
+    func repinVisibleSession(_ session: ActiveSession) -> Bool {
+        guard isForeground, visibleSession === session else { return false }
+        session.repinForeground()
+        return true
+    }
+
     func setForeground(_ active: Bool) {
         isForeground = active
         if active {
@@ -4010,17 +4028,21 @@ final class SessionHub {
             // Carry its in-memory draft through replacement, including a send
             // already waiting for acknowledgement. Explicit disconnect removes it.
             let draft = self.sessions[connection.id]?.composerDraft
-            if let existing = self.sessions[connection.id],
+            let existing = self.sessions[connection.id]
+            if let existing,
                force || !Self.sameSessionConfiguration(existing.connection, connection) {
                 // Already inside the queue: using public disconnect here would
                 // enqueue behind this very operation and deadlock.
-                await self.disconnectCurrent(connection.id)
+                await self.disconnectCurrent(connection.id, preservingVisibleSession: true)
                 HostCapabilityCache.shared.invalidate(connection.id)
             }
             // Creation belongs to the same ordered operation as teardown:
             // an older caller must not resume later and reinstall stale config.
             let session = self.prepare(connection)
             if let draft { session.composerDraft = draft }
+            // Keep the old identity through teardown so a disappearing screen
+            // can still revoke it. Transfer only ownership that survived awaits.
+            if let existing, self.visibleSession === existing { self.visibleSession = session }
             return session
         }
         connectionOperations[connection.id] = Task { _ = await task.value }
@@ -4102,6 +4124,10 @@ final class SessionHub {
                cursorBlink: Bool = true) async {
         guard sessions[active.connection.id] === active, !active.isStopping,
               !pendingDisconnects.contains(active.connection.id) else { return }
+        if active.connection.multiplexer == .herdr,
+           !isForeground || visibleSession !== active {
+            active.releaseWindowPinsForBackground(reason: "hidden-start")
+        }
         await active.start(theme: theme, fontSize: fontSize, fontName: fontName,
                             cursorShape: cursorShape, cursorColorId: cursorColorId, cursorBlink: cursorBlink)
 
@@ -4198,7 +4224,7 @@ final class SessionHub {
         finishConnectionOperation(connectionId, token: token)
     }
 
-    private func disconnectCurrent(_ connectionId: UUID) async {
+    private func disconnectCurrent(_ connectionId: UUID, preservingVisibleSession: Bool = false) async {
         guard let active = sessions[connectionId] else { return }
         active.isStopping = true
         await active.stop()
@@ -4208,7 +4234,7 @@ final class SessionHub {
         await SSHService.shared.clearCachedSecret(for: connectionId)
         guard sessions[connectionId] === active else { return }
         sessions[connectionId] = nil
-        if visibleSession === active { visibleSession = nil }
+        if !preservingVisibleSession, visibleSession === active { visibleSession = nil }
         var m = metrics.metrics[connectionId] ?? SessionMetrics()
         m.state = .saved
         m.connectedAt = nil

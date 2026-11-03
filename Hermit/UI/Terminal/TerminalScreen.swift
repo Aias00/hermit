@@ -649,8 +649,7 @@ struct TerminalScreen: View {
                 cancelDictation()
             }
             if phase == .active {
-                if let active {
-                    hub.visibleSession = active
+                if let active, hub.visibleSession === active {
                     active.resumeHerdrFrames()
                 }
                 clipboardHasImage = UIPasteboard.general.hasImages
@@ -724,7 +723,7 @@ struct TerminalScreen: View {
             // windows isn't stranded at the phone width. Re-pinned in .task on
             // return. (A presented sheet doesn't fire onDisappear, so opening the
             // windows/sessions picker won't release the pin.)
-            active?.releaseWindowPinsForBackground()
+            active?.releaseWindowPinsForBackground(reason: "screen-disappeared")
             if hub.visibleSession === active { hub.visibleSession = nil }
             HardwareKeys.shared.uninstall(owner: hardwareKeyOwner)
         }
@@ -1988,7 +1987,7 @@ struct TerminalScreen: View {
         // so a desktop client could reclaim its width. Re-pin to the phone grid
         // now. No-op on a fresh connect (snapshot not attached yet — the normal
         // flow pins as windows are discovered).
-        session.repinForeground()
+        hub.repinVisibleSession(session)
         // tmux mints its terminals during connect (before cursor settings
         // were threaded in) — re-assert the full appearance now.
         applyAppearance()

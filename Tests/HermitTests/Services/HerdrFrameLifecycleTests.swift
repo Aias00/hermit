@@ -80,6 +80,9 @@ struct HerdrFrameLifecycleTests {
                              pauseBootWrite: Bool = false,
                              writeTimeout: Duration? = nil,
                              queuedBootBarrier: Task<Void, Never>? = nil,
+                             presentationActive: Bool = true,
+                             hub: SessionHub? = nil,
+                             visibleInHub: Bool = false,
                              waitForBoot: Bool = true) async throws -> Fixture {
         var connection = ServerConnection(name: "herdr frame fixture", host: "192.0.2.1", port: 22,
                                           username: "test", authMethod: .password)
@@ -100,12 +103,116 @@ struct HerdrFrameLifecycleTests {
             active.installForTesting(moshTransport: nil, herdrWriteBarrier: queuedBootBarrier)
         }
         active.sidecarConnect = { _ in throw SSHError.connectionFailed }
-        await active.start(theme: .githubDark, fontSize: 14)
+        if !presentationActive { active.releaseWindowPinsForBackground() }
+        if let hub {
+            hub.makeSession = { _ in active }
+            #expect(hub.prepare(connection) === active)
+            if visibleInHub { hub.visibleSession = active }
+            await hub.start(active, theme: .githubDark, fontSize: 14)
+        } else {
+            await active.start(theme: .githubDark, fontSize: 14)
+        }
         let fixture = Fixture(active: active, transport: transport, dials: dials)
         if waitForBoot {
             #expect(await eventually { await transport.writer.written().contains { $0.contains("/bin/sh -c") } })
         }
         return fixture
+    }
+
+    @Test("A hidden HERDR session may reconnect its control plane without taking terminal size ownership")
+    func hiddenStartupDoesNotTakeOverTerminal() async throws {
+        let fixture = try await makeFixture(presentationActive: false, waitForBoot: false)
+        #expect(await eventually { fixture.active.herdrControl?.snapshot.panes.count == 2 })
+        try await Task.sleep(for: .milliseconds(200))
+        let hiddenWrites = await fixture.transport.writer.written()
+        #expect(!hiddenWrites.contains { $0.contains("terminal session control") },
+                "hidden startup must not reacquire the remote PTY at the phone grid")
+        #expect(!hiddenWrites.contains { $0.contains("terminal.resize") })
+        fixture.active.resumeHerdrFrames()
+        fixture.active.herdrControl?.quicken()
+        #expect(await eventually {
+            await fixture.transport.writer.written().contains { $0.contains("terminal session control") }
+        })
+        await paint(fixture)
+        #expect(fixture.dials.count == 1, "opening the terminal reuses the metadata connection")
+        await finish(fixture)
+    }
+
+    @Test("Home-screen startup keeps HERDR metadata live without opening a frame controller")
+    func hubStartsHiddenSessionWithoutPresentation() async throws {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        hub.isForeground = true
+        let fixture = try await makeFixture(hub: hub, waitForBoot: false)
+        #expect(await eventually { fixture.active.herdrControl?.snapshot.panes.count == 2 })
+        #expect(!hub.repinVisibleSession(fixture.active), "a late hidden dial completion cannot reclaim presentation")
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!(await fixture.transport.writer.written()).contains { $0.contains("terminal session control") })
+        hub.visibleSession = fixture.active
+        #expect(hub.repinVisibleSession(fixture.active))
+        #expect(await eventually {
+            await fixture.transport.writer.written().contains { $0.contains("terminal session control") }
+        })
+        await paint(fixture)
+        await finish(fixture)
+    }
+
+    @Test("A background startup cannot take presentation even with a retained terminal screen")
+    func hubStartsBackgroundSessionWithoutPresentation() async throws {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        let fixture = try await makeFixture(hub: hub, visibleInHub: true, waitForBoot: false)
+        #expect(await eventually { fixture.active.herdrControl?.snapshot.panes.count == 2 })
+        #expect(!hub.repinVisibleSession(fixture.active), "a retained screen cannot reclaim size while backgrounded")
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!(await fixture.transport.writer.written()).contains { $0.contains("terminal session control") })
+        await finish(fixture)
+    }
+
+    @Test("A visible foreground terminal still acquires its frame controller on startup")
+    func hubStartsVisibleForegroundPresentation() async throws {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        hub.isForeground = true
+        let fixture = try await makeFixture(hub: hub, visibleInHub: true)
+        await paint(fixture)
+        #expect(fixture.active.herdrControl?.snapshot.panes.count == 2)
+        await finish(fixture)
+    }
+
+    @Test("Replacement transfers only the terminal presentation that is still visible", arguments: [true, false])
+    func replacementPreservesVisibility(visible: Bool) async {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        hub.isForeground = true
+        var connection = ServerConnection(name: "replacement fixture", host: "192.0.2.1", port: 22,
+                                          username: "test", authMethod: .password)
+        connection.multiplexer = .herdr
+        let original = hub.prepare(connection)
+        if visible { hub.visibleSession = original }
+        let replacement = await hub.replaceConnection(connection, force: true)
+        #expect(replacement !== original)
+        if visible { #expect(hub.visibleSession === replacement) }
+        else { #expect(hub.visibleSession == nil) }
+        await hub.disconnect(connection.id)
+        #expect(hub.visibleSession == nil, "explicit disconnect always releases presentation")
+    }
+
+    @Test("Leaving during replacement teardown prevents a late presentation takeover")
+    func leavingDuringReplacementReleasesVisibility() async throws {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        hub.isForeground = true
+        let fixture = try await makeFixture(hub: hub, visibleInHub: true)
+        await paint(fixture)
+        hub.makeSession = { SessionHub.ActiveSession(connection: $0) }
+        await fixture.transport.writer.pause()
+        let replacementTask = Task { await hub.replaceConnection(fixture.active.connection, force: true) }
+        #expect(await eventually { await fixture.transport.writer.isPaused })
+        #expect(hub.visibleSession === fixture.active, "the old screen can still revoke its identity during teardown")
+        hub.visibleSession = nil
+        fixture.active.releaseWindowPinsForBackground()
+        await fixture.transport.writer.release()
+        let replacement = await replacementTask.value
+        #expect(hub.visibleSession == nil)
+        #expect(!hub.repinVisibleSession(replacement))
+        await hub.disconnect(replacement.connection.id)
+        HostCapabilityCache.shared.invalidate(fixture.active.connection.id)
     }
 
     private func finish(_ fixture: Fixture) async {
