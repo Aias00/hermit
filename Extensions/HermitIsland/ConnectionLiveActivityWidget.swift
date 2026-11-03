@@ -159,16 +159,9 @@ private struct ConnectionActivityTaskRow: View {
         HStack(alignment: .center, spacing: 10) {
             Group {
                 if task.state == .working {
-                    VStack(spacing: 2) {
-                        ForEach(0..<3) { _ in
-                            HStack(spacing: 2) {
-                                Circle().frame(width: 4, height: 4)
-                                Circle().frame(width: 4, height: 4)
-                            }
-                        }
-                    }
+                    Circle().strokeBorder(lineWidth: 1.8).frame(width: 16, height: 16)
                 } else {
-                    Image(systemName: task.state == .done ? "checkmark" : task.state.symbol)
+                    Image(systemName: task.state == .done ? "checkmark.circle" : "exclamationmark.circle")
                         .font(.system(size: 16, weight: .medium))
                 }
             }
