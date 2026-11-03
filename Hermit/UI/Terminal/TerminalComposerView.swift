@@ -3,11 +3,12 @@ import SwiftTerm
 import UIKit
 import MoshpitKit
 
-/// The screen keeps a weak handle for its explicit New line action.
+/// Weak editor handle for explicit newline and remote editing actions.
 @MainActor
 final class TerminalComposerEditor {
     weak var view: ComposerTextView?
     func insertNewline() { view?.insertDraftLineBreak() }
+    func resumeRemoteEditing() { view?.resumeRemoteEditing() }
 }
 
 /// Multiline editor. With a submit handler, Return sends; Shift+Return adds a line.
@@ -18,16 +19,26 @@ struct TerminalComposerView: UIViewRepresentable {
     let onKeyboardDismiss: () -> Void
     let onSubmit: (() -> Void)?
     let editor: TerminalComposerEditor?
+    var onEmptyDelete: (() -> Void)?
+    var onEmptyArrow: ((String) -> Void)?
+    var onControlKey: ((UInt8) -> Void)?
+    var consumeControlText: ((String) -> Bool)?
 
     init(text: Binding<String>, isFocused: Binding<Bool>, onFocus: @escaping () -> Void,
          onKeyboardDismiss: @escaping () -> Void = {},
-         onSubmit: (() -> Void)? = nil, editor: TerminalComposerEditor? = nil) {
+         onSubmit: (() -> Void)? = nil, editor: TerminalComposerEditor? = nil,
+         onEmptyDelete: (() -> Void)? = nil, onEmptyArrow: ((String) -> Void)? = nil,
+         onControlKey: ((UInt8) -> Void)? = nil, consumeControlText: ((String) -> Bool)? = nil) {
         self._text = text
         self._isFocused = isFocused
         self.onFocus = onFocus
         self.onKeyboardDismiss = onKeyboardDismiss
         self.onSubmit = onSubmit
         self.editor = editor
+        self.onEmptyDelete = onEmptyDelete
+        self.onEmptyArrow = onEmptyArrow
+        self.onControlKey = onControlKey
+        self.consumeControlText = consumeControlText
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -92,6 +103,10 @@ struct TerminalComposerView: UIViewRepresentable {
                 // UIKit paints it; never resurrect the old editor value here.
                 self?.parent.onSubmit?()
             }
+            view.onEmptyDelete = parent.onEmptyDelete == nil ? nil : { [weak self] in self?.parent.onEmptyDelete?() }
+            view.onEmptyArrow = parent.onEmptyArrow == nil ? nil : { [weak self] in self?.parent.onEmptyArrow?($0) }
+            view.onControlKey = parent.onControlKey == nil ? nil : { [weak self] in self?.parent.onControlKey?($0) }
+            view.consumeControlText = { [weak self] in self?.parent.consumeControlText?($0) ?? false }
         }
 
         func updateFocus(_ view: ComposerTextView) {
@@ -199,7 +214,12 @@ struct TerminalComposerView: UIViewRepresentable {
 final class ComposerTextView: UITextView {
     private let placeholder = UILabel()
     var onReturn: (() -> Void)?
+    var onEmptyDelete: (() -> Void)?
+    var onEmptyArrow: ((String) -> Void)?
+    var onControlKey: ((UInt8) -> Void)?
+    var consumeControlText: ((String) -> Bool)?
     private var insertingDictation = false
+    private var deletedLocalText = false
 
     init() {
         super.init(frame: .zero, textContainer: nil)
@@ -218,7 +238,76 @@ final class ComposerTextView: UITextView {
         newline.discoverabilityTitle = String(localized: "New line")
         newline.wantsPriorityOverSystemBehavior = true
         commands.append(newline)
+        if markedTextRange == nil {
+            // Only an empty draft lends navigation to the remote. With text
+            // present, UIKit keeps normal caret movement and selection.
+            if text.isEmpty, onEmptyArrow != nil {
+                for input in [UIKeyCommand.inputUpArrow, UIKeyCommand.inputDownArrow,
+                              UIKeyCommand.inputLeftArrow, UIKeyCommand.inputRightArrow] {
+                    let arrow = UIKeyCommand(input: input, modifierFlags: [], action: #selector(emptyArrow(_:)))
+                    arrow.wantsPriorityOverSystemBehavior = true
+                    commands.append(arrow)
+                }
+            }
+            if onControlKey != nil {
+                let escape = UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [],
+                                          action: #selector(remoteEscape(_:)))
+                escape.wantsPriorityOverSystemBehavior = true
+                commands.append(escape)
+                for byte in UInt8(ascii: "a")...UInt8(ascii: "z") {
+                    let control = UIKeyCommand(input: String(UnicodeScalar(byte)), modifierFlags: .control,
+                                               action: #selector(controlKey(_:)))
+                    control.wantsPriorityOverSystemBehavior = true
+                    commands.append(control)
+                }
+            }
+        }
         return commands
+    }
+
+    @objc private func emptyArrow(_ command: UIKeyCommand) {
+        guard text.isEmpty, markedTextRange == nil, let input = command.input else { return }
+        let directions = [UIKeyCommand.inputUpArrow: "up", UIKeyCommand.inputDownArrow: "down",
+                          UIKeyCommand.inputLeftArrow: "left", UIKeyCommand.inputRightArrow: "right"]
+        if let direction = directions[input] {
+            deletedLocalText = false
+            onEmptyArrow?(direction)
+        }
+    }
+
+    @objc private func controlKey(_ command: UIKeyCommand) {
+        guard markedTextRange == nil, let byte = command.input?.utf8.first else { return }
+        onControlKey?(byte & 0x1f)
+    }
+
+    @objc private func remoteEscape(_ command: UIKeyCommand) {
+        guard markedTextRange == nil else { return }
+        onControlKey?(0x1b)
+    }
+
+    override func deleteBackward() {
+        if text.isEmpty, markedTextRange == nil, !insertingDictation, let onEmptyDelete {
+            // Holding Delete to clear a local draft must stop at the boundary;
+            // it must not continue deleting an unrelated remote command.
+            if !deletedLocalText { onEmptyDelete() }
+        } else {
+            deletedLocalText = true
+            super.deleteBackward()
+        }
+    }
+
+    override var hasText: Bool {
+        super.hasText || (onEmptyDelete != nil && !deletedLocalText)
+    }
+
+    func resumeRemoteEditing() {
+        guard text.isEmpty, markedTextRange == nil else { return }
+        deletedLocalText = false
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        if !isFirstResponder { deletedLocalText = false }
+        return super.becomeFirstResponder()
     }
 
     @objc private func shiftReturn(_ command: UIKeyCommand) { insertDraftLineBreak() }
@@ -229,12 +318,25 @@ final class ComposerTextView: UITextView {
     }
 
     override func insertText(_ text: String) {
+        if !insertingDictation, consumeControlText?(text) == true {
+            // insertText is an IME commit; intermediate candidates arrive via
+            // setMarkedText. A committed Ctrl letter must not remain in the
+            // local draft, even when it replaces marked Pinyin text.
+            if let marked = markedTextRange {
+                super.replace(marked, withText: "")
+                unmarkText()
+            }
+            return
+        }
         if (text == "\n" || text == "\r" || text == "\r\n"), let onReturn, !insertingDictation {
             if markedTextRange != nil {
                 // The first Return confirms composition; it must never send a
                 // half-composed Chinese word or accept a remote prompt.
                 unmarkText()
-            } else { onReturn() }
+            } else {
+                deletedLocalText = false
+                onReturn()
+            }
             return
         }
         super.insertText(text)
@@ -257,6 +359,7 @@ final class ComposerTextView: UITextView {
     /// An in-progress edit or selection elsewhere keeps its position.
     func updateDraftText(_ draft: String) {
         guard text != draft, markedTextRange == nil else { return }
+        deletedLocalText = false
         let selection = selectedRange
         let wasAtEnd = selection.length == 0 && selection.location == (text as NSString).length
         text = draft

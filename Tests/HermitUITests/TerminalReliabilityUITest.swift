@@ -70,6 +70,14 @@ final class TerminalReliabilityUITest: XCTestCase {
                     if sidebar.waitForExistence(timeout: 3) && sidebar.isHittable { sidebar.tap() }
                 }
             }
+            if !host.waitForExistence(timeout: 15), app.buttons["home-settings"].exists {
+                // A test-host install can leave an already launched home
+                // process without the new seed arguments. Retry startup once,
+                // never substitute a stale host with the same address.
+                captureScreenshot(app, name: "fixture-seed-before-startup-retry")
+                app.terminate()
+                app.launch()
+            }
             XCTAssertTrue(host.waitForExistence(timeout: 15))
             XCTAssertTrue(app.buttons["home-settings"].exists)
             XCTAssertTrue(host.label.contains("127.0.0.1"), "only open the isolated loopback host")
@@ -664,6 +672,52 @@ final class TerminalReliabilityUITest: XCTestCase {
     }
 
     @MainActor
+    func testBottomKeyboardEditsExistingHerdrInputAndKeepsDraftDuringCtrl() throws {
+        guard let root = ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"],
+              root.hasPrefix("/private/tmp/moshpit-ui-lab-") || root.hasPrefix("/tmp/moshpit-ui-lab-") else {
+            throw XCTSkip("requires a dedicated temporary terminal session fixture")
+        }
+        let app = try openTerminal(explicitNavigation: true)
+        XCTAssertTrue(app.staticTexts["herdr"].firstMatch.waitForExistence(timeout: 15))
+        let field = composer(app)
+        let direct = app.buttons["conversation-direct-input"]
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: direct)
+        waitForExpectations(timeout: 15)
+        let editReceipt = URL(fileURLWithPath: root).appendingPathComponent("remote-delete-" + UUID().uuidString + ".log")
+        let ctrlReceipt = URL(fileURLWithPath: root).appendingPathComponent("remote-ctrl-" + UUID().uuidString + ".log")
+        defer {
+            try? FileManager.default.removeItem(at: editReceipt)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: editReceipt.path + "x"))
+            try? FileManager.default.removeItem(at: ctrlReceipt)
+        }
+        // Stage an existing remote command, as if it came from another client.
+        direct.tap()
+        app.typeText("printf 'REMOTE_DELETE_OK\\n' >> '" + editReceipt.path + "'x")
+        direct.tap()
+        XCTAssertFalse(direct.isSelected)
+        app.typeText(XCUIKeyboardKey.delete.rawValue + "\n")
+        expectation(for: NSPredicate { _, _ in FileManager.default.fileExists(atPath: editReceipt.path) }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
+        XCTAssertEqual(try String(contentsOf: editReceipt, encoding: .utf8), "REMOTE_DELETE_OK\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: editReceipt.path + "x"))
+
+        let draft = "printf 'CTRL_RETAINED_OK\\n' >> '" + ctrlReceipt.path + "'"
+        app.typeText(draft)
+        app.buttons["conversation-ctrl"].tap()
+        app.typeText("c")
+        XCTAssertEqual(field.value as? String, draft)
+        XCTAssertFalse(direct.isSelected)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ctrlReceipt.path))
+        app.typeText("\n")
+        expectation(for: NSPredicate { _, _ in
+            (field.value as? String)?.isEmpty == true && FileManager.default.fileExists(atPath: ctrlReceipt.path)
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
+        XCTAssertEqual(try String(contentsOf: ctrlReceipt, encoding: .utf8), "CTRL_RETAINED_OK\n")
+        captureScreenshot(app, name: "herdr-bottom-keyboard-edit-and-control")
+    }
+
+    @MainActor
     func testExplicitNewlineThenReturnSendsForHerdrAndSSH() throws {
         guard let root = ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"] else {
             throw XCTSkip("requires the isolated terminal session fixture")
@@ -696,6 +750,73 @@ final class TerminalReliabilityUITest: XCTestCase {
             captureScreenshot(app, name: "return-submits-" + mux)
             app.terminate()
         }
+    }
+
+    @MainActor
+    func testBottomKeyboardControlsRemoteWithoutFocusSwitch() async throws {
+        let receipt = try inputReceiptURL()
+        let app = try openTerminal(multiplexer: "none", explicitNavigation: true)
+        let field = composer(app)
+        let hand = app.buttons["conversation-direct-input"]
+        field.tap()
+        try await resetInputReceipt(receipt)
+        app.typeText(XCUIKeyboardKey.delete.rawValue + XCUIKeyboardKey.delete.rawValue)
+        try await assertInputBytes([127, 127], receipt: receipt)
+        XCTAssertFalse(hand.isSelected)
+        app.typeText("kept draft")
+        app.buttons["conversation-ctrl"].tap()
+        app.typeText("c")
+        try await assertInputBytes([127, 127, 3], receipt: receipt)
+        XCTAssertEqual(field.value as? String, "kept draft")
+        XCTAssertFalse(hand.isSelected, "Ctrl must not switch the keyboard to the terminal")
+        app.buttons["向左"].tap()
+        app.typeText(" more")
+        XCTAssertEqual(field.value as? String, "kept draft more")
+        XCTAssertFalse(hand.isSelected)
+        try await resetInputReceipt(receipt)
+        app.typeText("\n")
+        let expected = Array("\u{1b}[200~kept draft more\u{1b}[201~\r".utf8).map(Int.init)
+        try await assertInputBytes(expected, receipt: receipt)
+        XCTAssertEqual(field.value as? String, "")
+
+        // A long Delete which empties a local draft must not reach the remote.
+        app.typeText("abc")
+        try await resetInputReceipt(receipt)
+        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8))
+        XCTAssertEqual(field.value as? String, "")
+        let erasedDraftBytes = try await receivedInput(receipt)
+        XCTAssertTrue(erasedDraftBytes.isEmpty)
+        // Return is still usable from the same field to confirm remote input.
+        app.typeText("\n")
+        try await assertOneRemoteReturn(receipt)
+        app.buttons["conversation-keyboard-toggle"].tap()
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(hand.isSelected)
+        app.buttons["conversation-keyboard-toggle"].tap()
+        app.typeText("same bottom field")
+        XCTAssertEqual(field.value as? String, "same bottom field")
+        XCTAssertFalse(hand.isSelected)
+        app.buttons["conversation-keyboard-toggle"].tap()
+        // A cursor-row tap opens the bottom editor, preserving its draft;
+        // simply touching the terminal must not silently select direct input.
+        try await emitReaderOutput("\u{1b}[2J\u{1b}[3J\u{1b}[H> ", receipt: receipt)
+        let surface = app.descendants(matching: .any).matching(identifier: "terminal-input-surface").firstMatch
+        XCTAssertTrue(surface.waitForExistence(timeout: 5))
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.015)).tap()
+        app.typeText(" resumed")
+        XCTAssertEqual(field.value as? String, "same bottom field resumed")
+        XCTAssertFalse(hand.isSelected)
+        captureScreenshot(app, name: "bottom-keyboard-controls-remote")
+    }
+
+    private func assertInputBytes(_ expected: [Int], receipt: URL) async throws {
+        var actual: [Int] = []
+        for _ in 0..<80 {
+            actual = try await receivedInput(receipt)
+            if actual == expected { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(actual, expected)
     }
 
     @MainActor
@@ -738,6 +859,16 @@ final class TerminalReliabilityUITest: XCTestCase {
         try await resetInputReceipt(receipt)
         enter.tap()
         try await assertOneRemoteReturn(receipt)
+        XCTAssertEqual(field.value as? String, "parked local draft")
+        // Hiding the keyboard does not implicitly change the selected input
+        // destination; reopening direct mode must leave the draft parked.
+        app.buttons["conversation-keyboard-toggle"].tap()
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(direct.isSelected)
+        app.buttons["conversation-keyboard-toggle"].tap()
+        try await resetInputReceipt(receipt)
+        app.typeText("raw after reopening")
+        try await assertInputBytes(Array("raw after reopening".utf8).map(Int.init), receipt: receipt)
         XCTAssertEqual(field.value as? String, "parked local draft")
         direct.tap()
         XCTAssertFalse(direct.isSelected)

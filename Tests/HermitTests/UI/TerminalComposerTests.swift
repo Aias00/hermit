@@ -7,6 +7,110 @@ import UIKit
 @MainActor
 @Suite("Terminal composer multiline drafts", .serialized)
 struct TerminalComposerTests {
+    @Test("An empty draft lends Delete and arrows to the remote without acquiring terminal focus")
+    func emptyDraftRemoteEditing() throws {
+        let view = ComposerTextView()
+        var deletes = 0
+        var arrows: [String] = []
+        view.onEmptyDelete = { deletes += 1 }
+        view.onEmptyArrow = { arrows.append($0) }
+        #expect(view.hasText, "keep software Delete available for the remote input")
+        view.deleteBackward()
+        view.deleteBackward()
+        let left = try #require(view.keyCommands?.first { $0.input == UIKeyCommand.inputLeftArrow && $0.modifierFlags.isEmpty })
+        _ = view.perform(left.action, with: left)
+        #expect(deletes == 2)
+        #expect(arrows == ["left"])
+        #expect(view.text.isEmpty)
+        #expect(!view.isFirstResponder)
+    }
+
+    @Test("Deleting a local draft cannot continue into the remote during key repeat")
+    func deletionStopsAtLocalBoundary() throws {
+        let view = ComposerTextView()
+        var remoteDeletes = 0
+        view.onEmptyDelete = { remoteDeletes += 1 }
+        view.onEmptyArrow = { _ in }
+        view.insertText("字😀")
+        #expect(view.keyCommands?.contains { $0.input == UIKeyCommand.inputLeftArrow && $0.modifierFlags.isEmpty } == false)
+        for _ in 0..<10 { view.deleteBackward() }
+        #expect(view.text.isEmpty)
+        #expect(remoteDeletes == 0)
+        #expect(!view.hasText, "repeat must stop once the local draft is erased")
+        let left = try #require(view.keyCommands?.first { $0.input == UIKeyCommand.inputLeftArrow && $0.modifierFlags.isEmpty })
+        _ = view.perform(left.action, with: left)
+        view.deleteBackward()
+        #expect(remoteDeletes == 1, "an explicit remote navigation enables remote editing again")
+    }
+
+    @Test("Marked text keeps deletion and navigation inside the IME")
+    func remoteKeysDoNotEscapeComposition() {
+        let view = ComposerTextView()
+        var events = 0
+        view.onEmptyDelete = { events += 1 }
+        view.onEmptyArrow = { _ in events += 1 }
+        view.onControlKey = { _ in events += 1 }
+        view.setMarkedText("拼音", selectedRange: NSRange(location: 2, length: 0))
+        #expect(view.keyCommands?.contains { $0.action == NSSelectorFromString("emptyArrow:") || $0.action == NSSelectorFromString("controlKey:") } == false)
+        view.deleteBackward()
+        #expect(events == 0)
+    }
+
+    @Test("Remote Ctrl preserves a parked draft; literal paste is never consumed as Ctrl")
+    func controlPreservesDraftAndPaste() throws {
+        var draft = ""
+        var controls: [UInt8] = []
+        let editor = TerminalComposerView(text: Binding(get: { draft }, set: { draft = $0 }),
+            isFocused: .constant(false), onFocus: {}, onControlKey: { controls.append($0) },
+            consumeControlText: { text in
+                guard text == "c" else { return false }
+                controls.append(3)
+                return true
+            })
+        let delegate = editor.makeCoordinator()
+        let view = ComposerTextView()
+        view.delegate = delegate
+        delegate.configureReturn(view)
+        view.insertText("kept draft")
+        view.insertText("c")
+        #expect(draft == "kept draft")
+        let ctrlR = try #require(view.keyCommands?.first { $0.input == "r" && $0.modifierFlags == .control })
+        _ = view.perform(ctrlR.action, with: ctrlR)
+        #expect(controls == [3, 18])
+        let escape = try #require(view.keyCommands?.first { $0.input == UIKeyCommand.inputEscape && $0.modifierFlags.isEmpty })
+        _ = view.perform(escape.action, with: escape)
+        #expect(controls == [3, 18, 27])
+        UIPasteboard.general.string = "c"
+        defer { UIPasteboard.general.items = [] }
+        view.paste(nil)
+        #expect(draft == "kept draftc")
+        #expect(controls == [3, 18, 27])
+    }
+
+    @Test("A committed Ctrl candidate leaves no marked letter in the local draft")
+    func committedControlCandidateDoesNotPolluteDraft() {
+        var draft = ""
+        var controls = 0
+        let editor = TerminalComposerView(text: Binding(get: { draft }, set: { draft = $0 }),
+            isFocused: .constant(false), onFocus: {}, consumeControlText: { text in
+                guard text == "c" else { return false }
+                controls += 1
+                return true
+            })
+        let delegate = editor.makeCoordinator()
+        let view = ComposerTextView()
+        view.delegate = delegate
+        delegate.configureReturn(view)
+        view.insertText("kept draft ")
+        view.setMarkedText("c", selectedRange: NSRange(location: 1, length: 0))
+        #expect(controls == 0, "Pinyin candidates cannot issue remote controls")
+        view.insertText("c")
+        #expect(controls == 1)
+        #expect(view.markedTextRange == nil)
+        #expect(view.text == "kept draft ")
+        #expect(draft == "kept draft ")
+    }
+
     @Test("Return submits the latest draft once without inserting a line break")
     func returnSubmitsDraft() {
         var draft = ""
@@ -233,6 +337,7 @@ struct TerminalComposerTests {
 
     @Test("A temporary keyboard resignation preserves the draft's intended focus")
     func temporaryResignationPreservesFocusIntent() async {
+        await waitForActiveApplication()
         var focused = true
         var sheetOpen = false
         var dismissals = 0
@@ -241,7 +346,7 @@ struct TerminalComposerTests {
             onFocus: {}, onKeyboardDismiss: { dismissals += 1 })
         let delegate = editor.makeCoordinator()
         let (window, view) = makeFocusFixture(delegate: delegate)
-        defer { window.isHidden = true }
+        defer { dismissFocusFixture(window) }
         #expect(view.becomeFirstResponder())
         sheetOpen = true
         #expect(view.resignFirstResponder())
@@ -256,13 +361,14 @@ struct TerminalComposerTests {
 
     @Test("A late didEnd callback cannot undo focus restoration after a picker")
     func lateDidEndPreservesRestoredFocus() async {
+        await waitForActiveApplication()
         var focused = true
         var sheetOpen = false
         let editor = TerminalComposerView(text: .constant("kept"),
             isFocused: Binding(get: { focused && !sheetOpen }, set: { focused = $0 }), onFocus: {})
         let delegate = editor.makeCoordinator()
         let (window, view) = makeFocusFixture(delegate: delegate)
-        defer { window.isHidden = true }
+        defer { dismissFocusFixture(window) }
         #expect(view.becomeFirstResponder())
         sheetOpen = true
         // Deliver UIKit's shouldEnd now, but hold didEnd until the picker has
@@ -284,6 +390,7 @@ struct TerminalComposerTests {
 
     @Test("The system keyboard Hide key cancels queued focus and stays dismissed after a redraw")
     func systemKeyboardDismissalSurvivesRedraw() async {
+        await waitForActiveApplication()
         var focused = true
         var dismissals = 0
         let editor = TerminalComposerView(text: .constant("kept"),
@@ -291,7 +398,7 @@ struct TerminalComposerTests {
             onFocus: {}, onKeyboardDismiss: { dismissals += 1 })
         let delegate = editor.makeCoordinator()
         let (window, view) = makeFocusFixture(delegate: delegate)
-        defer { window.isHidden = true }
+        defer { dismissFocusFixture(window) }
         #expect(UIApplication.shared.applicationState == .active)
         view.text = "kept"
         #expect(view.becomeFirstResponder())
@@ -312,6 +419,7 @@ struct TerminalComposerTests {
 
     @Test("A Menu that presents after shouldEnd only borrows the composer's keyboard")
     func delayedMenuPresentationPreservesFocusIntent() async {
+        await waitForActiveApplication()
         var focused = true
         var dismissals = 0
         let editor = TerminalComposerView(text: .constant("kept"),
@@ -319,7 +427,7 @@ struct TerminalComposerTests {
             onFocus: {}, onKeyboardDismiss: { dismissals += 1 })
         let delegate = editor.makeCoordinator()
         let (window, view) = makeFocusFixture(delegate: delegate)
-        defer { window.isHidden = true }
+        defer { dismissFocusFixture(window) }
         let root = window.rootViewController!
         let menu = UIViewController()
         menu.modalPresentationStyle = .overFullScreen
@@ -349,6 +457,7 @@ struct TerminalComposerTests {
 
     @Test("Tapping the terminal still transfers keyboard ownership out of the draft")
     func terminalFocusHandoffIsRespected() async {
+        await waitForActiveApplication()
         var focused = true
         var dismissals = 0
         let editor = TerminalComposerView(text: .constant("kept"),
@@ -356,7 +465,7 @@ struct TerminalComposerTests {
             onFocus: {}, onKeyboardDismiss: { dismissals += 1 })
         let delegate = editor.makeCoordinator()
         let (window, view) = makeFocusFixture(delegate: delegate)
-        defer { window.isHidden = true }
+        defer { dismissFocusFixture(window) }
         let terminal = TerminalView(frame: CGRect(x: 0, y: 80, width: 300, height: 160))
         window.rootViewController?.view.addSubview(terminal)
         #expect(view.becomeFirstResponder())
@@ -371,7 +480,10 @@ struct TerminalComposerTests {
     }
 
     private func makeFocusFixture(delegate: TerminalComposerView.Coordinator) -> (UIWindow, ComposerTextView) {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 700))
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow()
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 700)
         let controller = UIViewController()
         window.rootViewController = controller
         window.makeKeyAndVisible()
@@ -380,6 +492,22 @@ struct TerminalComposerTests {
         view.delegate = delegate
         controller.view.addSubview(view)
         return (window, view)
+    }
+
+    private func dismissFocusFixture(_ window: UIWindow) {
+        window.isHidden = true
+        // Return the scene's keyboard to its real host window between tests.
+        window.windowScene?.windows.first { $0 !== window && !$0.isHidden }?.makeKey()
+    }
+
+    private func waitForActiveApplication() async {
+        // Hosted tests can begin before the cold-launched app receives its
+        // foreground notification. Focus assertions require an active app.
+        for _ in 0..<100 {
+            if UIApplication.shared.applicationState == .active { return }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(UIApplication.shared.applicationState == .active)
     }
 
     private func drainMainQueue() async {

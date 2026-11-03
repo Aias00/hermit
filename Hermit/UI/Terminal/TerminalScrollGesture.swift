@@ -225,7 +225,8 @@ final class TerminalScrollGesture: NSObject, UIGestureRecognizerDelegate {
                                                   readingScrollback: readingScrollback)
         Log.input.debug("tap row=\(cell.row) cursor=\(cursorRow) scrolled=\(readingScrollback) keyboard=\(wantsKeyboard) focused=\(terminal.isFirstResponder)")
         if wantsKeyboard, !terminal.isFirstResponder {
-            _ = terminal.becomeFirstResponder()
+            if let request = coordinator?.hostContainer?.onKeyboardRequest { request() }
+            else { _ = terminal.becomeFirstResponder() }
         }
         coordinator?.click(col: cell.col, row: cell.row)
     }

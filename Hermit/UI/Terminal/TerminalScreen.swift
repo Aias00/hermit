@@ -88,6 +88,9 @@ struct TerminalScreen: View {
     /// read.
     @State private var keyboardIntent: KeyboardIntent = .unasked
     @State private var composerFocused = false
+    /// Input destination is a deliberate choice, independent of UIKit lending
+    /// the keyboard to a picker, dismissing it, or restoring it after a switch.
+    @State private var directInput = false
     @State private var dictationReviewOwnsKeyboard = false
     @State private var focusBeforeSheet: (composer: Bool, keyboard: KeyboardIntent)?
     @State private var highlightedTerminalLocation: String?
@@ -110,7 +113,7 @@ struct TerminalScreen: View {
         if composerFocused && keyboardIntent != .down { return .allow }
         switch keyboardIntent {
         case .unasked: return .allow
-        case .up: return .take
+        case .up: return directInput ? .take : .allow
         case .down: return .resign
         }
     }
@@ -1760,6 +1763,7 @@ struct TerminalScreen: View {
             cursorBlink: settings.cursorBlink,
             coordinator: active.coordinator,
             focusPolicy: focus ?? focusPolicy,
+            onKeyboardRequest: requestInputKeyboard,
             geometryHeld: geometryHold)
             .id(ObjectIdentifier(active.coordinator))
     }
@@ -1783,6 +1787,7 @@ struct TerminalScreen: View {
                 if ghost != nil || controller.snapshot.isAttached {
                     TmuxPaneSplitView(controller: controller,
                                       focusPolicy: focusPolicy,
+                                      onKeyboardRequest: requestInputKeyboard,
                                       geometryHeld: geometryHold,
                                       compactChrome: compactChrome,
                                       frozen: ghost != nil)
@@ -1847,6 +1852,7 @@ struct TerminalScreen: View {
         settings.fontSize = size
     }
     private func activateTerminalKeyboard() {
+        directInput = true
         dictationReviewOwnsKeyboard = false
         composerFocused = false
         keyboardIntent = .up
@@ -1854,21 +1860,30 @@ struct TerminalScreen: View {
         typingCoordinator?.hostContainer?.requestFocus(.take)
     }
 
+    /// A cursor tap opens the same bottom entry point during ordinary use.
+    /// Only the explicitly selected direct mode takes the terminal responder.
+    private func requestInputKeyboard() {
+        guard !anySheetOpen, focusBeforeSheet == nil else { return }
+        if terminalKeyboardActive { activateTerminalKeyboard() }
+        else { activateDraftKeyboard() }
+    }
+
+    private func activateDraftKeyboard() {
+        typingCoordinator?.hostContainer?.requestFocus(.allow)
+        dictationReviewOwnsKeyboard = false
+        directInput = false
+        keyboardIntent = .up
+        composerFocused = true
+    }
+
     private var terminalKeyboardActive: Bool {
-        // A modal temporarily borrows focus; it does not change the chosen
-        // input destination or make the hand button appear to switch modes.
-        if let previous = focusBeforeSheet {
-            return !previous.composer && previous.keyboard == .up
-        }
-        return !dictationReviewOwnsKeyboard && !composerFocused && keyboardIntent == .up
+        directInput
     }
 
     private func toggleInputDestination() {
         if terminalKeyboardActive {
-            typingCoordinator?.hostContainer?.requestFocus(.allow)
             disarmStickyCtrlIfNeeded()
-            keyboardIntent = .up
-            composerFocused = true
+            activateDraftKeyboard()
         } else {
             activateTerminalKeyboard()
         }
@@ -1882,7 +1897,7 @@ struct TerminalScreen: View {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         } else {
             keyboardIntent = .up
-            composerFocused = true
+            composerFocused = !directInput
         }
     }
 
@@ -1892,15 +1907,18 @@ struct TerminalScreen: View {
         active?.tmuxController?.activeCoordinator ?? active?.coordinator
     }
 
-    /// Arm/disarm sticky Ctrl on whatever the user is typing into. One-shot:
-    /// the coordinator clears itself after folding the next key.
+    /// One-shot remote Ctrl, consumed by the current keyboard owner without
+    /// moving the user's draft or requiring a responder switch.
     private func toggleStickyCtrl() {
         guard let coordinator = typingCoordinator else { return }
         if ctrlArmed {
             coordinator.pendingCtrl = false
             ctrlArmed = false
         } else {
-            activateTerminalKeyboard()
+            // Ctrl is a remote operation, but does not require moving the
+            // keyboard away from a parked draft. Consume just the next key.
+            if !terminalKeyboardActive { activateDraftKeyboard() }
+            composerEditor.resumeRemoteEditing()
             Haptics.tap()
             coordinator.pendingCtrl = true
             coordinator.onPendingCtrlConsumed = { ctrlArmed = false }
@@ -2087,6 +2105,7 @@ struct TerminalScreen: View {
     /// `SessionHub.ActiveSession.applicationCursorKeys`).
     private func sendArrow(_ direction: String) {
         disarmStickyCtrlIfNeeded()
+        composerEditor.resumeRemoteEditing()
         // Over herdr these bytes are intercepted in sendInput and rerouted as
         // SEMANTIC keys (`pane send-keys`) — the local DECCKM below is stale
         // there (frames never carry mode changes), and sendInput is the one
@@ -2134,14 +2153,28 @@ struct TerminalScreen: View {
                     get: { composerFocused && !anySheetOpen && focusBeforeSheet == nil },
                     set: { composerFocused = $0 }),
                     onFocus: {
+                        directInput = false
                         dictationReviewOwnsKeyboard = false
                         typingCoordinator?.hostContainer?.requestFocus(.allow)
-                        disarmStickyCtrlIfNeeded()
                         keyboardIntent = .up
                     }, onKeyboardDismiss: {
                         composerFocused = false
                         keyboardIntent = .down
-                    }, onSubmit: { submitCurrentInput(fromDraft: true) }, editor: composerEditor)
+                    }, onSubmit: { submitCurrentInput(fromDraft: true) }, editor: composerEditor,
+                    onEmptyDelete: {
+                        guard launchIsConnected, !composerIsSending, composerText.isEmpty else { return }
+                        disarmStickyCtrlIfNeeded()
+                        typingCoordinator?.terminalView?.deleteBackward()
+                    }, onEmptyArrow: { direction in
+                        guard launchIsConnected, !composerIsSending, composerText.isEmpty else { return }
+                        sendArrow(direction)
+                    },
+                    onControlKey: sendRemoteControl, consumeControlText: { text in
+                        guard ctrlArmed, launchIsConnected, text.utf8.count == 1,
+                              let byte = text.utf8.first, (0x40...0x7e).contains(byte) else { return false }
+                        sendRemoteControl(byte & 0x1f)
+                        return true
+                    })
                     .frame(maxWidth: .infinity)
                     .accessibilityIdentifier("terminal-composer")
                 conversationIcon("paperplane.fill", label: String(localized: "Send + Return"), identifier: "conversation-send") { submitComposer() }
@@ -2200,6 +2233,7 @@ struct TerminalScreen: View {
             if composerIsSending { ProgressView().controlSize(.mini) }
             Text(composerIsSending ? String(localized: "Sending…")
                  : terminalKeyboardActive ? String(localized: "Return: submit terminal input")
+                 : composerText.isEmpty ? String(localized: "Empty draft: keys control the terminal")
                  : String(localized: "Return: send · Shift+Return: new line"))
                 .font(.system(size: 10))
                 .foregroundStyle(TerminalChrome.foreground.opacity(0.7))
@@ -2211,6 +2245,7 @@ struct TerminalScreen: View {
                 // editing to the draft, just like the named mode switch.
                 typingCoordinator?.hostContainer?.requestFocus(.allow)
                 dictationReviewOwnsKeyboard = false
+                directInput = false
                 disarmStickyCtrlIfNeeded()
                 composerEditor.insertNewline()
                 keyboardIntent = .up
@@ -2234,7 +2269,17 @@ struct TerminalScreen: View {
         guard launchIsConnected, !composerIsSending, imageAttachment == nil, !fileUploads.isRunning else { return }
         disarmStickyCtrlIfNeeded()
         if !composerText.isEmpty, fromDraft || !terminalKeyboardActive { submitComposer() }
-        else { active?.sendInput(Data([0x0D])) }
+        else {
+            composerEditor.resumeRemoteEditing()
+            active?.sendInput(Data([0x0D]))
+        }
+    }
+
+    private func sendRemoteControl(_ byte: UInt8) {
+        guard launchIsConnected else { return }
+        disarmStickyCtrlIfNeeded()
+        composerEditor.resumeRemoteEditing()
+        active?.sendInput(Data([byte]))
     }
 
     private func submitComposer() {
@@ -2513,8 +2558,7 @@ struct TerminalScreen: View {
         disarmStickyCtrlIfNeeded()
         composerText += ImageAttachmentPipeline.insertText(
             forRemotePaths: [entry.remotePath], style: activePaneInsertStyle)
-        composerFocused = true
-        keyboardIntent = .up
+        activateDraftKeyboard()
         Haptics.tap()
     }
 
@@ -2540,8 +2584,7 @@ struct TerminalScreen: View {
               let text = controller.insertText(style: activePaneInsertStyle) else { return }
         composerText += text
         imageAttachment = nil
-        composerFocused = true
-        keyboardIntent = .up
+        activateDraftKeyboard()
         Haptics.success()
         if submit { submitComposer() }
     }
@@ -2653,9 +2696,7 @@ struct TerminalScreen: View {
             // text is the user's choice, including any edits made in the panel.
             if text != nil || dictation.phase == .idle {
                 composerText = DictationTranscript.join(composerText, reviewedText)
-                dictationReviewOwnsKeyboard = false
-                composerFocused = true
-                keyboardIntent = .up
+                activateDraftKeyboard()
                 Haptics.success()
             }
             self.dictation = nil
@@ -2667,6 +2708,7 @@ struct TerminalScreen: View {
         // Both the panel Cancel and the mic toggle return to the local draft.
         // Cancel queued terminal focus before removing the review panel.
         typingCoordinator?.hostContainer?.requestFocus(.allow)
+        directInput = false
         if keyboardIntent == .up { composerFocused = true }
         cancelDictation()
     }
@@ -2694,6 +2736,7 @@ struct TmuxPaneSplitView: View {
     /// How the pane should treat first responder — `.resign` while a
     /// navigation sheet is up, so it can't grab the keyboard back over it.
     var focusPolicy: TerminalFocusPolicy = .take
+    var onKeyboardRequest: (() -> Void)?
     /// Hold the shown pane at its current size across a modal — see
     /// ``TerminalHostContainer/geometryHeld``.
     var geometryHeld: Bool = false
@@ -2711,6 +2754,7 @@ struct TmuxPaneSplitView: View {
                 PaneTerminalHost(terminal: controller.terminalView(for: paneId),
                                  coordinator: controller.coordinator(for: paneId),
                                  focusPolicy: focusPolicy,
+                                 onKeyboardRequest: onKeyboardRequest,
                                  geometryHeld: geometryHeld)
                     // Keyed on the CONTROLLER's identity too, not just paneId:
                     // a reconnect mints a brand-new TmuxSessionController (and
@@ -2774,6 +2818,7 @@ struct PaneTerminalHost: UIViewRepresentable {
     /// frame-lock covers tmux panes too. nil-safe for previews/tests.
     var coordinator: SwiftTerminalView.Coordinator?
     var focusPolicy: TerminalFocusPolicy = .take
+    var onKeyboardRequest: (() -> Void)?
     /// Hold this pane at the size it has — see
     /// ``TerminalHostContainer/geometryHeld``.
     var geometryHeld: Bool = false
@@ -2795,6 +2840,7 @@ struct PaneTerminalHost: UIViewRepresentable {
         let container = TerminalHostContainer()
         container.host(terminal)
         coordinator?.hostContainer = container
+        container.onKeyboardRequest = onKeyboardRequest
         container.geometryHeld = geometryHeld
         container.requestFocus(focusPolicy)
         return container
@@ -2802,6 +2848,7 @@ struct PaneTerminalHost: UIViewRepresentable {
 
     func updateUIView(_ uiView: TerminalHostContainer, context: Context) {
         guard let terminal = uiView.terminalView else { return }
+        uiView.onKeyboardRequest = onKeyboardRequest
         if uiView.geometryHeld != geometryHeld { uiView.geometryHeld = geometryHeld }
         uiView.requestFocus(focusPolicy)
     }

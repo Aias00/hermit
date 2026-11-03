@@ -55727,6 +55727,28 @@
           }
         }
       }
+    },
+    "Empty draft: keys control the terminal": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empty draft: arrows / Return control the terminal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "草稿为空：方向键／回车操作远端"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "草稿為空：方向鍵／Return 操作遠端"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

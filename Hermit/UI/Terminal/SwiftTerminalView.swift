@@ -71,6 +71,7 @@ final class TerminalHostContainer: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        accessibilityIdentifier = "terminal-input-surface"
         NotificationCenter.default.addObserver(self, selector: #selector(applyRendererPreference),
             name: Self.rendererPreferenceChanged, object: nil)
     }
@@ -86,6 +87,9 @@ final class TerminalHostContainer: UIView {
     }
 
     var onDetached: (() -> Void)?
+    /// The screen can keep ordinary typing in its bottom editor. Advanced
+    /// terminal hosts without an editor retain the native responder path.
+    var onKeyboardRequest: (() -> Void)?
 
     @objc private func applyRendererPreference() {
         // Metal needs an attached surface. Reused panes pick up the preference
@@ -386,6 +390,7 @@ struct SwiftTerminalView: UIViewRepresentable {
 
     /// What to do about the keyboard. See ``TerminalFocusPolicy``.
     var focusPolicy: TerminalFocusPolicy = .take
+    var onKeyboardRequest: (() -> Void)?
 
     /// Hold the terminal at the size it has right now — see
     /// ``TerminalHostContainer/geometryHeld``. True while a navigation sheet
@@ -412,6 +417,7 @@ struct SwiftTerminalView: UIViewRepresentable {
             existing.terminalDelegate = coordinator
             coordinator.attach(to: existing)   // gesture attach is idempotent
             coordinator.hostContainer = container
+            container.onKeyboardRequest = onKeyboardRequest
             container.geometryHeld = geometryHeld
             applyStyle(to: existing)
             container.requestFocus(focusPolicy)
@@ -461,6 +467,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         container.remoteGrid = coordinator.remoteGrid
         container.host(terminalView)
         coordinator.hostContainer = container
+        container.onKeyboardRequest = onKeyboardRequest
         container.geometryHeld = geometryHeld
         container.requestFocus(focusPolicy)
         return container
@@ -470,6 +477,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         // === COSMETIC ONLY ===
         // No feed(), no buffer clear, no delegate swap. See type doc.
         guard let terminal = uiView.terminalView else { return }
+        uiView.onKeyboardRequest = onKeyboardRequest
         if uiView.geometryHeld != geometryHeld { uiView.geometryHeld = geometryHeld }
 
         let targetSize = CGFloat(fontSize)
