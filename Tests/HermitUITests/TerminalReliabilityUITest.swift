@@ -753,6 +753,53 @@ final class TerminalReliabilityUITest: XCTestCase {
     }
 
     @MainActor
+    func testControlDoesNotSurviveKeyboardHidingOrFilePickerAndEscapeResumesRemoteEditing() async throws {
+        let receipt = try inputReceiptURL()
+        let app = try openTerminal(multiplexer: "none", explicitNavigation: true)
+        let field = composer(app)
+        let ctrl = app.buttons["conversation-ctrl"]
+        let keyboard = app.buttons["conversation-keyboard-toggle"]
+        field.tap()
+        app.typeText("local")
+        XCTAssertEqual(field.value as? String, "local")
+        try await resetInputReceipt(receipt)
+        waitForKeyboardToolbar(ctrl, in: app, keyboardVisible: true)
+        ctrl.tap()
+        if !ctrl.isSelected { captureScreenshot(app, name: "control-arm-before-keyboard-hide") }
+        XCTAssertTrue(ctrl.isSelected)
+        keyboard.tap()
+        XCTAssertFalse(ctrl.isSelected)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        keyboard.tap()
+        app.typeText("c")
+        XCTAssertEqual(field.value as? String, "localc")
+
+        waitForKeyboardToolbar(ctrl, in: app, keyboardVisible: true)
+        ctrl.tap()
+        XCTAssertTrue(ctrl.isSelected)
+        app.buttons["conversation-attachments"].tap()
+        app.buttons["本地文件（单个最多 20 MB）"].tap()
+        let cancel = app.buttons.matching(NSPredicate(format: "label IN %@", ["取消", "Cancel"])).firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10))
+        cancel.tap()
+        XCTAssertFalse(ctrl.isSelected)
+        app.typeText("d")
+        XCTAssertEqual(field.value as? String, "localcd")
+        XCTAssertFalse(app.buttons["conversation-direct-input"].isSelected)
+        let staged = try await receivedInput(receipt)
+        XCTAssertTrue(staged.isEmpty, "neither hiding nor the picker may turn an ordinary letter into a remote command")
+
+        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8))
+        XCTAssertEqual(field.value as? String, "")
+        let cleared = try await receivedInput(receipt)
+        XCTAssertTrue(cleared.isEmpty)
+        app.buttons["Esc"].tap()
+        app.typeText(XCUIKeyboardKey.delete.rawValue + "\n")
+        try await assertInputBytes([27, 127, 13], receipt: receipt)
+        captureScreenshot(app, name: "control-lifecycle-and-escape")
+    }
+
+    @MainActor
     func testBottomKeyboardControlsRemoteWithoutFocusSwitch() async throws {
         let receipt = try inputReceiptURL()
         let app = try openTerminal(multiplexer: "none", explicitNavigation: true)

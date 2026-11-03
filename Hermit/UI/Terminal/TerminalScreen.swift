@@ -129,7 +129,8 @@ struct TerminalScreen: View {
     /// later, unrelated manual navigation to this same connection.
     @State private var pendingPaneSelection: String?
     /// Sticky-Ctrl armed: the next typed key goes out as its control code.
-    @State private var ctrlArmed = false
+    @State private var controlModifier = TerminalControlModifier()
+    private var ctrlArmed: Bool { controlModifier.isArmed }
     /// URL found in text the user just copied in-terminal — drives the
     /// transient "Open link" chip (plain-text URLs aren't tappable; select +
     /// copy is the natural gesture, so meet the user right after it).
@@ -428,6 +429,7 @@ struct TerminalScreen: View {
     /// size. Nobody sees the intermediate size either way; the sheet is over
     /// the whole screen.
     private func presentSheet(_ open: @escaping () -> Void) {
+        disarmStickyCtrlIfNeeded()
         if focusBeforeSheet == nil {
             focusBeforeSheet = (composerFocused, keyboardIntent)
         }
@@ -640,6 +642,7 @@ struct TerminalScreen: View {
         // Code streams output starved the scrollback swipe of touch events
         // (the reported "can't scroll history" jank).
         .onChange(of: scenePhase) { _, phase in
+            if phase != .active { disarmStickyCtrlIfNeeded() }
             if phase == .background, let dictation,
                (dictation.currentRequest?.engine ?? settings.voiceEngine) == .doubao,
                dictation.isListening || dictationStartTask != nil || dictationFinishTask != nil {
@@ -669,8 +672,11 @@ struct TerminalScreen: View {
             }
         }
         .onChange(of: anySheetOpen) { _, open in
-            if !open { restoreFocusAfterSheet() }
+            if open { disarmStickyCtrlIfNeeded() }
+            else { restoreFocusAfterSheet() }
         }
+        .onChange(of: tmuxSnapshot?.activePaneId) { _, _ in disarmStickyCtrlIfNeeded() }
+        .onChange(of: typingCoordinator.map { ObjectIdentifier($0) }) { _, _ in disarmStickyCtrlIfNeeded() }
         .onChange(of: terminalLocationID) { previous, current in
             guard previous != nil, let current else { return }
             highlightedTerminalLocation = current
@@ -709,6 +715,7 @@ struct TerminalScreen: View {
             await connectAndAttach()
         }
         .onDisappear {
+            disarmStickyCtrlIfNeeded()
             cancelDictation()
             accessLoginTask?.cancel()
             accessLoginTask = nil
@@ -744,6 +751,7 @@ struct TerminalScreen: View {
             // the replacement has painted, so first responder has somewhere
             // to go and the keyboard never moves.
             if state != .live {
+                disarmStickyCtrlIfNeeded()
                 lastCoverState = state
                 coverArmed = true
             }
@@ -1625,6 +1633,7 @@ struct TerminalScreen: View {
         }
         .animation(.easeInOut(duration: 0.3), value: transitionKey)
         .onChange(of: activeIdentity) { _, _ in
+            disarmStickyCtrlIfNeeded()
             wasEverLive = false
             // The session resolving while still connecting is the first
             // connect's normal path (`connState` reads `.connecting` both
@@ -1881,8 +1890,8 @@ struct TerminalScreen: View {
     }
 
     private func toggleInputDestination() {
+        disarmStickyCtrlIfNeeded()
         if terminalKeyboardActive {
-            disarmStickyCtrlIfNeeded()
             activateDraftKeyboard()
         } else {
             activateTerminalKeyboard()
@@ -1891,6 +1900,7 @@ struct TerminalScreen: View {
 
     private func toggleKeyboard() {
         if keyboardIntent == .up || composerFocused {
+            disarmStickyCtrlIfNeeded()
             keyboardIntent = .down
             composerFocused = false
             typingCoordinator?.terminalView?.resignFirstResponder()
@@ -1912,32 +1922,21 @@ struct TerminalScreen: View {
     private func toggleStickyCtrl() {
         guard let coordinator = typingCoordinator else { return }
         if ctrlArmed {
-            coordinator.pendingCtrl = false
-            ctrlArmed = false
+            controlModifier.cancel()
         } else {
             // Ctrl is a remote operation, but does not require moving the
             // keyboard away from a parked draft. Consume just the next key.
             if !terminalKeyboardActive { activateDraftKeyboard() }
             composerEditor.resumeRemoteEditing()
             Haptics.tap()
-            coordinator.pendingCtrl = true
-            coordinator.onPendingCtrlConsumed = { ctrlArmed = false }
-            ctrlArmed = true
+            controlModifier.arm(on: coordinator)
         }
     }
 
-    /// Sticky-Ctrl only folds into an actual typed key (`Coordinator.send`
-    /// consumes it there) — nothing clears it if the very next thing the user
-    /// does is tap a *different* shortcut-bar control instead of typing.
-    /// Left armed, it silently outlives its own chip: esc/tab/^C/paste/arrow/
-    /// scroll would all go out unaffected, but ctrl stayed "on" for whatever
-    /// ordinary letter came after, folding it into an unintended control byte.
-    /// Any other bar action means "I'm done with ctrl" — disarm it the same
-    /// way an explicit second tap on the chip would.
+    /// An action other than the next typed key ends the one-shot modifier.
+    /// Clear its original coordinator even if the active pane was replaced.
     private func disarmStickyCtrlIfNeeded() {
-        guard ctrlArmed, let coordinator = typingCoordinator else { return }
-        coordinator.pendingCtrl = false
-        ctrlArmed = false
+        controlModifier.cancel()
     }
 
     /// Copying inside the terminal is how users grab dev-server/OAuth links
@@ -2158,6 +2157,7 @@ struct TerminalScreen: View {
                         typingCoordinator?.hostContainer?.requestFocus(.allow)
                         keyboardIntent = .up
                     }, onKeyboardDismiss: {
+                        disarmStickyCtrlIfNeeded()
                         composerFocused = false
                         keyboardIntent = .down
                     }, onSubmit: { submitCurrentInput(fromDraft: true) }, editor: composerEditor,
@@ -2170,11 +2170,11 @@ struct TerminalScreen: View {
                         sendArrow(direction)
                     },
                     onControlKey: sendRemoteControl, consumeControlText: { text in
-                        guard ctrlArmed, launchIsConnected, text.utf8.count == 1,
+                        guard controlModifier.applies(to: typingCoordinator), launchIsConnected, text.utf8.count == 1,
                               let byte = text.utf8.first, (0x40...0x7e).contains(byte) else { return false }
                         sendRemoteControl(byte & 0x1f)
                         return true
-                    })
+                    }, onLiteralInput: disarmStickyCtrlIfNeeded)
                     .frame(maxWidth: .infinity)
                     .accessibilityIdentifier("terminal-composer")
                 conversationIcon("paperplane.fill", label: String(localized: "Send + Return"), identifier: "conversation-send") { submitComposer() }
@@ -2349,11 +2349,11 @@ struct TerminalScreen: View {
                 .accessibilityLabel(ctrlArmed ? "取消 Ctrl 修饰键" : "启用一次 Ctrl 修饰键")
                 .accessibilityAddTraits(ctrlArmed ? [.isSelected] : [])
                 .disabled(!launchIsConnected)
-            Button("Esc") {
+            Button("Esc") { sendRemoteControl(0x1B) }.disabled(!launchIsConnected)
+            Button {
                 disarmStickyCtrlIfNeeded()
-                active?.sendInput(Data([0x1B]))
-            }.disabled(!launchIsConnected)
-            Button { showsExtraKeys.toggle() } label: { Image(systemName: "square.grid.2x2") }
+                showsExtraKeys.toggle()
+            } label: { Image(systemName: "square.grid.2x2") }
                 .accessibilityLabel("更多快捷键")
                 .accessibilityIdentifier("conversation-more-keys")
                 .foregroundStyle(showsExtraKeys ? Color.cyan : Color(red: 0.72, green: 0.80, blue: 0.88))

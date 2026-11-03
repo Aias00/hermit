@@ -2,6 +2,43 @@ import SwiftUI
 import SwiftTerm
 import UIKit
 import MoshpitKit
+import Observation
+
+/// A one-shot modifier belongs to the coordinator on which it was armed.
+/// Cancelling after a pane switch must clear the old owner, not the new pane.
+@MainActor @Observable
+final class TerminalControlModifier {
+    private(set) var isArmed = false
+    @ObservationIgnored private weak var owner: SwiftTerminalView.Coordinator?
+
+    func arm(on coordinator: SwiftTerminalView.Coordinator) {
+        cancel()
+        owner = coordinator
+        isArmed = true
+        coordinator.pendingCtrl = true
+        coordinator.onPendingCtrlConsumed = { [weak self, weak coordinator] in
+            guard let self, let coordinator, self.owner === coordinator else { return }
+            self.cancel()
+        }
+    }
+
+    func applies(to coordinator: SwiftTerminalView.Coordinator?) -> Bool {
+        guard isArmed else { return false }
+        guard let coordinator, owner === coordinator else {
+            cancel()
+            return false
+        }
+        return true
+    }
+
+    func cancel() {
+        guard isArmed else { return }
+        owner?.pendingCtrl = false
+        owner?.onPendingCtrlConsumed = nil
+        owner = nil
+        isArmed = false
+    }
+}
 
 /// Weak editor handle for explicit newline and remote editing actions.
 @MainActor
@@ -23,12 +60,14 @@ struct TerminalComposerView: UIViewRepresentable {
     var onEmptyArrow: ((String) -> Void)?
     var onControlKey: ((UInt8) -> Void)?
     var consumeControlText: ((String) -> Bool)?
+    var onLiteralInput: (() -> Void)?
 
     init(text: Binding<String>, isFocused: Binding<Bool>, onFocus: @escaping () -> Void,
          onKeyboardDismiss: @escaping () -> Void = {},
          onSubmit: (() -> Void)? = nil, editor: TerminalComposerEditor? = nil,
          onEmptyDelete: (() -> Void)? = nil, onEmptyArrow: ((String) -> Void)? = nil,
-         onControlKey: ((UInt8) -> Void)? = nil, consumeControlText: ((String) -> Bool)? = nil) {
+         onControlKey: ((UInt8) -> Void)? = nil, consumeControlText: ((String) -> Bool)? = nil,
+         onLiteralInput: (() -> Void)? = nil) {
         self._text = text
         self._isFocused = isFocused
         self.onFocus = onFocus
@@ -39,6 +78,7 @@ struct TerminalComposerView: UIViewRepresentable {
         self.onEmptyArrow = onEmptyArrow
         self.onControlKey = onControlKey
         self.consumeControlText = consumeControlText
+        self.onLiteralInput = onLiteralInput
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -107,6 +147,7 @@ struct TerminalComposerView: UIViewRepresentable {
             view.onEmptyArrow = parent.onEmptyArrow == nil ? nil : { [weak self] in self?.parent.onEmptyArrow?($0) }
             view.onControlKey = parent.onControlKey == nil ? nil : { [weak self] in self?.parent.onControlKey?($0) }
             view.consumeControlText = { [weak self] in self?.parent.consumeControlText?($0) ?? false }
+            view.onLiteralInput = { [weak self] in self?.parent.onLiteralInput?() }
         }
 
         func updateFocus(_ view: ComposerTextView) {
@@ -218,6 +259,7 @@ final class ComposerTextView: UITextView {
     var onEmptyArrow: ((String) -> Void)?
     var onControlKey: ((UInt8) -> Void)?
     var consumeControlText: ((String) -> Bool)?
+    var onLiteralInput: (() -> Void)?
     private var insertingDictation = false
     private var deletedLocalText = false
 
@@ -313,6 +355,7 @@ final class ComposerTextView: UITextView {
     @objc private func shiftReturn(_ command: UIKeyCommand) { insertDraftLineBreak() }
 
     func insertDraftLineBreak() {
+        onLiteralInput?()
         if markedTextRange != nil { unmarkText() }
         super.insertText("\n")
     }
@@ -343,6 +386,7 @@ final class ComposerTextView: UITextView {
     }
 
     override func paste(_ sender: Any?) {
+        onLiteralInput?()
         // A deliberate paste is text even when the clipboard is exactly one
         // newline. Bypass the keyboard Return shortcut and keep all paragraphs.
         if let text = UIPasteboard.general.string { super.insertText(text) }
@@ -350,9 +394,17 @@ final class ComposerTextView: UITextView {
     }
 
     override func insertDictationResult(_ dictationResult: [UIDictationPhrase]) {
+        insertDictatedText(dictationResult.map(\.text).joined())
+    }
+
+    /// UITextView does not implement the optional insertDictationResult
+    /// superclass method on every OS. Insert its most likely phrases as text.
+    func insertDictatedText(_ text: String) {
+        onLiteralInput?()
+        guard !text.isEmpty else { return }
         insertingDictation = true
         defer { insertingDictation = false }
-        super.insertDictationResult(dictationResult)
+        super.insertText(text)
     }
 
     /// External additions (voice and attachments) follow a caret at the end.

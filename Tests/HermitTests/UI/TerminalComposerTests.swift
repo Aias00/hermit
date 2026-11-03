@@ -7,6 +7,118 @@ import UIKit
 @MainActor
 @Suite("Terminal composer multiline drafts", .serialized)
 struct TerminalComposerTests {
+    @Test("Cancelling after a pane switch clears the coordinator that armed Ctrl")
+    func controlDoesNotCrossCoordinators() {
+        let first = SwiftTerminalView.Coordinator()
+        let second = SwiftTerminalView.Coordinator()
+        let modifier = TerminalControlModifier()
+        modifier.arm(on: first)
+        #expect(first.pendingCtrl)
+        #expect(!modifier.applies(to: second))
+        #expect(!modifier.isArmed)
+        #expect(!first.pendingCtrl)
+        #expect(!second.pendingCtrl)
+    }
+
+    @Test("A stale consumption callback cannot cancel a newer Ctrl owner")
+    func staleControlCallbackCannotCancelNewOwner() {
+        let first = SwiftTerminalView.Coordinator()
+        let second = SwiftTerminalView.Coordinator()
+        let modifier = TerminalControlModifier()
+        modifier.arm(on: first)
+        let stale = first.onPendingCtrlConsumed
+        modifier.arm(on: second)
+        stale?()
+        #expect(modifier.isArmed)
+        #expect(!first.pendingCtrl)
+        #expect(second.pendingCtrl)
+        modifier.cancel()
+        #expect(!second.pendingCtrl)
+    }
+
+    @Test("Direct terminal Ctrl is consumed once on the terminal input path")
+    func directControlIsConsumedOnce() {
+        let coordinator = SwiftTerminalView.Coordinator()
+        let modifier = TerminalControlModifier()
+        let terminal = TerminalView(frame: CGRect(x: 0, y: 0, width: 300, height: 100),
+                                    font: .monospacedSystemFont(ofSize: 14, weight: .regular))
+        var received: [UInt8] = []
+        coordinator.onInput = { received.append(contentsOf: $0) }
+        modifier.arm(on: coordinator)
+        coordinator.send(source: terminal, data: [UInt8(ascii: "c")][...])
+        coordinator.send(source: terminal, data: [UInt8(ascii: "c")][...])
+        #expect(received == [3, 99])
+        #expect(!modifier.isArmed)
+        #expect(!coordinator.pendingCtrl)
+    }
+
+    @Test("Pasting cancels Ctrl before the next ordinary letter is typed")
+    func literalPasteCancelsControl() {
+        var draft = ""
+        var controls = 0
+        let owner = SwiftTerminalView.Coordinator()
+        let modifier = TerminalControlModifier()
+        let editor = TerminalComposerView(text: Binding(get: { draft }, set: { draft = $0 }),
+            isFocused: .constant(false), onFocus: {}, consumeControlText: { text in
+                guard modifier.applies(to: owner), text == "c" else { return false }
+                modifier.cancel()
+                controls += 1
+                return true
+            }, onLiteralInput: modifier.cancel)
+        let delegate = editor.makeCoordinator()
+        let view = ComposerTextView()
+        view.delegate = delegate
+        delegate.configureReturn(view)
+        view.insertText("kept ")
+        modifier.arm(on: owner)
+        UIPasteboard.general.string = "c"
+        defer { UIPasteboard.general.items = [] }
+        view.paste(nil)
+        view.insertText("c")
+        #expect(draft == "kept cc")
+        #expect(controls == 0)
+        #expect(!modifier.isArmed)
+        #expect(!owner.pendingCtrl)
+    }
+
+    @Test("Explicit newline and system dictation end the one-shot modifier")
+    func newlineAndDictationCancelControl() {
+        let owner = SwiftTerminalView.Coordinator()
+        let modifier = TerminalControlModifier()
+        let view = ComposerTextView()
+        view.onLiteralInput = modifier.cancel
+        modifier.arm(on: owner)
+        view.insertDraftLineBreak()
+        #expect(view.text == "\n")
+        #expect(!modifier.isArmed)
+        #expect(!owner.pendingCtrl)
+        modifier.arm(on: owner)
+        view.insertDictationResult([])
+        #expect(!modifier.isArmed)
+        #expect(!owner.pendingCtrl)
+    }
+
+    @Test("System dictation inserts complete paragraphs at the caret without submitting")
+    func systemDictationStagesLiteralParagraphs() {
+        var draft = ""
+        var sends = 0
+        let editor = TerminalComposerView(text: Binding(get: { draft }, set: { draft = $0 }),
+            isFocused: .constant(false), onFocus: {}, onSubmit: { sends += 1 })
+        let delegate = editor.makeCoordinator()
+        let view = ComposerTextView()
+        view.delegate = delegate
+        delegate.configureReturn(view)
+        view.insertText("prefix suffix")
+        view.selectedRange = NSRange(location: 7, length: 0)
+        view.insertDictatedText("中文 😀\nsecond paragraph\n")
+        #expect(draft == "prefix 中文 😀\nsecond paragraph\nsuffix")
+        view.insertDictatedText("\n")
+        #expect(draft == "prefix 中文 😀\nsecond paragraph\n\nsuffix")
+        #expect(sends == 0)
+        view.insertText("\n")
+        #expect(sends == 1)
+    }
+
     @Test("An empty draft lends Delete and arrows to the remote without acquiring terminal focus")
     func emptyDraftRemoteEditing() throws {
         let view = ComposerTextView()
