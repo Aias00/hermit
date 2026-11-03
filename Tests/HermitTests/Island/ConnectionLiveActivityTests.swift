@@ -181,7 +181,7 @@ struct ConnectionLiveActivityTests {
             #expect(settings.liveActivityShowHostNames)
             settings.liveActivityShowHostNames = false
             #expect(!settings.liveActivityShowHostNames)
-            #expect(!AppSettings.agentNotificationsAvailable)
+            #expect(AppSettings.agentNotificationsAvailable)
         }
     }
 
@@ -241,12 +241,13 @@ struct ConnectionLiveActivityTests {
     @Test("running activities from the previous version remain decodable")
     func legacyPayload() throws {
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(content())) as? [String: Any])
-        for key in ["isBackground", "transportName", "workspaceName", "programName", "taskState", "observedAt"] {
+        for key in ["isBackground", "transportName", "workspaceName", "programName", "taskState", "observedAt", "tasks", "totalTaskCount"] {
             json.removeValue(forKey: key)
         }
         let decoded = try JSONDecoder().decode(ConnectionActivityAttributes.ContentState.self,
             from: JSONSerialization.data(withJSONObject: json))
         #expect(decoded.connectionState == .connected && decoded.programName == nil)
+        #expect(decoded.tasks == nil && decoded.totalTaskCount == nil)
     }
 
     @Test("ordinary SSH retains useful context without inventing task progress")
@@ -273,4 +274,84 @@ struct ConnectionLiveActivityTests {
             #expect(value.updatedAt == now && value.taskState == .working)
         }
     }
+    @Test("task rows are bounded, urgency ordered, privacy filtered and pane linked")
+    func taskRows() throws {
+        let id = UUID()
+        let contexts = (0..<13).map { index in
+            ConnectionActivityContext(workspaceName: "private-workspace-\(index)", programName: "Codex",
+                taskState: index == 12 ? "attention" : "working", paneID: "w1:p\(index)",
+                taskDetail: "private-task-\(index)")
+        }
+        let entry = ConnectionActivityEntry(id: id, name: "private-host", state: .connected,
+            working: 12, attention: 1, observedAt: now.addingTimeInterval(-100), tasks: contexts)
+        let offline = ConnectionActivityEntry(id: UUID(), name: "offline", state: .offline, tasks: contexts)
+        let privateState = try #require(ConnectionActivitySnapshot.make(entries: [entry, offline], preferredID: id,
+            foreground: false, showHostNames: false, now: now, showTaskDetails: false))
+        let rows = try #require(privateState.tasks)
+        #expect(rows.count == 3 && privateState.totalTaskCount == 13)
+        #expect(rows.first?.state == .attention)
+        #expect(rows.first?.id == "\(id.uuidString):w1:p12")
+        #expect(privateState.statusDate == now.addingTimeInterval(-100))
+        let rowLink = try #require(rows.first?.deepLink)
+        let target = try #require(AgentDeepLink.parse(rowLink))
+        #expect(target.connectionId == id && target.paneId == "w1:p12")
+        let encoded = String(decoding: try JSONEncoder().encode(privateState), as: UTF8.self)
+        #expect(!encoded.contains("private-"))
+        let shared = try #require(ConnectionActivitySnapshot.make(entries: [entry], preferredID: id,
+            foreground: true, showHostNames: true, now: now, showTaskDetails: true))
+        #expect(shared.tasks?.first?.workspaceName == "private-workspace-12")
+        #expect(shared.tasks?.first?.detail == "private-task-12")
+    }
+
+    @Test("three Unicode rows and long aliases remain below ActivityKit's payload budget")
+    func unicodeTaskPayload() throws {
+        let id = UUID()
+        let task = ConnectionActivityContext(workspaceName: String(repeating: "🔐工作区", count: 300),
+            programName: "Claude Code", taskState: "working", paneID: "w1:p1",
+            taskDetail: String(repeating: "👨‍👩‍👧‍👦中文任务\n", count: 300))
+        let entries = (0..<5).map { _ in ConnectionActivityEntry(id: UUID(),
+            name: String(repeating: "服务器", count: 200), state: .connected, tasks: [task]) }
+        let state = try #require(ConnectionActivitySnapshot.make(entries: entries, preferredID: id,
+            foreground: true, showHostNames: true, now: now, showTaskDetails: true))
+        #expect(state.tasks?.count == 3 && state.totalTaskCount == 5)
+        #expect(try JSONEncoder().encode(state).count < 4096)
+        #expect(state.tasks?.allSatisfy { ($0.detail?.utf8.count ?? 0) <= 180 } == true)
+    }
+
+    @Test("reference task list fits the card at phone and mini widths and larger type",
+          arguments: [320.0, 360.0, 600.0])
+    func referenceLayout(width: Double) throws {
+        var state = content()
+        state.headlineName = "Mac mini"
+        state.isBackground = true
+        state.totalTaskCount = 13
+        state.tasks = [
+            .init(id: "1", workspaceName: "stream-agent", programName: "Codex",
+                  detail: "分析当前工程架构", state: .done, deepLink: state.deepLink),
+            .init(id: "2", workspaceName: "toy", programName: "Claude Code",
+                  detail: "设计基于 ESP32 开源方案的软硬件交互玩具", state: .working, deepLink: state.deepLink),
+            .init(id: "3", workspaceName: "idea", programName: "Codex",
+                  detail: "检查当前 SSH 客户端", state: .working, deepLink: state.deepLink)
+        ]
+        for size in [DynamicTypeSize.large, .xxxLarge, .accessibility1, .accessibility5] {
+            for stale in [false, true] {
+                let renderer = ImageRenderer(content: ConnectionActivityLockScreen(state: state, isStale: stale)
+                    .environment(\.dynamicTypeSize, size)
+                    .environment(\.locale, Locale(identifier: "zh-Hans"))
+                    .environment(\.colorScheme, .dark).background(Color(white: 0.12)))
+                renderer.proposedSize = .init(width: width, height: nil)
+                let image = try #require(renderer.uiImage)
+                #expect(image.size.height > 50 && image.size.height <= 160,
+                        "\(width) / \(size) / stale=\(stale): \(image.size.height)pt")
+                #expect(image.size.width == CGFloat(width))
+                if let directory = ProcessInfo.processInfo.environment["MOSHPIT_ACTIVITY_LAYOUT_OUTPUT"] {
+                    let output = URL(fileURLWithPath: directory, isDirectory: true)
+                    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+                    try image.pngData()?.write(to: output.appendingPathComponent(
+                        "reference-\(Int(width))-\(size)-\(stale ? "stale" : "live").png"))
+                }
+            }
+        }
+    }
+
 }

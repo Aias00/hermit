@@ -85,37 +85,112 @@ struct ConnectionLiveActivityWidget: Widget {
 struct ConnectionActivityLockScreen: View {
     let state: ConnectionActivityAttributes.ContentState
     let isStale: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var rows: [ConnectionActivityAttributes.TaskSummary] {
+        // Leave room for larger accessibility text instead of silently clipping
+        // the system's 160pt card. The footer counts every omitted task.
+        Array((state.tasks ?? []).prefix(typeSize > .xxLarge ? 1 : (typeSize > .large ? 2 : 3)))
+    }
+    private var remaining: Int { max(0, (state.totalTaskCount ?? state.tasks?.count ?? 0) - rows.count) }
+    private var historical: Bool { isStale || state.isBackground == true || state.connectionState == .background }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label {
-                    Text(state.headlineName ?? "Hermit").truncationMode(.middle)
-                } icon: {
-                    Image(systemName: "terminal").foregroundStyle(.cyan)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(state.headlineName ?? "Hermit")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 3) {
+                    Text("Updated at")
+                    Text(state.statusDate, format: .dateTime.hour().minute()).monospacedDigit()
                 }
-                .font(.headline).lineLimit(1)
-                Spacer(minLength: 8)
-                Text("\(state.connectionCount) connections")
-                    .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(.white.opacity(0.07), in: Capsule())
-                    .fixedSize()
+                .font(.caption2).foregroundStyle(.secondary).fixedSize()
             }
-            ConnectionActivityDetails(state: state, isStale: isStale)
+            if rows.isEmpty {
+                ConnectionActivityDetails(state: state, isStale: isStale, showTimestamp: false)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(rows) { task in
+                        if let url = URL(string: task.deepLink) {
+                            Link(destination: url) {
+                                ConnectionActivityTaskRow(task: task, isStale: isStale)
+                            }
+                            .accessibilityIdentifier("connection-live-activity-task-\(task.id)")
+                        }
+                    }
+                }
+                HStack(spacing: 8) {
+                    if remaining > 0 {
+                        Text("+\(remaining)").monospacedDigit()
+                            .accessibilityLabel(Text("\(remaining) more tasks"))
+                    }
+                    Spacer(minLength: 0)
+                    if historical { Text("Last known status") }
+                    else if state.connectionCount > 1 { Text("\(state.connectionCount) connections") }
+                }
+                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(.white)
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("connection-live-activity-card")
+    }
+}
+
+private struct ConnectionActivityTaskRow: View {
+    let task: ConnectionActivityAttributes.TaskSummary
+    let isStale: Bool
+
+    private var color: Color {
+        if isStale { return .secondary }
+        switch task.state { case .done: return .green; case .attention, .working: return .orange }
+    }
+    private var subtitle: String {
+        let detail = task.detail ?? task.state.label
+        return [detail, task.programName, task.hostName].compactMap { $0 }.joined(separator: " · ")
+    }
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Group {
+                if task.state == .working {
+                    VStack(spacing: 2) {
+                        ForEach(0..<3) { _ in
+                            HStack(spacing: 2) {
+                                Circle().frame(width: 4, height: 4)
+                                Circle().frame(width: 4, height: 4)
+                            }
+                        }
+                    }
+                } else {
+                    Image(systemName: task.state == .done ? "checkmark" : task.state.symbol)
+                        .font(.system(size: 16, weight: .medium))
+                }
+            }
+            .foregroundStyle(color).frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(verbatim: task.workspaceName ?? task.programName ?? String(localized: "Task"))
+                    .font(.caption.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+                Text(verbatim: subtitle)
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([task.workspaceName, task.programName, task.state.label, task.detail, task.hostName]
+            .compactMap { $0 }.joined(separator: ", "))
     }
 }
 
 private struct ConnectionActivityDetails: View {
     let state: ConnectionActivityAttributes.ContentState
     let isStale: Bool
+    var showTimestamp = true
     private var presentation: ActivityPresentation { .init(state: state, isStale: isStale) }
 
     private var context: String {
@@ -150,14 +225,16 @@ private struct ConnectionActivityDetails: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            HStack(spacing: 8) {
-                Text(presentation.historical ? String(localized: "Last known status") : String(localized: "State as of"))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Text(state.statusDate, format: .dateTime.hour().minute())
-                    .monospacedDigit().fixedSize()
+            if showTimestamp {
+                HStack(spacing: 8) {
+                    Text(presentation.historical ? String(localized: "Last known status") : String(localized: "State as of"))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(state.statusDate, format: .dateTime.hour().minute())
+                        .monospacedDigit().fixedSize()
+                }
+                .font(.caption2).foregroundStyle(.secondary)
             }
-            .font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

@@ -81,19 +81,32 @@ final class HerdrConnectionLiveActivityUITest: XCTestCase {
                                         evaluatedWith: location)
         await fulfillment(of: [workspaceReady], timeout: 15)
         let originalLocation = location.label
-        try await submit("printf 'before:%s\\n' \"$$\" >> \(quote(receipt.path))", in: app)
-        try await waitForReceipt(receipt, containing: "before:")
-        let paneQuery = "import json,sys; print(json.load(sys.stdin)['result']['snapshot']['focused_pane_id'])"
-        let report = "moshpit_activity_pane=\"$(\(quote(herdr)) api snapshot | /usr/bin/python3 -c \(quote(paneQuery)))\"; "
-            + "test -n \"$moshpit_activity_pane\" && "
-            + "printf '%s\\n' \"$moshpit_activity_pane\" > \(quote(agentReceipt.path)) && "
-            + "\(quote(herdr)) pane report-agent \"$moshpit_activity_pane\" "
-            + "--source \(quote(reportSource)) --agent codex --state blocked --seq 1 && "
-            + "printf 'reported\\n' >> \(quote(agentReceipt.path))"
-        try await submit(report, in: app)
-        try await waitForReceipt(agentReceipt, containing: "reported\n")
-        let paneID = try XCTUnwrap(String(contentsOf: agentReceipt, encoding: .utf8)
-            .split(separator: "\n").first.map(String.init))
+        let preparedPane = URL(fileURLWithPath: directory).appendingPathComponent("activity-prepared-pane")
+        let isPrepared = FileManager.default.fileExists(atPath: preparedPane.path)
+        let paneID: String
+        if isPrepared {
+            // A preconfigured native task avoids unrelated keyboard automation
+            // delays on tablet runtimes. The phone path verifies shell identity.
+            paneID = try String(contentsOf: preparedPane, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            XCTAssertFalse(paneID.isEmpty)
+        } else {
+            try await submit("printf 'before:%s\\n' \"$$\" >> \(quote(receipt.path))", in: app)
+            try await waitForReceipt(receipt, containing: "before:")
+            let paneQuery = "import json,sys; print(json.load(sys.stdin)['result']['snapshot']['focused_pane_id'])"
+            let report = "moshpit_activity_pane=\"$(\(quote(herdr)) api snapshot | /usr/bin/python3 -c \(quote(paneQuery)))\"; "
+                + "test -n \"$moshpit_activity_pane\" && "
+                + "printf '%s\\n' \"$moshpit_activity_pane\" > \(quote(agentReceipt.path)) && "
+                + "\(quote(herdr)) pane report-agent \"$moshpit_activity_pane\" "
+                + "--source \(quote(reportSource)) --agent codex --state blocked --seq 1 && "
+                + "\(quote(herdr)) pane report-metadata \"$moshpit_activity_pane\" "
+                + "--source \(quote(reportSource)) --title \(quote("请确认方案并继续")) --seq 2 && "
+                + "printf 'reported\\n' >> \(quote(agentReceipt.path))"
+            try await submit(report, in: app)
+            try await waitForReceipt(agentReceipt, containing: "reported\n")
+            paneID = try XCTUnwrap(String(contentsOf: agentReceipt, encoding: .utf8)
+                .split(separator: "\n").first.map(String.init))
+        }
         hideKeyboard(app)
         // Let Herdr's normal snapshot cadence (up to 8 seconds at idle) and
         // ActivityKit's foreground sampler observe the native blocked report.
@@ -106,19 +119,29 @@ final class HerdrConnectionLiveActivityUITest: XCTestCase {
         allowActivityIfOffered(in: springboard)
         let contentReady = expectation(for: NSPredicate { _, _ in
             let labels = self.labels(in: card)
-            return labels.contains(alias) && labels.contains("ui-lab") && labels.contains("SSH")
+            return labels.contains(alias) && labels.contains("ui-lab")
                 && labels.contains("Codex")
                 // The system widget uses SpringBoard's language, independently
                 // of the foreground app's English test launch arguments.
                 && ["Waiting for you", "等待你的操作"].contains(where: labels.contains)
-                && ["1 needs attention", "1 项待处理", "1 項待處理"].contains(where: labels.contains)
+
         }, evaluatedWith: card)
         await fulfillment(of: [contentReady], timeout: 15)
         let labels = labels(in: card)
+        if FileManager.default.fileExists(atPath: URL(fileURLWithPath: directory)
+            .appendingPathComponent("activity-multiple-ready").path) {
+            XCTAssertTrue(labels.contains("stream-agent") && labels.contains("toy"),
+                          "Task rows must include workspaces outside the selected pane")
+            XCTAssertTrue(["10 more tasks", "另有 10 项任务", "另有 10 項任務"].contains(where: labels.contains),
+                          "13 explicit tasks must leave exactly 10 beyond the three visible rows: \(labels)")
+        }
         XCTAssertFalse(labels.contains("127.0.0.1"), "The connection address must stay off the lock screen")
         XCTAssertFalse(labels.contains(directory), "The fixture's full working path must stay off the lock screen")
         capture(springboard, name: "herdr-live-activity-background-native-attention")
-        card.tap()
+        let waitingTask = card.descendants(matching: .any)
+            .matching(identifier: "connection-live-activity-task-\(id):\(paneID)").firstMatch
+        XCTAssertTrue(waitingTask.exists, "Each task must expose a link to its own pane")
+        waitingTask.tap()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         let title = app.staticTexts["terminal-host-title"]
         XCTAssertTrue(title.waitForExistence(timeout: 15))
@@ -127,18 +150,20 @@ final class HerdrConnectionLiveActivityUITest: XCTestCase {
         let restored = expectation(for: NSPredicate(format: "label == %@", originalLocation),
                                    evaluatedWith: location)
         await fulfillment(of: [restored], timeout: 20)
-        let release = releaseCommand(herdr: herdr, paneID: paneID, source: reportSource)
-            + " && rm -f \(quote(agentReceipt.path))"
-            + " && printf 'returned:%s\\n' \"$$\" >> \(quote(receipt.path))"
-        try await submit(release, in: app)
-        try await waitForReceipt(receipt, containing: "returned:")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: agentReceipt.path),
-                       "The native fixture agent report must be released before continuing")
-        let lines = try String(contentsOf: receipt, encoding: .utf8).split(separator: "\n")
-        XCTAssertEqual(lines.count, 2, "Each submitted command must run exactly once")
-        XCTAssertEqual(lines.first?.split(separator: ":").last,
-                       lines.last?.split(separator: ":").last,
-                       "Tapping the card must return to the same persistent Herdr shell")
+        if !isPrepared {
+            let release = releaseCommand(herdr: herdr, paneID: paneID, source: reportSource)
+                + " && rm -f \(quote(agentReceipt.path))"
+                + " && printf 'returned:%s\\n' \"$$\" >> \(quote(receipt.path))"
+            try await submit(release, in: app)
+            try await waitForReceipt(receipt, containing: "returned:")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: agentReceipt.path),
+                           "The native fixture agent report must be released before continuing")
+            let lines = try String(contentsOf: receipt, encoding: .utf8).split(separator: "\n")
+            XCTAssertEqual(lines.count, 2, "Each submitted command must run exactly once")
+            XCTAssertEqual(lines.first?.split(separator: ":").last,
+                           lines.last?.split(separator: ":").last,
+                           "Tapping the card must return to the same persistent Herdr shell")
+        }
         hideKeyboard(app)
         capture(app, name: "herdr-live-activity-returned-to-same-shell")
 

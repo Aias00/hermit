@@ -3,8 +3,9 @@ import Foundation
 import ActivityKit
 
 /// A bounded snapshot shared by the app and its widget. Host/workspace aliases
-/// follow the visibility setting; programs come from a fixed allowlist. No
-/// terminal output, addresses, usernames, arguments or task titles are included.
+/// follow the visibility setting; programs come from a fixed allowlist. Only
+/// explicit task titles may appear, gated by the lock-screen detail preference.
+/// Terminal output, connection addresses and command arguments are not sampled.
 public struct ConnectionActivityAttributes: ActivityAttributes {
     public enum ConnectionState: String, Codable, Hashable, Sendable {
         case connecting, connected, reconnecting, offline, background
@@ -72,6 +73,9 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
         /// Numeric result of an explicitly finished plain SSH shell command.
         /// Command text, arguments and paths never enter the activity payload.
         public var commandExitCode: Int?
+        /// At most three rows; nil decodes activities created by older builds.
+        public var tasks: [TaskSummary]?
+        public var totalTaskCount: Int?
 
         public var statusDate: Date { observedAt ?? updatedAt }
 
@@ -80,7 +84,8 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
                     deepLink: String, updatedAt: Date, isBackground: Bool? = nil,
                     transportName: String? = nil, workspaceName: String? = nil,
                     programName: String? = nil, taskState: TaskState? = nil,
-                    observedAt: Date? = nil, commandExitCode: Int? = nil) {
+                    observedAt: Date? = nil, commandExitCode: Int? = nil,
+                    tasks: [TaskSummary]? = nil, totalTaskCount: Int? = nil) {
             self.connectionCount = connectionCount
             self.headlineName = headlineName
             self.connectionState = connectionState
@@ -96,6 +101,32 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
             self.taskState = taskState
             self.observedAt = observedAt
             self.commandExitCode = commandExitCode
+            self.tasks = tasks
+            self.totalTaskCount = totalTaskCount
+        }
+    }
+
+    public struct TaskSummary: Codable, Hashable, Sendable, Identifiable {
+        public var id: String
+        public var workspaceName: String?
+        public var hostName: String?
+        public var programName: String?
+        public var detail: String?
+        public var state: TaskState
+        public var deepLink: String
+        public var observedAt: Date?
+
+        public init(id: String, workspaceName: String? = nil, hostName: String? = nil,
+                    programName: String? = nil, detail: String? = nil, state: TaskState,
+                    deepLink: String, observedAt: Date? = nil) {
+            self.id = id
+            self.workspaceName = workspaceName
+            self.hostName = hostName
+            self.programName = programName
+            self.detail = detail
+            self.state = state
+            self.deepLink = deepLink
+            self.observedAt = observedAt
         }
     }
 

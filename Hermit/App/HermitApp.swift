@@ -222,6 +222,9 @@ struct HermitApp: App {
             .onChange(of: settings.liveActivityShowHostNames) { _, _ in
                 connectionActivity.refresh(force: true)
             }
+            .onChange(of: settings.lockScreenDetailEnabled) { _, _ in
+                connectionActivity.refresh(force: true)
+            }
             // The stores loaded in init(), which may have run before the first
             // unlock after a reboot (prewarming, a push, a Live Activity intent
             // — see DefaultsReadiness). Read again the moment the file can be

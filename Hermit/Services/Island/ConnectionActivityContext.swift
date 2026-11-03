@@ -2,14 +2,16 @@ import Foundation
 import MoshpitKit
 
 /// A small, deliberately limited view of the selected remote pane. Task state
-/// comes only from explicit stamps; terminal titles and command arguments are
-/// never copied into the activity. The caller controls workspace-name privacy.
+/// comes only from explicit stamps. The selected pane uses safe program names;
+/// task rows additionally expose a reported title, which the payload builder
+/// filters with the lock-screen detail preference. Terminal output is not read.
 struct ConnectionActivityContext: Equatable, Sendable {
     var workspaceName: String?
     var windowIndex: Int?
     var programName: String?
     var taskState: String?
     var paneID: String?
+    var taskDetail: String?
 
     static func make(command: ShellCommandObservation?) -> Self {
         guard let command else { return Self() }
@@ -30,7 +32,25 @@ struct ConnectionActivityContext: Equatable, Sendable {
             return Self()
         }
 
-        let hook = knownHooks[paneID]
+        return paneContext(snapshot: snapshot, hooks: knownHooks, paneID: paneID, pane: pane)
+    }
+
+    /// All explicitly reported tasks, including panes outside the active workspace.
+    /// Read-only metadata: never attach to, focus, or resize any remote terminal.
+    static func tasks(snapshot: TmuxSnapshot, hooks: [String: AgentHook],
+                      hooksLoaded: Bool) -> [Self] {
+        guard hooksLoaded else { return [] }
+        return hooks.keys.sorted().compactMap { paneID in
+            guard let pane = snapshot.panes[paneID], reportedState(hooks[paneID]) != nil else { return nil }
+            var context = paneContext(snapshot: snapshot, hooks: hooks, paneID: paneID, pane: pane)
+            context.taskDetail = hooks[paneID]?.title
+            return context
+        }
+    }
+
+    private static func paneContext(snapshot: TmuxSnapshot, hooks: [String: AgentHook],
+                                    paneID: String, pane: PaneInfo) -> Self {
+        let hook = hooks[paneID]
         let window = snapshot.windows[pane.windowId]
         let workspace = window.flatMap { snapshot.sessions[$0.sessionId]?.name }
         let program: String?

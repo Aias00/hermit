@@ -144,4 +144,20 @@ struct ConnectionActivityContextTests {
         let missing = ConnectionActivityContext.make(snapshot: value, hooks: [:], hooksLoaded: true)
         #expect(missing == ConnectionActivityContext())
     }
+    @Test("all valid task panes are read without relying on focus or terminal output")
+    func multipleTaskContexts() {
+        var value = snapshot(command: "codex")
+        value.panes["%2"] = PaneInfo(id: "%2", windowId: "@1", command: "claude")
+        let hooks: [String: AgentHook] = [
+            "%1": .init(state: "done", agent: "codex", title: "分析架构"),
+            "%2": .init(state: "working", agent: "claude", title: "设计交互玩具"),
+            "%missing": .init(state: "attention", agent: "codex", title: "removed"),
+        ]
+        let rows = ConnectionActivityContext.tasks(snapshot: value, hooks: hooks, hooksLoaded: true)
+        #expect(rows.map(\.paneID) == ["%1", "%2"])
+        #expect(rows.map(\.taskDetail) == ["分析架构", "设计交互玩具"])
+        #expect(rows.map(\.workspaceName) == ["project", "project"])
+        #expect(ConnectionActivityContext.tasks(snapshot: value, hooks: hooks, hooksLoaded: false).isEmpty)
+    }
+
 }

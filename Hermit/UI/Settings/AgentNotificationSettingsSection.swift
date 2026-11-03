@@ -19,7 +19,8 @@ struct AgentNotificationSettingsSection: View {
             ToggleRow(label: "Alert sound", subtitle: "Play a sound when the agent needs you",
                       isOn: $settings.attentionSoundEnabled).disabled(!settings.notificationsEnabled)
             ToggleRow(label: "Show detail on lock screen", subtitle: "关闭后仅显示任务状态和位置",
-                      isOn: $settings.lockScreenDetailEnabled).disabled(!settings.notificationsEnabled)
+                      isOn: $settings.lockScreenDetailEnabled)
+                .disabled(!settings.notificationsEnabled && !settings.liveActivityEnabled)
             LabeledContent("系统通知权限", value: permissionLabel)
                 .accessibilityIdentifier("settings-notification-permission")
             if authorization == .denied {

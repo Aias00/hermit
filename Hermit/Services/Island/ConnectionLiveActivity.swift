@@ -19,11 +19,13 @@ struct ConnectionActivityEntry: Equatable {
     var taskState: ConnectionActivityAttributes.TaskState?
     var observedAt: Date?
     var commandExitCode: Int?
+    var tasks: [ConnectionActivityContext] = []
 }
 
 enum ConnectionActivitySnapshot {
     static func make(entries: [ConnectionActivityEntry], preferredID: UUID?,
-                     foreground: Bool, showHostNames: Bool, now: Date)
+                     foreground: Bool, showHostNames: Bool, now: Date,
+                     showTaskDetails: Bool = false)
         -> ConnectionActivityAttributes.ContentState? {
         guard !entries.isEmpty else { return nil }
         // A remote prompt takes precedence over the screen currently visible.
@@ -40,6 +42,32 @@ enum ConnectionActivitySnapshot {
         let link = paneID.map {
             AgentDeepLink.string(connectionId: headline.id, paneId: $0)
         } ?? "\(AgentDeepLink.scheme)://connection/\(headline.id.uuidString)"
+        let allTasks = ordered.filter { $0.state == .connected }.flatMap { entry in
+            entry.tasks.compactMap { context -> ConnectionActivityAttributes.TaskSummary? in
+                guard let pane = context.paneID,
+                      let state = context.taskState.flatMap(ConnectionActivityAttributes.TaskState.init(rawValue:))
+                else { return nil }
+                return .init(id: "\(entry.id.uuidString):\(pane)",
+                    workspaceName: showHostNames ? boundedText(context.workspaceName, bytes: 80) : nil,
+                    hostName: showHostNames && entry.id != headline.id ? boundedText(entry.name, bytes: 80) : nil,
+                    programName: context.programName,
+                    detail: showTaskDetails ? boundedText(context.taskDetail, bytes: 180) : nil,
+                    state: state, deepLink: AgentDeepLink.string(connectionId: entry.id, paneId: pane),
+                    observedAt: entry.observedAt)
+            }
+        }.sorted {
+            // Keep prompts ahead of working tasks, then completed tasks. Stable
+            // identity avoids rows jumping around on every observation tick.
+            func rank(_ state: ConnectionActivityAttributes.TaskState) -> Int {
+                switch state { case .attention: return 0; case .working: return 1; case .done: return 2 }
+            }
+            if rank($0.state) != rank($1.state) { return rank($0.state) < rank($1.state) }
+            let firstOnHeadline = $0.id.hasPrefix(headline.id.uuidString + ":")
+            let secondOnHeadline = $1.id.hasPrefix(headline.id.uuidString + ":")
+            if firstOnHeadline != secondOnHeadline { return firstOnHeadline }
+            return $0.id.compare($1.id, options: .numeric) == .orderedAscending
+        }
+        let visibleTasks = Array(allTasks.prefix(3))
         return .init(connectionCount: entries.count,
                      headlineName: showHostNames ? boundedAlias(headline.name) : nil,
                      connectionState: headline.state,
@@ -51,9 +79,21 @@ enum ConnectionActivitySnapshot {
                      workspaceName: showHostNames ? boundedAlias(headline.workspaceName) : nil,
                      programName: headline.programName,
                      taskState: headline.state == .connected ? headline.taskState : nil,
-                     observedAt: headline.state == .connected ? headline.observedAt : nil,
+                     observedAt: visibleTasks.compactMap(\.observedAt).min()
+                        ?? (headline.state == .connected ? headline.observedAt : nil),
                      commandExitCode: headline.state == .connected && headline.taskState == .done
-                        ? headline.commandExitCode : nil)
+                        ? headline.commandExitCode : nil,
+                     tasks: visibleTasks, totalTaskCount: allTasks.count)
+    }
+
+    private static func boundedText(_ text: String?, bytes: Int) -> String? {
+        guard let alias = boundedAlias(text) else { return nil }
+        var result = ""
+        for character in alias {
+            guard result.utf8.count + String(character).utf8.count <= bytes else { break }
+            result.append(character)
+        }
+        return result.isEmpty ? nil : result
     }
 
     private static func boundedAlias(_ name: String?) -> String? {
@@ -237,12 +277,17 @@ final class ConnectionLiveActivity {
                     transportName: ConnectionActivitySnapshot.transportName(for: session.connection),
                     workspaceName: context.workspaceName, programName: context.programName,
                     taskState: context.taskState.flatMap(ConnectionActivityAttributes.TaskState.init(rawValue:)),
-                    observedAt: observedAt, commandExitCode: shellCommand?.exitCode)
+                    observedAt: observedAt, commandExitCode: shellCommand?.exitCode,
+                    tasks: controller.map {
+                        observedAt == nil ? [] : ConnectionActivityContext.tasks(
+                            snapshot: $0.snapshot, hooks: hooks, hooksLoaded: $0.agentHooksLoaded)
+                    } ?? [])
             }
         } else { entries = [] }
         let content = ConnectionActivitySnapshot.make(entries: entries,
             preferredID: hub.visibleSession?.connection.id, foreground: foreground,
-            showHostNames: settings.liveActivityShowHostNames, now: now)
+            showHostNames: settings.liveActivityShowHostNames, now: now,
+            showTaskDetails: settings.lockScreenDetailEnabled)
         submit(content, canStart: foreground, force: force)
     }
 
