@@ -12,6 +12,19 @@ import MoshpitKit
 @MainActor
 @Suite("Host setup model")
 struct HostSetupModelTests {
+    @Test("A HERDR pairing installs its native listener without editing agent hooks")
+    func nativeHerdrPairing() async throws {
+        let channel = HostInstallerTests.healthyChannel()
+        var connection = Self.connection()
+        connection.multiplexer = .herdr
+        let (model, _) = Self.model(channel, push: FakePush(), connection: connection)
+        await model.inspect()
+        await model.pair(relayURL: "https://push.example.org")
+        #expect(model.error == nil)
+        #expect(channel.file(at: "$HOME/.moshpit/hermit-herdr-notify.py") == HostScripts.herdrNotify)
+        #expect(channel.commands.contains { $0.contains("--install-service --connection") })
+        #expect(!channel.commands.contains { $0.contains(".claude/settings.json") || $0.contains(".codex/config.toml") })
+    }
 
     final class FakePush: PushCoordinating {
         var lastRelayError: String?

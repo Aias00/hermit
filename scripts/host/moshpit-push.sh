@@ -92,7 +92,7 @@ DUR="${4:-}"
 case "$DUR" in *[!0-9]*) DUR="" ;; esac
 
 TESTMODE=""
-TESTCONN=""
+TESTCONN="${HERMIT_PUSH_CONNECTION:-}"
 if [ "$STATE" = "--test" ]; then
   STATE="done"
   AGENT="moshpit-selftest"
@@ -111,9 +111,9 @@ case "$STATE" in
   *) exit 0 ;;
 esac
 
-PANE="${TMUX_PANE:-%0}"
-SESSION=""
-if [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+PANE="${HERMIT_PUSH_PANE:-${TMUX_PANE:-%0}}"
+SESSION="${HERMIT_PUSH_SESSION:-}"
+if [ -z "$SESSION" ] && [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
   SESSION=$(tmux display-message -p "#S" 2>/dev/null || echo "")
 fi
 HOST="${MOSHPIT_PUSH_HOST:-$(hostname 2>/dev/null || echo host)}"

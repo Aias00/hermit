@@ -19,6 +19,14 @@ import Testing
 @MainActor
 @Suite("Push self-test wait", .serialized)
 struct PushServiceTests {
+    @Test("Remote push is gated by the signed APNs entitlement, including its environment")
+    func signingCapability() {
+        #expect(RemotePushCapability.environment(in: nil) == nil)
+        #expect(RemotePushCapability.environment(in: ["aps-environment": "development"]) == "sandbox")
+        #expect(RemotePushCapability.environment(in: ["aps-environment": "production"]) == "production")
+        #expect(RemotePushCapability.environment(in: ["aps-environment": "staging"]) == nil)
+        #expect(RemotePushCapability.environment(in: ["aps-environment": true]) == nil)
+    }
 
     /// Somewhere for a detached wait to leave its answer.
     @MainActor final class Outcome {

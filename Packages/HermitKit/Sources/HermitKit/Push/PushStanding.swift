@@ -53,9 +53,12 @@ public enum PushStanding {
     private static let filename = "standing-attention.json"
 
     private static var url: URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: PushPairingStore.appGroup)?
-            .appendingPathComponent(filename)
+        let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: PushPairingStore.appGroup)
+        // Personal Team builds have no App Group. Local notifications still
+        // need a standing set; only APNs extension deduplication requires sharing.
+        let local = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("HermitNotifications", isDirectory: true)
+        return (group ?? local)?.appendingPathComponent(filename)
     }
 
     /// conn → entries. Pruned of expired entries on every read.

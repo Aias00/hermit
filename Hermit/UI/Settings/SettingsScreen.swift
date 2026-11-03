@@ -42,7 +42,6 @@ struct SettingsScreen: View {
     #endif
     @State private var showServerBinaryEditor = false
     @State private var showUDPEditor = false
-    @State private var showNotifInfo = false
     @State private var showHooksInstall = false
     @State private var showOfflineHostInfo = false
     @State private var showFeedback = false
@@ -149,48 +148,9 @@ struct SettingsScreen: View {
                         .disabled(!settings.liveActivityEnabled)
                 }
 
-                if AppSettings.agentNotificationsAvailable {
-                FormGroup(
-                    title: "NOTIFICATIONS",
-                    footer: "Hermit watches the active session for agent activity and posts a local alert when your agent needs attention — natively on herdr, via the bell and hooks on tmux."
-                ) {
-                    ToggleRow(
-                        label: "Notifications",
-                        subtitle: "Alert when an agent needs you",
-                        isOn: $settings.notificationsEnabled)
-                    ToggleRow(
-                        label: "Alert sound",
-                        subtitle: "Play a sound when the agent needs you",
-                        isOn: $settings.attentionSoundEnabled)
-                    ToggleRow(
-                        label: "Show detail on lock screen",
-                        subtitle: "Display what the agent is running, asking, or was asked — off keeps it private",
-                        isOn: $settings.lockScreenDetailEnabled)
-                    ChevronRow(label: "How notifications work") { showNotifInfo = true }
-                    // Shown on herdr too, unlike the sheet this
-                    // replaced. That one only installed tmux hooks, so
-                    // hiding it on herdr was right — herdr reports agent
-                    // status itself. This screen also pairs the host for
-                    // pushes, which works on any multiplexer, and the
-                    // hook script is what FIRES a push even where its
-                    // tmux stamping is inert. The sheet says which half
-                    // applies.
-                    if liveSession != nil {
-                        ChevronRow(label: "Set up this host") { showHooksInstall = true }
-                    } else {
-                        // Not a dead grey row. Host setup happens ON the
-                        // host — the phone only holds its half of each
-                        // pairing — so with nothing connected there is
-                        // nothing to act on. But since auto-care made
-                        // setup automatic, this row's job offline is to
-                        // SAY that, and to show the half the phone does
-                        // have: which hosts are paired.
-                        ChevronRow(label: "Set up this host",
-                                   subtitle: "Automatic — connect to inspect") {
-                            showOfflineHostInfo = true
-                        }
-                    }
-                }
+                AgentNotificationSettingsSection {
+                    if liveSession != nil { showHooksInstall = true }
+                    else { showOfflineHostInfo = true }
                 }
 
                 voiceGroup(settings: $settings)
@@ -282,9 +242,6 @@ struct SettingsScreen: View {
         }
         .appSheet(isPresented: $showUDPEditor) {
             UDPRangeEditor(settings: settings)
-        }
-        .appSheet(isPresented: $showNotifInfo) {
-            NotificationInfoView()
         }
         .appSheet(isPresented: $showHooksInstall) {
             if let liveSession {
@@ -685,11 +642,11 @@ struct NotificationInfoView: View {
         NavigationStack {
             List {
                 row("bell.fill", Ink.warn, "Agents stamp their state",
-                    "Coding agents (Claude Code, Codex, …) report working / needs-you / done through hooks Hermit installs on your host — precise states, not guesses. The terminal bell still works as a fallback for everything else.")
+                    "HERDR 直接报告任务进行中、等待输入和完成状态，不需要给 Codex 或 Claude 单独安装通知脚本。tmux 会话可使用任务钩子或终端铃声。")
                 row("bubbles.and.sparkles.fill", Ink.accent, "Live Activity",
                     "While a session is attached, the Dynamic Island shows whether the agent is working, idle, or waiting on you. Tapping it deep-links straight back to that pane.")
                 row("paperplane.fill", Ink.mosh, "Push, sealed end-to-end",
-                    "When the app isn’t running, your host sends the alert through Hermit’s push relay. It is encrypted on your host with a key only this device holds — the relay and Apple carry ciphertext and can read none of it. Delivered even from a locked phone.")
+                    "连接期间使用本地通知。长期后台或 App 退出后，需要远端持续监听任务状态并通过推送服务投递；只有带推送权限且已完成配对的安装版本支持这条链路。")
                 row("moon.zzz.fill", Ink.meta, "Quiet by design",
                     "A question must stand for 30 seconds before any phone hears about it — answered at your desk means never announced. All waiting agents share one summary card; only the first rings. A finished turn shows the prompt it answered and only chimes if it ran three minutes or more. Parked agents stay silent.")
             }

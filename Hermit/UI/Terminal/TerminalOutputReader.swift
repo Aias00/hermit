@@ -101,6 +101,7 @@ struct TerminalOutputReader: View {
     let refresh: () -> TerminalOutputSnapshot?
     let currentRevision: () -> UInt64?
     @State var snapshot: TerminalOutputSnapshot
+    @State var showsPreview = false
     @State private var search = TerminalOutputSearch()
     @State private var copied = false
     @Environment(\.dismiss) private var dismiss
@@ -117,6 +118,13 @@ struct TerminalOutputReader: View {
                         Text("Only the most recent part of this output is included.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    Picker("显示方式", selection: $showsPreview) {
+                        Text("原文 / 搜索").tag(false)
+                        Text("Markdown 预览").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("terminal-output-presentation")
+                    if !showsPreview {
                     HStack {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField("Search output", text: $search.query)
@@ -150,9 +158,12 @@ struct TerminalOutputReader: View {
                     }
                     .buttonStyle(.bordered).disabled(search.matches.isEmpty)
                     .font(.subheadline)
+                    }
                 }.padding(16)
                 Divider()
-                if search.text.isEmpty {
+                if showsPreview, !snapshot.text.isEmpty {
+                    MarkdownPreview(text: snapshot.text)
+                } else if search.text.isEmpty {
                     ContentUnavailableView("No output yet", systemImage: "text.alignleft")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {

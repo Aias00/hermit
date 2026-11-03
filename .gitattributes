@@ -1,0 +1,4 @@
+# Keep upstream bundles and licenses byte-identical to the pinned npm artifacts.
+# Their template strings contain intentional whitespace; versions.json records hashes.
+Hermit/Resources/Markdown.bundle/*.js -whitespace
+Hermit/Resources/Markdown.bundle/*-LICENSE.txt -whitespace

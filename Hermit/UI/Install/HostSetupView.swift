@@ -31,7 +31,10 @@ struct HostSetupView: View {
                     hostCard
                     if let error = model.error { errorCard(error) }
                     if model.pairedButNothingWillPush { nothingWillPushCard }
-                    hooksSection
+                    if model.isHerdr {
+                        Text("HERDR 直接提供任务状态，无需安装 Claude、Codex 或 tmux 钩子。配对成功后会在远端安装独立的通知监听服务。")
+                            .font(.subheadline).foregroundStyle(Ink.secondary)
+                    } else { hooksSection }
                     pushSection
                 }
                 .padding(.horizontal, Metrics.pageHPad)
@@ -260,26 +263,21 @@ struct HostSetupView: View {
                           detail: model.pairedRelayURL ?? "",
                           status: model.status(model.pairingComponent))
 
-                // No relay-address field, in ANY build. Every audience it could
-                // serve has a better door: ordinary installs can only use OUR
-                // relay (its power is the APNs key for this bundle id — another
-                // address just breaks push, silently); source builders re-sign
-                // under their own team anyway, so their door is the default in
-                // AppSettings, one line; the simulator harness writes the
-                // stored setting directly (`simctl spawn … defaults write`).
-                // A DEBUG-only field survived one round on the theory that
-                // tests typed into it — none did, ever. What remains is the
-                // fact, stated but not editable.
-                Text(verbatim: relayURL)
-                    .font(Face.mono(11))
-                    .foregroundStyle(Ink.meta)
+                TextField("https://push.example.com", text: $relayURL)
+                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .accessibilityIdentifier("hostsetup-relay-url")
+                Text("填写使用你自己的 App 签名凭据部署的推送服务地址。")
+                    .font(.caption).foregroundStyle(.secondary)
 
                 HStack(spacing: 10) {
                     primaryButton(model.status(model.pairingComponent) == .absent
                                   ? String(localized: "Pair")
                                   : String(localized: "Re-pair"),
                                   busy: isWorking) {
-                        Task { await model.pair(relayURL: relayURL) }
+                        Task {
+                            await model.pair(relayURL: relayURL)
+                            if model.error == nil { settings.pushRelayURL = model.pairedRelayURL ?? relayURL }
+                        }
                     }
                     if model.status(model.pairingComponent) != .absent {
                         secondaryButton(String(localized: "Unpair")) {

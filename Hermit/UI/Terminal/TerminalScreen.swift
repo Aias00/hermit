@@ -159,9 +159,10 @@ struct TerminalScreen: View {
         let snapshot: TerminalOutputSnapshot
         let refresh: () -> TerminalOutputSnapshot?
         let revision: () -> UInt64?
+        let preview: Bool
     }
 
-    private func openOutputReader() {
+    private func openOutputReader(preview: Bool = false) {
         guard let coordinator = typingCoordinator else { return }
         let screenOnly = connection.multiplexer != .none || connection.connectionProtocol == .mosh
         guard let snapshot = TerminalOutputSnapshot.capture(coordinator, screenOnly: screenOnly) else { return }
@@ -184,7 +185,7 @@ struct TerminalScreen: View {
                 // was above the tail. Remote scroll owners remain untouched.
                 if !screenOnly { coordinator.returnToLatestLocalOutput() }
                 return TerminalOutputSnapshot.capture(coordinator, screenOnly: screenOnly)
-            }, revision: { [weak coordinator] in stillOwnsSource() ? coordinator?.outputRevision : nil })
+            }, revision: { [weak coordinator] in stillOwnsSource() ? coordinator?.outputRevision : nil }, preview: preview)
         presentSheet { outputReader = context }
     }
 
@@ -231,6 +232,7 @@ struct TerminalScreen: View {
     @State private var showCamera = false
     /// A fetched host file on its way into QuickLook (a tapped path link).
     @State private var quickLookURL: URL?
+    @State private var markdownDocument: MarkdownFileDocument?
     /// A tapped host FOLDER, presented as the folder sheet.
     @State private var remoteFolder: RemoteFolderTarget?
     /// A tapped host video is playing (`RemoteVideoPlayer`, presented
@@ -407,7 +409,7 @@ struct TerminalScreen: View {
     /// 状态").
     private var anySheetOpen: Bool {
         showWindowsSheet || showSessionsSheet || showPaneSheet || showCamera
-            || quickLookURL != nil || remoteFolder != nil || remoteVideoOpen
+            || quickLookURL != nil || markdownDocument != nil || remoteFolder != nil || remoteVideoOpen
             || photoPickerPresented || filePickerPresented || showsFileUploads || outputReader != nil || showTerminalActions
     }
 
@@ -856,7 +858,7 @@ struct TerminalScreen: View {
         }
         .appSheet(item: $outputReader) { context in
             TerminalOutputReader(title: context.title, refresh: context.refresh,
-                                 currentRevision: context.revision, snapshot: context.snapshot)
+                                 currentRevision: context.revision, snapshot: context.snapshot, showsPreview: context.preview)
         }
         .appSheet(isPresented: $showsFileUploads) {
             FileUploadQueueView(queue: fileUploads, canRetry: launchIsConnected) {
@@ -894,6 +896,9 @@ struct TerminalScreen: View {
             beginImageAttachment(items)
         }
         .quickLookPreview($quickLookURL)
+        .appSheet(item: $markdownDocument, onDismiss: { dismissRemotePreview() }) { document in
+            MarkdownFilePreview(document: document)
+        }
         .onChange(of: quickLookURL) { _, url in
             if url == nil { dismissRemotePreview() }
         }
@@ -903,7 +908,9 @@ struct TerminalScreen: View {
         .onChange(of: active?.remotePreview?.phase) { _, phase in
             switch phase {
             case .ready(let url)?:
-                presentSheet { quickLookURL = url }
+                if let document = MarkdownFileDocument.load(url) {
+                    presentSheet { markdownDocument = document }
+                } else { presentSheet { quickLookURL = url } }
             case .folder(let entry)?:
                 guard let files = active?.remotePreview?.files else { return }
                 presentSheet { remoteFolder = RemoteFolderTarget(folder: entry, files: files) }
@@ -1128,6 +1135,9 @@ struct TerminalScreen: View {
             } else {
                 terminalAction("Read / search output", icon: "doc.text.magnifyingglass", enabled: typingCoordinator?.terminalView != nil) {
                     openOutputReader()
+                }
+                terminalAction("Markdown 预览", icon: "doc.richtext", enabled: typingCoordinator?.terminalView != nil) {
+                    openOutputReader(preview: true)
                 }
                 terminalAction("选择会话", icon: "rectangle.stack", enabled: tmuxSnapshot != nil) {
                     presentSheet { showSessionsSheet = true }

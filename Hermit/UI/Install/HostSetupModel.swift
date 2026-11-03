@@ -89,11 +89,13 @@ final class HostSetupModel {
     /// relay registration is missing still shows "Current" there and every push
     /// the host sends is refused. Without this, nothing anywhere would say so.
     var relayError: String? { push.lastRelayError }
+    var isHerdr: Bool { connection.multiplexer == .herdr }
+    var supportsRemotePush: Bool { push.supportsRemotePush }
 
     /// True when the host is paired but nothing on it will ever fire a push —
     /// the exact hole the previous design shipped, and the reason this is
     /// surfaced rather than inferred.
-    var pairedButNothingWillPush: Bool { state?.pairedButNothingWillPush ?? false }
+    var pairedButNothingWillPush: Bool { !isHerdr && (state?.pairedButNothingWillPush ?? false) }
 
     func status(_ component: InstallComponent) -> ComponentStatus {
         state?.status(component) ?? .absent
@@ -163,6 +165,9 @@ final class HostSetupModel {
             state = try await installer.inspect()
             phase = .idle
             if report.succeeded {
+                if isHerdr {
+                    try await installer.installHerdrNotifications(connectionId: connection.id, herdrPath: connection.herdrPath)
+                }
                 await provePush()
             } else {
                 error = report.failures.first ?? Self.blockedMessage(report.blocked)

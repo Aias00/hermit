@@ -54,6 +54,8 @@ final class HostAutoCare {
 
     func tend(connection: ServerConnection, session: SessionHub.ActiveSession) {
         guard AppSettings.agentNotificationsAvailable else { return }
+        guard push.supportsRemotePush else { return }
+        guard !settings.pushRelayURL.isEmpty else { return }
         // Harness escape hatch. Every seeded test connection points at a REAL
         // host (a scratch tmux, but the login's real $HOME) — without this, a
         // perf probe or reconnect harness would silently pair its throwaway
@@ -74,6 +76,15 @@ final class HostAutoCare {
             let installer = try await session.hostInstaller()
             let state = try await installer.inspect()
             tended.insert(connection.id)
+
+            if connection.multiplexer == .herdr {
+                // Native HERDR status needs no Claude/Codex hooks or tmux.
+                try await ensurePairing(connection: connection, installer: installer, state: state)
+                if settings.notificationsEnabled, await push.ensureReady(connectionId: connection.id) != nil {
+                    try await installer.installHerdrNotifications(connectionId: connection.id, herdrPath: connection.herdrPath)
+                }
+                return
+            }
 
             let agents = Self.installedHookAgents(state.manifest)
             guard !agents.isEmpty else {
@@ -113,6 +124,10 @@ final class HostAutoCare {
                                installer: HostInstaller,
                                state: InstallState) async throws {
         guard settings.notificationsEnabled else { return }
+        guard state.facts.canPush else {
+            throw NSError(domain: "HermitNotifications", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "远端缺少通知发送所需工具。"])
+        }
         let conn = connection.id.uuidString
 
         if var local = PushPairingStore.pairing(for: connection.id) {
@@ -143,7 +158,7 @@ final class HostAutoCare {
             let expected = ContentDigest.of(HostInstaller.pushConf(ready))
             if state.manifest.pairingEntry(conn: conn)?.digest != expected {
                 Log.island.info("autocare: rewriting pairing on \(connection.displayName, privacy: .public)")
-                _ = try await installer.installPairing(ready, state: state)
+                try requirePairing(try await installer.installPairing(ready, state: state))
             }
             return
         }
@@ -154,7 +169,14 @@ final class HostAutoCare {
         let pairing = try await push.pair(connectionId: connection.id,
                                           hostLabel: connection.displayName,
                                           relayURL: settings.pushRelayURL)
-        _ = try await installer.installPairing(pairing, state: state)
+        try requirePairing(try await installer.installPairing(pairing, state: state))
+    }
+
+    private func requirePairing(_ report: InstallReport) throws {
+        guard report.succeeded else {
+            throw NSError(domain: "HermitNotifications", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: report.failures.first ?? "远端通知配对未安装完成。"])
+        }
     }
 
     /// The user said yes: perform the one consented write (hook registration

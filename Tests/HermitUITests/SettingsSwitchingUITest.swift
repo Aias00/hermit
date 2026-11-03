@@ -11,6 +11,7 @@ final class SettingsSwitchingUITest: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-MOSHPIT_AUTOCARE_OFF", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         if reset { app.launchArguments.append("-MOSHPIT_RESET") }
+        app.terminate()
         app.launch()
         XCTAssertTrue(app.buttons["home-settings"].waitForExistence(timeout: 10))
         return app
@@ -20,6 +21,43 @@ final class SettingsSwitchingUITest: XCTestCase {
     private func openSettings(_ app: XCUIApplication) {
         app.buttons["home-settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testNotificationsExposeSigningLimitAndCanSendLocalTest() throws {
+        let app = launch()
+        app.buttons["home-settings"].tap()
+        let toggle = app.switches["settings-agent-notifications"]
+        XCTAssertTrue(reveal(toggle, in: app))
+        if toggle.value as? String == "0" { toggle.tap() }
+        allowNotificationsIfAsked(in: app)
+        let test = app.buttons["settings-notification-test"]
+        XCTAssertTrue(reveal(test, in: app))
+        XCTAssertTrue(test.isEnabled)
+        XCTAssertTrue(reveal(app.staticTexts["settings-push-unavailable"], in: app))
+        tap(test, in: app, towardTop: true)
+        allowNotificationsIfAsked(in: app)
+        let sent = app.staticTexts["settings-notification-result"]
+        let hasResult = reveal(sent, in: app)
+        capture("herdr-notification-settings")
+        XCTAssertTrue(hasResult)
+        XCTAssertTrue(sent.label.contains("测试通知已提交"), sent.label)
+        XCTAssertTrue(reveal(toggle, in: app, towardTop: true))
+        toggle.tap()
+        XCTAssertTrue(reveal(test, in: app))
+        XCTAssertFalse(test.isEnabled)
+    }
+
+    @MainActor
+    private func allowNotificationsIfAsked(in app: XCUIApplication) {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let inAppPermission = app.alerts.firstMatch
+        let permission = inAppPermission.waitForExistence(timeout: 3) ? inAppPermission : springboard.alerts.firstMatch
+        if permission.waitForExistence(timeout: 3) {
+            let allow = permission.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允许"])).firstMatch
+            XCTAssertTrue(allow.exists)
+            allow.tap()
+        }
     }
 
     @MainActor

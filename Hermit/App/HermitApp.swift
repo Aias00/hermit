@@ -44,7 +44,8 @@ struct HermitApp: App {
         #endif
         let store = ConnectionStore(readiness: .system)
         let hub = SessionHub(metrics: metrics)
-        let monitor = AgentActivityMonitor(settings: settings)
+        // ConnectionActivityMonitor already owns the Lock Screen activity.
+        let monitor = AgentActivityMonitor(settings: settings, publishesLiveActivity: false)
         let router = DeepLinkRouter()
         let notificationHandler = AgentNotificationHandler()
         _metrics = State(initialValue: metrics)
@@ -210,6 +211,13 @@ struct HermitApp: App {
             }
             .onChange(of: settings.liveActivityEnabled) { _, _ in
                 connectionActivity.refresh(force: true)
+            }
+            .onChange(of: settings.notificationsEnabled) { _, enabled in
+                PushService.shared.setNotificationsEnabled(enabled)
+                guard enabled else { return }
+                for session in hub.sessions.values {
+                    monitor.trackWhenReady(connection: session.connection, session: session)
+                }
             }
             .onChange(of: settings.liveActivityShowHostNames) { _, _ in
                 connectionActivity.refresh(force: true)

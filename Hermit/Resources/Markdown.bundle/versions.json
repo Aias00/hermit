@@ -1,0 +1,26 @@
+[
+  {
+    "package": "mermaid",
+    "version": "11.15.0",
+    "file": "mermaid.min.js",
+    "sha256": "70137e77bb273bb2ef972b86e8b0400cca8be53cb25bfc45911a186dc98665de",
+    "tarball_integrity": "sha512-pTMbcf3rWdtLiYGpmoTjHEpeY8seiy6sR+9nD7LOs8KfUbHE4lOUAprTRqRAcWSQ6MQpdX+YEsxShtGsINtPtw==",
+    "source": "https://registry.npmjs.org/mermaid/-/mermaid-11.15.0.tgz"
+  },
+  {
+    "package": "marked",
+    "version": "17.0.1",
+    "file": "marked.js",
+    "sha256": "e131975cfd9e6fd19a98ae2e1328e57232af7208198798834534b8e5326ed386",
+    "tarball_integrity": "sha512-boeBdiS0ghpWcSwoNm/jJBwdpFaMnZWRzjA6SkUMYb40SVaN1x7mmfGKp0jvexGcx+7y2La5zRZsYFZI6Qpypg==",
+    "source": "https://registry.npmjs.org/marked/-/marked-17.0.1.tgz"
+  },
+  {
+    "package": "dompurify",
+    "version": "3.3.1",
+    "file": "purify.min.js",
+    "sha256": "9b494057fad6656fd9ce2089d0b6898df9632c10e45e4775a43073a46cffc8cb",
+    "tarball_integrity": "sha512-qkdCKzLNtrgPFP1Vo+98FRzJnBRGe4ffyCea9IwHB1fyxPOeNTHpLKYGd4Uk9xvNoH0ZoOjwZxNptyMwqrId1Q==",
+    "source": "https://registry.npmjs.org/dompurify/-/dompurify-3.3.1.tgz"
+  }
+]

@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import Moshpit
 import MoshpitKit
+import UserNotifications
 
 /// `AgentActivityMonitor` is a `@MainActor` state machine whose interesting
 /// logic (output-heuristic promotion, the idle/done/linger sweep) is `private`
@@ -16,6 +17,53 @@ import MoshpitKit
 @Suite("AgentActivityMonitor")
 @MainActor
 struct AgentActivityMonitorTests {
+
+    @Test("Native HERDR transitions deliver one routed notification and respect detail privacy")
+    func nativeHerdrNotifications() async throws {
+        let suite = "test.herdrnotifications.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.notificationsEnabled = true
+        settings.lockScreenDetailEnabled = false
+        var requests: [UNNotificationRequest] = []
+        let monitor = AgentActivityMonitor(settings: settings, publishesLiveActivity: false,
+            announceDelay: 0.04, deliverNotification: { requests.append($0) }, authorizeNotifications: {})
+        var connection = ServerConnection(name: "Notification fixture", host: "192.0.2.1", username: "test", authMethod: .password)
+        connection.multiplexer = .herdr
+        let runner = HerdrControlClientTests.FakeRunner()
+        let client = HerdrControlClient(runner: runner)
+        defer { client.stop(); monitor.untrack(connectionId: connection.id) }
+        monitor.track(connection: connection, controller: client)
+        func report(_ state: String) async {
+            runner.setResponse("""
+            {"result":{"snapshot":{"workspaces":[{"workspace_id":"w1","label":"project"}],
+            "tabs":[{"tab_id":"w1:t1","workspace_id":"w1","label":"1","number":1}],
+            "panes":[{"pane_id":"w1:p1","terminal_id":"t1","tab_id":"w1:t1","workspace_id":"w1","agent":"codex","agent_status":"\(state)","terminal_title_stripped":"secret prompt"}],
+            "layouts":[],"focused_workspace_id":"w1","focused_tab_id":"w1:t1","focused_pane_id":"w1:p1"}}}
+            """)
+            await client.pollNowForTesting()
+        }
+        await report("working")
+        await report("done")
+        #expect(requests.count == 1)
+        #expect(requests.first?.content.userInfo[AgentNotifications.connectionKey] as? String == connection.id.uuidString)
+        #expect(requests.first?.content.userInfo[AgentNotifications.paneKey] as? String == "w1:p1")
+        #expect(requests.first?.content.body.contains("secret prompt") == false)
+        await report("done")
+        #expect(requests.count == 1, "repeated snapshots must not repeat completion alerts")
+        await report("working")
+        await report("blocked")
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(requests.count == 2)
+        await report("blocked")
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(requests.count == 2, "a standing prompt rings once")
+        await report("working")
+        settings.notificationsEnabled = false
+        await report("done")
+        #expect(requests.count == 2, "opting out suppresses later transitions")
+    }
 
     private func makeMonitor() -> (AgentActivityMonitor, UserDefaults, String) {
         let name = "test.agentmonitor.\(UUID().uuidString)"

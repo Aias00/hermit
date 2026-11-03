@@ -20,6 +20,29 @@
 
 **硬限制(记住)**:① App **7 天过期**,过期后图标在但打不开,重新 ⌘R 一次即可续(数据保留)。② 同时最多 **3 个**自签 App。③ 每 7 天最多 10 个 App ID(Hermit 占 2 个:主 App + 灵动岛扩展)。
 
+### HERDR 手机通知与 Markdown 预览
+
+设置中的「通知」提供权限状态、声音、锁屏详情开关和测试通知。个人安装包可以在连接存活时，
+根据 HERDR 原生的 `working / blocked / done` 状态产生本地通知。持续等待 30 秒才提醒；
+同一次等待或完成不会随重复快照反复提醒，点击通知返回对应连接和窗格。
+本地通知不依赖 APNs 或 App Group；没有 App Group 的安装使用 App 私有目录保存去重状态。
+
+锁屏后长时间后台、App 退出后的新任务事件需要远程推送。当前 Personal Team 包不具备这项签名权限，
+设置会明确提示。具备 APNs 权限的版本可以在「配置主机」填写自建推送服务地址并配对；
+不会默认连接原项目的公共推送服务。服务端 APNs 凭据必须与 App 的签名团队和 Bundle ID 对应。
+
+HERDR 主机配对完成后会安装 `scripts/host/hermit-herdr-notify.py` 对应的用户服务：macOS 使用
+LaunchAgent，Linux 使用 systemd user service。监听器通过 HERDR Unix socket 订阅事件并读取
+`session.snapshot`，仅将等待与完成交给现有加密发送器，不需要 tmux 或 Codex/Claude 钩子，
+也不发送终端输入或修改尺寸。需有 Python 3；Linux 用户服务在退出登录后持续运行还取决于主机的
+user service/linger 配置。取消配对后，监听器发现对应配置已删除便退出。
+
+终端右上角菜单的「Markdown 预览」可将当前画面中的 Markdown 排版，支持表格、代码和 Mermaid。
+远端文件浏览器打开不超过 1 MB 的 UTF-8 `.md`、`.markdown`、`.mdown` 文件时，也会使用此预览。
+渲染资源随 App 安装，预览不请求外部图片或渲染服务；HTTP(S) 链接仅在用户点击时打开。
+预览最多渲染前 200,000 个字符。终端已经丢失的符号或未加载的历史无法从画面还原，内容不完整时
+可打开远端原始 Markdown 文件；原文入口和复制内容始终保留。
+
 ---
 
 ## A. 一次性准备(在 Mac 上,手机可不在场)

@@ -31,6 +31,23 @@ import MoshpitKit
 struct HostInstaller {
     let channel: HostChannel
 
+    /// Runs independently of the phone, consuming HERDR's native snapshots.
+    /// The caller must have completed APNs pairing before starting this service.
+    func installHerdrNotifications(connectionId: UUID, herdrPath: String?) async throws {
+        let path = "$HOME/.moshpit/hermit-herdr-notify.py"
+        _ = try await channel.run(HostCommands.writeFile(path: path, mode: "700",
+            base64: Data(HostScripts.herdrNotify.utf8).base64EncodedString()))
+        let digest = try await channel.runText(HostCommands.sha256(path: path))
+        guard digest == ContentDigest.of(HostScripts.herdrNotify) else {
+            throw NSError(domain: "HermitNotifications", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "远端任务监听脚本校验失败。"])
+        }
+        let binary = herdrPath?.isEmpty == false ? herdrPath! : "herdr"
+        let command = "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\" python3 \"\(path)\" --install-service --connection "
+            + HerdrLaunch.quote(connectionId.uuidString) + " --herdr " + HerdrLaunch.quote(binary)
+        _ = try await channel.run(command)
+    }
+
     // MARK: - Reading
 
     /// What this host can do. Gathered before anything is written so a host

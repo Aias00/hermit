@@ -104,6 +104,30 @@ final class TerminalReliabilityUITest: XCTestCase {
     }
 
     @MainActor
+    func testHerdrMarkdownPreviewPreservesDraftAndShowsDiagram() throws {
+        guard ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"] != nil else {
+            throw XCTSkip("requires an isolated HERDR fixture")
+        }
+        let app = try openTerminal(explicitNavigation: true)
+        let source = "# 预览验证\n\n**任务状态**\n\n| 项目 | 状态 |\n| --- | --- |\n| HERDR | 正常 |\n\n```mermaid\nflowchart TD\nA[用户输入] --> B[任务处理]\nB --> C[完成通知]\n```\n"
+        let encoded = Data(source.utf8).base64EncodedString()
+        submit("printf '\\033[2J\\033[H'; printf '%s' '" + encoded + "' | base64 -D", in: app)
+        let field = composer(app)
+        field.tap()
+        app.typeText("preview keeps draft")
+        app.buttons["conversation-menu"].tap()
+        app.buttons["Markdown 预览"].tap()
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.waitForExistence(timeout: 10))
+        XCTAssertTrue(web.staticTexts["预览验证"].waitForExistence(timeout: 15))
+        captureScreenshot(app, name: "herdr-markdown-mermaid-preview")
+        app.buttons["原文 / 搜索"].tap()
+        XCTAssertTrue(app.textFields["terminal-output-query"].waitForExistence(timeout: 5))
+        app.buttons["完成"].tap()
+        XCTAssertEqual(field.value as? String, "preview keeps draft")
+    }
+
+    @MainActor
     func testOutputReaderSearchRefreshAndCopyNeverSendSSHInput() async throws {
         let receipt = try inputReceiptURL()
         let app = try openTerminal(multiplexer: "none", explicitNavigation: true)

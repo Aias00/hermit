@@ -20,8 +20,7 @@ enum PredictMode: String, CaseIterable {
 /// computed over UserDefaults with the access/withMutation pattern.
 @Observable
 final class AppSettings {
-    /// Hidden until the agent notification feature is ready for release.
-    static let agentNotificationsAvailable = false
+    static let agentNotificationsAvailable = true
 
     @ObservationIgnored private let defaults: UserDefaults
 
@@ -234,34 +233,15 @@ final class AppSettings {
         }
     }
 
-    /// The one relay this build can use. HARDCODED, not defaulted: an earlier
-    /// version stored a user-editable value and fell back to the constant only
-    /// when nothing was stored — so the one time a stray edit dropped the
-    /// ".org" suffix, the typo was persisted, the fallback never fired again,
-    /// and (once the editing UI was removed) there was no way back at all. A
-    /// source builder running their own relay changes THIS line, together with
-    /// the signing key that makes their relay real.
-    nonisolated static let defaultPushRelay = "https://push.moshpit.cluas.eu.org"
+    /// A relay must sign for this app's own bundle/team. Never default a
+    /// source build to the original project's public notification service.
+    nonisolated static let defaultPushRelay = ""
 
-    /// What every pairing and registration uses. In Release this IS the
-    /// constant. In DEBUG a stored override is honored so a harness can point a
-    /// simulator at a local relay (`simctl spawn <sim> defaults write
-    /// com.cluas.moshpit moshpit.settings.pushRelay http://127.0.0.1:PORT`) —
-    /// and ONLY for loopback hosts. Not "any valid URL": the developer's own
-    /// devices run Debug builds permanently, and the typo that motivated all of
-    /// this ("…cluas.eu", org gone) parses as a perfectly valid URL. A harness
-    /// needs the loopback; nothing legitimate needs anything else.
     var pushRelayURL: String {
         get {
             access(keyPath: \.pushRelayURL)
-            #if DEBUG
-            let stored = get("moshpit.settings.pushRelay", "")
-            if let url = URL(string: stored), let host = url.host,
-               ["127.0.0.1", "localhost", "::1"].contains(host) {
-                return stored
-            }
-            #endif
-            return Self.defaultPushRelay
+            return get("moshpit.settings.pushRelay", Self.defaultPushRelay)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
         set { withMutation(keyPath: \.pushRelayURL) { defaults.set(newValue, forKey: "moshpit.settings.pushRelay") } }
     }

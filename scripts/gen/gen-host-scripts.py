@@ -15,6 +15,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 OUT = ROOT / "Hermit" / "Services" / "Install" / "HostScripts.swift"
 
 SCRIPTS = [
+    ("herdrNotify", "scripts/host/hermit-herdr-notify.py",
+     "User service forwarding native HERDR state through the sealed sender."),
     ("stamp", "scripts/host/moshpit-stamp.sh",
      "What an agent's lifecycle hook calls: stamps the pane, hands attention/done to the sender."),
     ("sender", "scripts/host/moshpit-push.sh",

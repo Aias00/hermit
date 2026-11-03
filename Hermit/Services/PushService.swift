@@ -4,6 +4,28 @@ import UIKit
 import UserNotifications
 import MoshpitKit
 
+/// A cached device token does not establish that the current installation is
+/// signed for APNs. Read the binary's entitlements before registering or pairing.
+enum RemotePushCapability {
+    static let environment: String? = {
+        guard let url = Bundle.main.executableURL,
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        return environment(in: CloudSyncEntitlements.signedEntitlements(in: data))
+    }()
+
+    static func environment(in entitlements: [String: Any]?) -> String? {
+        switch entitlements?["aps-environment"] as? String {
+        case "development": return "sandbox"
+        case "production": return "production"
+        default: return nil
+        }
+    }
+
+    static var unavailableMessage: String {
+        String(localized: "当前安装版本支持连接期间的本地通知。离线推送需要启用推送权限的开发者签名版本。")
+    }
+}
+
 /// Remote-push half of the Vibe Island control surface.
 ///
 /// The local path — `AgentActivityMonitor` watching a live tmux channel — only
@@ -35,6 +57,7 @@ import MoshpitKit
 /// stays silent, and they cannot be exercised against real APNs in a unit test.
 @MainActor
 protocol PushCoordinating: AnyObject {
+    var supportsRemotePush: Bool { get }
     /// Why this phone has no usable relay credential, if it has none. nil when
     /// the last mint succeeded.
     var lastRelayError: String? { get }
@@ -48,6 +71,10 @@ protocol PushCoordinating: AnyObject {
     func unpair(connectionId: UUID)
     func awaitSelfTest(nonce: String, timeout: Duration) async -> Bool
     func forgetSelfTest(nonce: String)
+}
+
+extension PushCoordinating {
+    var supportsRemotePush: Bool { true }
 }
 
 @MainActor
@@ -86,14 +113,11 @@ final class PushService: PushCoordinating {
     /// guess gets wrong — a TestFlight build installed over a development one —
     /// self-corrects at the relay, which retries the other host on
     /// BadDeviceToken and remembers the answer.
-    var lastRelayError: String? { lastError }
+    var supportsRemotePush: Bool { RemotePushCapability.environment != nil }
+    var lastRelayError: String? { supportsRemotePush ? lastError : RemotePushCapability.unavailableMessage }
 
     nonisolated static var apnsEnvironment: String {
-        #if DEBUG
-        "sandbox"
-        #else
-        "production"
-        #endif
+        RemotePushCapability.environment ?? "sandbox"
     }
 
     // MARK: - Token lifecycle
@@ -115,6 +139,11 @@ final class PushService: PushCoordinating {
     /// for notifications from it.
     func registerForRemoteNotifications() {
         guard AppSettings.agentNotificationsAvailable else { return }
+        guard supportsRemotePush else { return }
+        guard AppSettings.shared.notificationsEnabled else {
+            UIApplication.shared.unregisterForRemoteNotifications()
+            return
+        }
         let count = pairings.count
         guard count > 0 else {
             Log.push.info("no paired hosts — not registering for remote notifications")
@@ -206,6 +235,7 @@ final class PushService: PushCoordinating {
     /// updated credential by conf digest and rewrites the host's file on its
     /// next pass.
     func mintNeededPairings() async {
+        guard supportsRemotePush, AppSettings.shared.notificationsEnabled else { return }
         guard let token = deviceToken else {
             Log.push.info("mint deferred — no device token yet")
             syncPending = true
@@ -252,6 +282,7 @@ final class PushService: PushCoordinating {
     }
 
     func ensureReady(connectionId: UUID) async -> PushPairing? {
+        guard supportsRemotePush, AppSettings.shared.notificationsEnabled else { return nil }
         guard let pairing = PushPairingStore.pairing(for: connectionId) else { return nil }
         guard pairing.needsMint(currentToken: deviceToken) else { return pairing }
         registerForRemoteNotifications()
@@ -271,6 +302,7 @@ final class PushService: PushCoordinating {
     /// Called when the app returns to the foreground: a cheap local check that
     /// re-mints only what needs it (rotated device token, ageing credential).
     func refreshRegistration() {
+        guard supportsRemotePush, AppSettings.shared.notificationsEnabled else { return }
         guard !pairings.isEmpty, deviceToken != nil else {
             if syncPending { registerForRemoteNotifications() }
             return
@@ -377,6 +409,8 @@ final class PushService: PushCoordinating {
     /// permission was granted, before iOS has handed over a device token — so
     /// this waits briefly for one rather than failing the commonest path.
     func pair(connectionId: UUID, hostLabel: String, relayURL: String) async throws -> PushPairing {
+        guard supportsRemotePush else { throw PushRelayClient.Failure.unsupportedSigning }
+        guard AppSettings.shared.notificationsEnabled else { throw PushRelayClient.Failure.notificationsDisabled }
         // A re-pair mints a fresh SECRET on purpose: the previous conf on that
         // host stops decrypting, which is the whole point of re-pairing after a
         // machine changes hands. (Its send token dies of relay-side TTL — a
@@ -401,6 +435,11 @@ final class PushService: PushCoordinating {
         return try await mintAndStore(pairing, token: token)
     }
 
+    func setNotificationsEnabled(_ enabled: Bool) {
+        if enabled { registerForRemoteNotifications() }
+        else { UIApplication.shared.unregisterForRemoteNotifications() }
+    }
+
     /// Forget a host. Local-only, and that is now the whole story: deleting the
     /// pairing SECRET is what stops this device reading anything, and the relay
     /// has no registration to forget. A conf left on an unreachable host keeps
@@ -417,6 +456,8 @@ final class PushService: PushCoordinating {
 /// answers with an HMAC and remembers nothing.
 enum PushRelayClient {
     enum Failure: LocalizedError {
+        case notificationsDisabled
+        case unsupportedSigning
         case badURL
         case couldNotSave
         case noDeviceToken
@@ -424,6 +465,10 @@ enum PushRelayClient {
 
         var errorDescription: String? {
             switch self {
+            case .notificationsDisabled:
+                return String(localized: "请先开启设置中的通知开关。")
+            case .unsupportedSigning:
+                return RemotePushCapability.unavailableMessage
             case .badURL:
                 return String(localized: "That relay address isn't a valid URL.")
             case .couldNotSave:

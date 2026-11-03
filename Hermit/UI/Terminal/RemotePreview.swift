@@ -394,6 +394,7 @@ final class RemoteFolderModel {
     /// Copies fetched so far (thumbnails included), by path.
     private(set) var local: [String: URL] = [:]
     var previewURL: URL?
+    var markdownDocument: MarkdownFileDocument?
     /// Why the file just tapped couldn't be opened (the grid stays up).
     var openFailure: String?
     /// An upload under way, as a fraction — shown above the grid.
@@ -480,7 +481,7 @@ final class RemoteFolderModel {
 
     func open(_ entry: RemoteFileEntry) async {
         if let url = local[entry.path] {
-            previewURL = url
+            presentCopy(url)
             return
         }
         if entry.kind == .video {
@@ -494,7 +495,12 @@ final class RemoteFolderModel {
                 return
             }
         }
-        if let url = await localCopy(of: entry) { previewURL = url }
+        if let url = await localCopy(of: entry) { presentCopy(url) }
+    }
+
+    private func presentCopy(_ url: URL) {
+        if let document = MarkdownFileDocument.load(url) { markdownDocument = document }
+        else { previewURL = url }
     }
 
     /// Fetches `entry` (or reuses the copy already here) and hands it to the
@@ -830,6 +836,7 @@ struct RemoteFolderView: View {
         .onDisappear { model.cancelUpload() }
         .refreshable { await model.load() }
         .quickLookPreview($model.previewURL, in: model.previewItems)
+        .appSheet(item: $model.markdownDocument) { MarkdownFilePreview(document: $0) }
         .alert(String(localized: "CAN'T OPEN"), isPresented: Binding(
             get: { model.openFailure != nil }, set: { if !$0 { model.openFailure = nil } }
         )) {

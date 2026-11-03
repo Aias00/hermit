@@ -196,7 +196,7 @@ final class AgentActivityMonitor {
         pendingAnnounce[key]?.task.cancel()
         Log.island.info("announce scheduled: pane \(key.pane, privacy: .public) grace \(Self.announceGrace, privacy: .public)s")
         let task = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.announceGrace))
+            try? await Task.sleep(for: .seconds(self?.announceDelay ?? Self.announceGrace))
             guard !Task.isCancelled, let self else { return }
             self.pendingAnnounce[key] = nil
             guard let p = self.panes[key], p.state == .attention,
@@ -223,8 +223,22 @@ final class AgentActivityMonitor {
     @ObservationIgnored private var activity: Activity<AgentActivityAttributes>?
     #endif
 
-    init(settings: AppSettings) {
+    private let publishesLiveActivity: Bool
+    private let announceDelay: TimeInterval
+    @ObservationIgnored private let deliverNotification: (UNNotificationRequest) -> Void
+    @ObservationIgnored private let authorizeNotifications: () -> Void
+
+    init(settings: AppSettings, publishesLiveActivity: Bool = true,
+         announceDelay: TimeInterval? = nil,
+         deliverNotification: @escaping (UNNotificationRequest) -> Void = { UNUserNotificationCenter.current().add($0) },
+         authorizeNotifications: @escaping () -> Void = {
+             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+         }) {
         self.settings = settings
+        self.publishesLiveActivity = publishesLiveActivity
+        self.announceDelay = announceDelay ?? Self.announceGrace
+        self.deliverNotification = deliverNotification
+        self.authorizeNotifications = authorizeNotifications
         loadAnnounced()
     }
 
@@ -455,7 +469,7 @@ final class AgentActivityMonitor {
             AgentNotifications.connectionKey: conn,
             AgentNotifications.paneKey: newest.pane
         ]
-        center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+        deliverNotification(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
     /// Post the "agent finished" notification. Hook-driven only — a precise
@@ -485,7 +499,7 @@ final class AgentActivityMonitor {
         let request = UNNotificationRequest(
             identifier: "moshpit.done.\(connectionId.uuidString).\(paneId)",
             content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        deliverNotification(request)
     }
 
     /// True when a pane is currently governed by a fresh hook stamp — the
@@ -687,8 +701,8 @@ final class AgentActivityMonitor {
             // The foreground command comes from the hook poll itself (fresh every
             // round), NOT from the discovery snapshot — that copy can be minutes
             // stale, and a stale "zsh" would suppress a just-launched agent.
-            let newState = Self.reclassify(state: mapped, title: hook.title,
-                                           foregroundCommand: hook.command)
+            let newState = controller.multiplexer == .herdr ? mapped
+                : Self.reclassify(state: mapped, title: hook.title, foregroundCommand: hook.command)
             // Hermit's own plumbing stamps a pane for real — that is what makes
             // an install self-test a proof rather than a claim — so it has to be
             // filtered here rather than by not stamping.
@@ -934,7 +948,7 @@ final class AgentActivityMonitor {
             return
         }
 
-        guard settings.liveActivityEnabled,
+        guard publishesLiveActivity, settings.liveActivityEnabled,
               ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
         // staleDate: the island's data is pushed by OUR 2s poll, which stops the
@@ -1010,6 +1024,6 @@ final class AgentActivityMonitor {
 
     private func requestNotificationAuthorizationIfNeeded() {
         guard AppSettings.agentNotificationsAvailable, settings.notificationsEnabled else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        authorizeNotifications()
     }
 }

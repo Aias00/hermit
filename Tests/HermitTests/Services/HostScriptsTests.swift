@@ -10,6 +10,11 @@ import Testing
 /// thing that ships is not the thing that was tested. These tests are the guard.
 @Suite("Host scripts")
 struct HostScriptsTests {
+    @Test("the native HERDR watcher matches its canonical host script")
+    func herdrWatcherMatchesRepo() throws {
+        guard let onDisk = try repoScript("hermit-herdr-notify.py") else { return }
+        #expect(HostScripts.herdrNotify == onDisk.trimmingCharacters(in: .newlines))
+    }
 
     /// #filePath is the compile-time source path, readable from a simulator
     /// because it shares the host filesystem. A device run cannot see the
