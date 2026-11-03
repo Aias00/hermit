@@ -38,7 +38,7 @@ LaunchAgent，Linux 使用 systemd user service。监听器通过 HERDR Unix soc
 user service/linger 配置。取消配对后，监听器发现对应配置已删除便退出。
 
 终端右上角菜单的「Markdown 预览」可将当前画面中的 Markdown 排版，支持表格、代码和 Mermaid。
-远端文件浏览器打开不超过 1 MB 的 UTF-8 `.md`、`.markdown`、`.mdown` 文件时，也会使用此预览。
+远端文件浏览器打开不超过 1 MB 的 UTF-8 `.md`、`.markdown` 文件时，也会使用此预览。
 渲染资源随 App 安装，预览不请求外部图片或渲染服务；HTTP(S) 链接仅在用户点击时打开。
 预览最多渲染前 200,000 个字符。终端已经丢失的符号或未加载的历史无法从画面还原，内容不完整时
 可打开远端原始 Markdown 文件；原文入口和复制内容始终保留。
