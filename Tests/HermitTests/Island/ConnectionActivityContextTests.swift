@@ -77,7 +77,7 @@ struct ConnectionActivityContextTests {
     }
 
     @Test("a fresh shell suppresses the old agent identity and every old task phase",
-          arguments: ["working", "attention", "done"])
+          arguments: ["working", "attention", "done", "idle"])
     func returnedShell(state: String) {
         let result = ConnectionActivityContext.make(snapshot: snapshot(command: "codex"),
             hooks: ["%1": AgentHook(state: state, agent: "codex", command: "/bin/zsh")],
@@ -113,8 +113,8 @@ struct ConnectionActivityContextTests {
         #expect(result.taskState == nil)
     }
 
-    @Test("idle and unknown remain unknown rather than reporting completion",
-          arguments: ["idle", "unknown", "failed", ""])
+    @Test("unknown states never report completion",
+          arguments: ["unknown", "failed", ""])
     func unknownStates(state: String) {
         let result = ConnectionActivityContext.make(snapshot: snapshot(command: "codex"),
             hooks: ["%1": AgentHook(state: state, agent: "codex")], hooksLoaded: true)
@@ -123,7 +123,7 @@ struct ConnectionActivityContextTests {
     }
 
     @Test("only explicit working attention and done stamps are reported",
-          arguments: ["working", "attention", "done"])
+          arguments: ["working", "attention", "done", "idle"])
     func explicitStates(state: String) {
         let result = ConnectionActivityContext.make(snapshot: snapshot(command: "node"),
             hooks: ["%1": AgentHook(state: state, agent: "gemini", command: "node")],
@@ -158,6 +158,30 @@ struct ConnectionActivityContextTests {
         #expect(rows.map(\.taskDetail) == ["分析架构", "设计交互玩具"])
         #expect(rows.map(\.workspaceName) == ["project", "project"])
         #expect(ConnectionActivityContext.tasks(snapshot: value, hooks: hooks, hooksLoaded: false).isEmpty)
+    }
+
+    @Test("idle agents remain visible without reusing the previous task title")
+    func idleAgentIsNotCompletion() throws {
+        let value = snapshot(command: "codex")
+        let idle = AgentHook(state: "idle", agent: "codex", title: "旧任务：部署服务")
+        let context = ConnectionActivityContext.make(snapshot: value, hooks: ["%1": idle], hooksLoaded: true)
+        #expect(context.taskState == "idle")
+        let rows = ConnectionActivityContext.tasks(snapshot: value, hooks: ["%1": idle], hooksLoaded: true)
+        #expect(rows.count == 1 && rows.first?.taskState == "idle")
+        #expect(rows.first?.taskDetail == nil)
+        #expect(ConnectionActivityContext.reportedState(.init(state: "idle")) == nil)
+        #expect(ConnectionActivityContext.reportedState(.init(state: "idle", agent: "zsh")) == nil)
+        #expect(ConnectionActivityContext.reportedState(.init(state: "idle", agent: "codex", command: "bash")) == nil)
+    }
+
+    @Test("an active idle pane cannot hide work in another pane")
+    func workingPaneBeforeIdleFocus() {
+        var value = snapshot(command: "codex")
+        value.panes["%2"] = PaneInfo(id: "%2", windowId: "@1", command: "claude")
+        let result = ConnectionActivityContext.make(snapshot: value,
+            hooks: ["%1": .init(state: "idle", agent: "codex"),
+                    "%2": .init(state: "working", agent: "claude")], hooksLoaded: true)
+        #expect(result.paneID == "%2" && result.taskState == "working")
     }
 
 }

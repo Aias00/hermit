@@ -270,7 +270,7 @@ struct ConnectionLiveActivityTests {
             let value = try #require(ConnectionActivitySnapshot.make(entries: [entry], preferredID: nil,
                 foreground: foreground, showHostNames: true, now: now))
             #expect(value.statusDate == observation)
-            #expect(value.statusDate.addingTimeInterval(45) < now)
+            #expect(value.isHeadlineStale(at: now, systemIsStale: false))
             #expect(value.updatedAt == now && value.taskState == .working)
         }
     }
@@ -351,6 +351,104 @@ struct ConnectionLiveActivityTests {
                         "reference-\(Int(width))-\(size)-\(stale ? "stale" : "live").png"))
                 }
             }
+        }
+    }
+
+    @Test("an offline selected host cannot headline another host's live tasks")
+    func onlineHeadlineWins() throws {
+        let selected = ConnectionActivityEntry(id: UUID(), name: "Offline Mac", state: .offline)
+        let live = ConnectionActivityEntry(id: UUID(), name: "Online Mac", state: .connected,
+            working: 1, paneID: "w2:p1", taskState: .working, observedAt: now,
+            tasks: [.init(workspaceName: "work", programName: "Codex", taskState: "working", paneID: "w2:p1")])
+        let state = try #require(ConnectionActivitySnapshot.make(entries: [selected, live], preferredID: selected.id,
+            foreground: true, showHostNames: true, now: now))
+        #expect(state.headlineName == "Online Mac" && state.connectionState == .connected)
+        let target = try #require(AgentDeepLink.parse(state.deepLink))
+        #expect(target.connectionId == live.id && target.paneId == "w2:p1")
+    }
+
+    @Test("foreground freshness tolerates two Herdr safety-net polls and sampling latency")
+    func freshnessHasPollingHeadroom() {
+        var state = content()
+        state.observedAt = now
+        let poll = Double(HerdrControlClient.pushedPollInterval.components.seconds)
+        #expect(state.freshnessInterval >= 2 * poll + 10)
+        #expect(!state.isHeadlineStale(at: now.addingTimeInterval(poll + 4), systemIsStale: false))
+        #expect(state.isHeadlineStale(at: now.addingTimeInterval(120), systemIsStale: false))
+        state.isBackground = true
+        #expect(state.staleDate == now.addingTimeInterval(45))
+        #expect(state.isHeadlineStale(at: now.addingTimeInterval(45), systemIsStale: false))
+    }
+
+    @Test("one old host cannot gray a fresh row or overwrite the headline observation time")
+    func independentObservationTimes() throws {
+        let old = ConnectionActivityEntry(id: UUID(), name: "Old", state: .connected,
+            observedAt: now.addingTimeInterval(-200),
+            tasks: [.init(workspaceName: "old", taskState: "working", paneID: "w1:p1")])
+        let fresh = ConnectionActivityEntry(id: UUID(), name: "Fresh", state: .connected, observedAt: now,
+            tasks: [.init(workspaceName: "fresh", taskState: "working", paneID: "w1:p1")])
+        for preferred in [old.id, fresh.id] {
+            let state = try #require(ConnectionActivitySnapshot.make(entries: [old, fresh], preferredID: preferred,
+                foreground: true, showHostNames: true, now: now))
+            #expect(state.statusDate == (preferred == old.id ? old.observedAt : fresh.observedAt))
+            #expect(state.staleDate == now.addingTimeInterval(120))
+            let rows = try #require(state.tasks)
+            let oldRow = try #require(rows.first { $0.workspaceName == "old" })
+            let freshRow = try #require(rows.first { $0.workspaceName == "fresh" })
+            #expect(oldRow.isStale(at: now, maximumAge: state.freshnessInterval, fallback: false))
+            #expect(!freshRow.isStale(at: now, maximumAge: state.freshnessInterval, fallback: true))
+        }
+        let legacy = ConnectionActivityAttributes.TaskSummary(id: "legacy", state: .working, deepLink: "hermit://")
+        #expect(legacy.isStale(at: now, maximumAge: 120, fallback: true))
+    }
+
+    @Test("idle is distinct from success and sorts behind reported work and completion")
+    func idlePayloadAndOrdering() throws {
+        let id = UUID()
+        let contexts = ["idle", "done", "working", "attention"].enumerated().map { index, phase in
+            ConnectionActivityContext(workspaceName: "workspace-\(index)", taskState: phase, paneID: "%\(index)")
+        }
+        let entry = ConnectionActivityEntry(id: id, name: "Mac", state: .connected,
+            working: 1, attention: 1, done: 1, tasks: contexts)
+        let state = try #require(ConnectionActivitySnapshot.make(entries: [entry], preferredID: id,
+            foreground: true, showHostNames: true, now: now))
+        #expect(state.tasks?.map(\.state) == [.attention, .working, .done])
+        #expect(state.totalTaskCount == 4)
+        let idleEntry = ConnectionActivityEntry(id: id, name: "Mac", state: .connected,
+            paneID: "%0", taskState: .idle, tasks: [contexts[0]])
+        let idle = try #require(ConnectionActivitySnapshot.make(entries: [idleEntry], preferredID: id,
+            foreground: true, showHostNames: true, now: now))
+        #expect(idle.workingCount == 0 && idle.doneCount == 0 && idle.attentionCount == 0)
+        #expect(idle.tasks?.first?.state == .idle && idle.taskState == .idle)
+        let decoded = try JSONDecoder().decode(ConnectionActivityAttributes.ContentState.self,
+            from: JSONEncoder().encode(idle))
+        #expect(decoded.taskState == .idle && decoded.tasks?.first?.state == .idle)
+    }
+
+    @Test("fresh, expired and idle task rows remain within the lock screen card",
+          arguments: [320.0, 360.0, 600.0])
+    func mixedStatusLayout(width: Double) throws {
+        var state = content()
+        state.headlineName = "Mac mini"
+        state.observedAt = now
+        state.tasks = [
+            .init(id: "old", workspaceName: "旧主机", programName: "Codex", detail: "检查连接状态",
+                  state: .working, deepLink: state.deepLink, observedAt: now.addingTimeInterval(-200)),
+            .init(id: "fresh", workspaceName: "新主机", programName: "Claude Code", detail: "分析当前工程架构",
+                  state: .working, deepLink: state.deepLink, observedAt: now),
+            .init(id: "idle", workspaceName: "空闲工作区", programName: "Codex", state: .idle,
+                  deepLink: state.deepLink, observedAt: now)
+        ]
+        let renderer = ImageRenderer(content: ConnectionActivityLockScreen(state: state, isStale: false, now: now)
+            .environment(\.locale, Locale(identifier: "zh-Hans"))
+            .environment(\.colorScheme, .dark).background(Color(white: 0.12)))
+        renderer.proposedSize = .init(width: width, height: nil)
+        let image = try #require(renderer.uiImage)
+        #expect(image.size.height > 50 && image.size.height <= 160)
+        if let directory = ProcessInfo.processInfo.environment["MOSHPIT_ACTIVITY_LAYOUT_OUTPUT"] {
+            let output = URL(fileURLWithPath: directory, isDirectory: true)
+            try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+            try image.pngData()?.write(to: output.appendingPathComponent("mixed-status-\(Int(width)).png"))
         }
     }
 

@@ -21,13 +21,19 @@ struct ConnectionActivityContext: Equatable, Sendable {
     static func make(snapshot: TmuxSnapshot, hooks: [String: AgentHook],
                      hooksLoaded: Bool) -> Self {
         let knownHooks = hooksLoaded ? hooks : [:]
-        let attentionPane = knownHooks.keys.sorted().first { paneID in
-            snapshot.panes[paneID] != nil
-                && reportedState(knownHooks[paneID]) == "attention"
-        }
         let activePane = snapshot.activePaneId.flatMap { snapshot.panes[$0] }
             ?? snapshot.activePanes.first(where: \.isActive)
-        guard let paneID = attentionPane ?? activePane?.id,
+        let taskPane = knownHooks.compactMap { paneID, hook -> (id: String, priority: Int)? in
+            guard snapshot.panes[paneID] != nil,
+                  let state = reportedState(hook).flatMap(ConnectionActivityAttributes.TaskState.init(rawValue:))
+            else { return nil }
+            return (paneID, state.priority)
+        }.sorted {
+            if $0.priority != $1.priority { return $0.priority < $1.priority }
+            if ($0.id == activePane?.id) != ($1.id == activePane?.id) { return $0.id == activePane?.id }
+            return $0.id.compare($1.id, options: .numeric) == .orderedAscending
+        }.first?.id
+        guard let paneID = taskPane ?? activePane?.id,
               let pane = snapshot.panes[paneID] else {
             return Self()
         }
@@ -43,7 +49,9 @@ struct ConnectionActivityContext: Equatable, Sendable {
         return hooks.keys.sorted().compactMap { paneID in
             guard let pane = snapshot.panes[paneID], reportedState(hooks[paneID]) != nil else { return nil }
             var context = paneContext(snapshot: snapshot, hooks: hooks, paneID: paneID, pane: pane)
-            context.taskDetail = hooks[paneID]?.title
+            // An idle agent's last title may describe a previous task. Retain
+            // the agent row, but do not present that old task as ongoing work.
+            context.taskDetail = context.taskState == "idle" ? nil : hooks[paneID]?.title
             return context
         }
     }
@@ -77,6 +85,11 @@ struct ConnectionActivityContext: Equatable, Sendable {
               !(hook.command.map(invalidatesAgent) ?? false) else { return nil }
         switch hook.state {
         case "working", "attention", "done": return hook.state
+        case "idle":
+            guard let agent = hook.agent,
+                  !agent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !invalidatesAgent(agent) else { return nil }
+            return "idle"
         default: return nil
         }
     }

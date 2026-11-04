@@ -7,6 +7,10 @@ import ActivityKit
 /// explicit task titles may appear, gated by the lock-screen detail preference.
 /// Terminal output, connection addresses and command arguments are not sampled.
 public struct ConnectionActivityAttributes: ActivityAttributes {
+    /// Two 45s safety-net polls plus network and local sampling headroom.
+    public static let foregroundFreshnessInterval: TimeInterval = 120
+    public static let backgroundFreshnessInterval: TimeInterval = 45
+
     public enum ConnectionState: String, Codable, Hashable, Sendable {
         case connecting, connected, reconnecting, offline, background
 
@@ -32,21 +36,32 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
     }
 
     public enum TaskState: String, Codable, Hashable, Sendable {
-        case working, attention, done
+        case working, attention, done, idle
 
         public var label: String {
             switch self {
             case .working: return String(localized: "Task in progress")
             case .attention: return String(localized: "Waiting for you")
             case .done: return String(localized: "Task completed")
+            case .idle: return String(localized: "Idle")
             }
         }
 
         public var symbol: String {
             switch self {
-            case .working: return "gearshape.2"
-            case .attention: return "exclamationmark.bubble"
+            case .working: return "circle"
+            case .attention: return "exclamationmark.circle"
             case .done: return "checkmark.circle"
+            case .idle: return "pause.circle"
+            }
+        }
+
+        public var priority: Int {
+            switch self {
+            case .attention: return 0
+            case .working: return 1
+            case .done: return 2
+            case .idle: return 3
             }
         }
     }
@@ -78,6 +93,25 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
         public var totalTaskCount: Int?
 
         public var statusDate: Date { observedAt ?? updatedAt }
+
+        public var freshnessInterval: TimeInterval {
+            isBackground == true || connectionState == .background
+                ? ConnectionActivityAttributes.backgroundFreshnessInterval
+                : ConnectionActivityAttributes.foregroundFreshnessInterval
+        }
+
+        /// The header describes its own host, never an unrelated row's poll.
+        public func isHeadlineStale(at date: Date, systemIsStale: Bool) -> Bool {
+            guard observedAt != nil else { return systemIsStale }
+            return date >= statusDate.addingTimeInterval(freshnessInterval)
+        }
+
+        /// System-level staleness represents the whole snapshot being old.
+        /// Each row also checks its own observation date whenever iOS renders.
+        public var staleDate: Date {
+            let newest = ([statusDate] + (tasks ?? []).compactMap(\.observedAt)).max() ?? statusDate
+            return newest.addingTimeInterval(freshnessInterval)
+        }
 
         public init(connectionCount: Int, headlineName: String?, connectionState: ConnectionState,
                     workingCount: Int, attentionCount: Int, doneCount: Int,
@@ -115,6 +149,11 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
         public var state: TaskState
         public var deepLink: String
         public var observedAt: Date?
+
+        public func isStale(at date: Date, maximumAge: TimeInterval, fallback: Bool) -> Bool {
+            guard let observedAt else { return fallback }
+            return date >= observedAt.addingTimeInterval(maximumAge)
+        }
 
         public init(id: String, workspaceName: String? = nil, hostName: String? = nil,
                     programName: String? = nil, detail: String? = nil, state: TaskState,

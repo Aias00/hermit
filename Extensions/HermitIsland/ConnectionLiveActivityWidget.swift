@@ -6,7 +6,9 @@ import WidgetKit
 private struct ActivityPresentation {
     let state: ConnectionActivityAttributes.ContentState
     let isStale: Bool
-    var historical: Bool { isStale || state.isBackground == true || state.connectionState == .background }
+    var now = Date()
+    var isExpired: Bool { state.isHeadlineStale(at: now, systemIsStale: isStale) }
+    var historical: Bool { isExpired || state.isBackground == true || state.connectionState == .background }
     var task: ConnectionActivityAttributes.TaskState? {
         state.connectionState == .connected ? state.taskState : nil
     }
@@ -27,7 +29,7 @@ private struct ActivityPresentation {
         return task?.symbol ?? state.connectionState.symbol
     }
     var color: Color {
-        if historical { return .secondary }
+        if isExpired || task == .idle { return .secondary }
         if commandFailed || task == .attention || state.connectionState == .reconnecting { return .orange }
         if shellFinished && state.commandExitCode == nil { return .cyan }
         if task == .done { return .green }
@@ -66,7 +68,7 @@ struct ConnectionLiveActivityWidget: Widget {
             } compactTrailing: {
                 if context.state.attentionCount > 0 {
                     Image(systemName: "exclamationmark.circle.fill")
-                        .foregroundStyle(presentation.historical ? Color.secondary : Color.orange)
+                        .foregroundStyle(presentation.isExpired ? Color.secondary : Color.orange)
                         .accessibilityLabel(Text("Needs attention"))
                 } else {
                     Text("\(context.state.connectionCount)").monospacedDigit()
@@ -85,6 +87,7 @@ struct ConnectionLiveActivityWidget: Widget {
 struct ConnectionActivityLockScreen: View {
     let state: ConnectionActivityAttributes.ContentState
     let isStale: Bool
+    var now = Date()
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var rows: [ConnectionActivityAttributes.TaskSummary] {
@@ -93,7 +96,10 @@ struct ConnectionActivityLockScreen: View {
         Array((state.tasks ?? []).prefix(typeSize > .xxLarge ? 1 : (typeSize > .large ? 2 : 3)))
     }
     private var remaining: Int { max(0, (state.totalTaskCount ?? state.tasks?.count ?? 0) - rows.count) }
-    private var historical: Bool { isStale || state.isBackground == true || state.connectionState == .background }
+    private var historical: Bool {
+        state.isHeadlineStale(at: now, systemIsStale: isStale)
+            || state.isBackground == true || state.connectionState == .background
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -109,13 +115,14 @@ struct ConnectionActivityLockScreen: View {
                 .font(.caption2).foregroundStyle(.secondary).fixedSize()
             }
             if rows.isEmpty {
-                ConnectionActivityDetails(state: state, isStale: isStale, showTimestamp: false)
+                ConnectionActivityDetails(state: state, isStale: isStale, showTimestamp: false, now: now)
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(rows) { task in
                         if let url = URL(string: task.deepLink) {
                             Link(destination: url) {
-                                ConnectionActivityTaskRow(task: task, isStale: isStale)
+                                ConnectionActivityTaskRow(task: task, isStale: task.isStale(
+                                    at: now, maximumAge: state.freshnessInterval, fallback: isStale))
                             }
                             .accessibilityIdentifier("connection-live-activity-task-\(task.id)")
                         }
@@ -149,11 +156,16 @@ private struct ConnectionActivityTaskRow: View {
 
     private var color: Color {
         if isStale { return .secondary }
-        switch task.state { case .done: return .green; case .attention, .working: return .orange }
+        switch task.state {
+        case .done: return .green
+        case .attention, .working: return .orange
+        case .idle: return .secondary
+        }
     }
     private var subtitle: String {
-        let detail = task.detail ?? task.state.label
-        return [detail, task.programName, task.hostName].compactMap { $0 }.joined(separator: " · ")
+        let detail = task.state == .idle ? task.state.label : task.detail ?? task.state.label
+        return [isStale ? String(localized: "Last known status") : nil, detail,
+                task.programName, task.hostName].compactMap { $0 }.joined(separator: " · ")
     }
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -161,7 +173,7 @@ private struct ConnectionActivityTaskRow: View {
                 if task.state == .working {
                     Circle().strokeBorder(lineWidth: 1.8).frame(width: 16, height: 16)
                 } else {
-                    Image(systemName: task.state == .done ? "checkmark.circle" : "exclamationmark.circle")
+                    Image(systemName: task.state.symbol)
                         .font(.system(size: 16, weight: .medium))
                 }
             }
@@ -175,7 +187,9 @@ private struct ConnectionActivityTaskRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([task.workspaceName, task.programName, task.state.label, task.detail, task.hostName]
+        .accessibilityLabel([task.workspaceName, task.programName, task.state.label,
+                             task.state == .idle ? nil : task.detail, task.hostName,
+                             isStale ? String(localized: "Last known status") : nil]
             .compactMap { $0 }.joined(separator: ", "))
     }
 }
@@ -184,7 +198,8 @@ private struct ConnectionActivityDetails: View {
     let state: ConnectionActivityAttributes.ContentState
     let isStale: Bool
     var showTimestamp = true
-    private var presentation: ActivityPresentation { .init(state: state, isStale: isStale) }
+    var now = Date()
+    private var presentation: ActivityPresentation { .init(state: state, isStale: isStale, now: now) }
 
     private var context: String {
         // Plain SSH already uses the transport as its title.

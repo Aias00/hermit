@@ -33,6 +33,7 @@ enum ConnectionActivitySnapshot {
             let firstNeedsAttention = $0.state == .connected && $0.attention > 0
             let secondNeedsAttention = $1.state == .connected && $1.attention > 0
             if firstNeedsAttention != secondNeedsAttention { return firstNeedsAttention }
+            if ($0.state == .connected) != ($1.state == .connected) { return $0.state == .connected }
             if ($0.id == preferredID) != ($1.id == preferredID) { return $0.id == preferredID }
             return $0.id.uuidString < $1.id.uuidString
         }
@@ -51,20 +52,19 @@ enum ConnectionActivitySnapshot {
                     workspaceName: showHostNames ? boundedText(context.workspaceName, bytes: 80) : nil,
                     hostName: showHostNames && entry.id != headline.id ? boundedText(entry.name, bytes: 80) : nil,
                     programName: context.programName,
-                    detail: showTaskDetails ? boundedText(context.taskDetail, bytes: 180) : nil,
+                    detail: showTaskDetails && state != .idle ? boundedText(context.taskDetail, bytes: 180) : nil,
                     state: state, deepLink: AgentDeepLink.string(connectionId: entry.id, paneId: pane),
                     observedAt: entry.observedAt)
             }
         }.sorted {
             // Keep prompts ahead of working tasks, then completed tasks. Stable
             // identity avoids rows jumping around on every observation tick.
-            func rank(_ state: ConnectionActivityAttributes.TaskState) -> Int {
-                switch state { case .attention: return 0; case .working: return 1; case .done: return 2 }
-            }
-            if rank($0.state) != rank($1.state) { return rank($0.state) < rank($1.state) }
+            if $0.state.priority != $1.state.priority { return $0.state.priority < $1.state.priority }
             let firstOnHeadline = $0.id.hasPrefix(headline.id.uuidString + ":")
             let secondOnHeadline = $1.id.hasPrefix(headline.id.uuidString + ":")
             if firstOnHeadline != secondOnHeadline { return firstOnHeadline }
+            let preferredPane = headline.paneID.map { "\(headline.id.uuidString):\($0)" }
+            if ($0.id == preferredPane) != ($1.id == preferredPane) { return $0.id == preferredPane }
             return $0.id.compare($1.id, options: .numeric) == .orderedAscending
         }
         let visibleTasks = Array(allTasks.prefix(3))
@@ -79,8 +79,7 @@ enum ConnectionActivitySnapshot {
                      workspaceName: showHostNames ? boundedAlias(headline.workspaceName) : nil,
                      programName: headline.programName,
                      taskState: headline.state == .connected ? headline.taskState : nil,
-                     observedAt: visibleTasks.compactMap(\.observedAt).min()
-                        ?? (headline.state == .connected ? headline.observedAt : nil),
+                     observedAt: headline.state == .connected ? headline.observedAt : nil,
                      commandExitCode: headline.state == .connected && headline.taskState == .done
                         ? headline.commandExitCode : nil,
                      tasks: visibleTasks, totalTaskCount: allTasks.count)
@@ -166,8 +165,7 @@ final class SystemConnectionActivityBackend: ConnectionActivityBackend {
                 await extra.end(nil, dismissalPolicy: .immediate)
             }
         }
-        let content = ActivityContent(state: state,
-                                      staleDate: state.statusDate.addingTimeInterval(45))
+        let content = ActivityContent(state: state, staleDate: state.staleDate)
         if let activity {
             await activity.update(content)
         } else if canStart && UIApplication.shared.applicationState == .active {
