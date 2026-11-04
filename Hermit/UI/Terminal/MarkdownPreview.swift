@@ -92,11 +92,12 @@ enum MarkdownPreviewSource {
 
 struct MarkdownPreview: UIViewRepresentable {
     let text: String
+    @Environment(\.colorScheme) private var colorScheme
     static var resourceURL: URL? {
         Bundle.main.url(forResource: "Markdown", withExtension: "bundle")?.appendingPathComponent("index.html")
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: text) }
+    func makeCoordinator() -> Coordinator { Coordinator(text: text, darkMode: colorScheme == .dark) }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -116,8 +117,11 @@ struct MarkdownPreview: UIViewRepresentable {
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
-        guard context.coordinator.text != text else { return }
+        let darkMode = colorScheme == .dark
+        guard !context.coordinator.text.utf8.elementsEqual(text.utf8)
+                || context.coordinator.darkMode != darkMode else { return }
         context.coordinator.text = text
+        context.coordinator.darkMode = darkMode
         if context.coordinator.loaded { context.coordinator.render(view) }
     }
 
@@ -128,15 +132,16 @@ struct MarkdownPreview: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var text: String
+        var darkMode: Bool
         var loaded = false
-        init(text: String) { self.text = text }
+        init(text: String, darkMode: Bool) { self.text = text; self.darkMode = darkMode }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             loaded = true
             render(webView)
         }
         func render(_ webView: WKWebView) {
-            webView.callAsyncJavaScript("return await window.renderMarkdown(source)",
-                arguments: ["source": MarkdownPreviewSource.prepare(text)], in: nil, in: .page) { _ in }
+            webView.callAsyncJavaScript("return await window.renderMarkdown(source,darkMode)",
+                arguments: ["source": MarkdownPreviewSource.prepare(text), "darkMode": darkMode], in: nil, in: .page) { _ in }
         }
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

@@ -4,6 +4,92 @@ import WebKit
 
 @Suite("Offline Markdown preview") @MainActor
 struct MarkdownPreviewTests {
+    private func renderer() async throws -> WKWebView {
+        let url = try #require(MarkdownPreview.resourceURL)
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let web = WKWebView(frame: .init(x: 0, y: 0, width: 390, height: 800), configuration: configuration)
+        web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        for _ in 0..<250 {
+            if (try? await web.evaluateJavaScript("typeof window.renderMarkdown === 'function'")) as? Bool == true {
+                return web
+            }
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        throw NSError(domain: "MarkdownPreviewTests", code: 1)
+    }
+
+    private func render(_ source: String, in web: WKWebView) async throws -> [String: Any] {
+        let value = try await execute("return await window.renderMarkdown(source)",
+            arguments: ["source": source], in: web)
+        return try #require(value as? [String: Any])
+    }
+
+    private func execute(_ body: String, arguments: [String: Any], in web: WKWebView) async throws -> Any {
+        try await withCheckedThrowingContinuation { continuation in
+            web.callAsyncJavaScript(body, arguments: arguments, in: nil, in: .page) {
+                continuation.resume(with: $0)
+            }
+        }
+    }
+
+    @Test("Appending text preserves existing paragraphs and rendered diagrams")
+    func reusesUnchangedBlocks() async throws {
+        let web = try await renderer()
+        defer { web.stopLoading() }
+        let source = "# 标题\n\n保留这段文字。\n\n```mermaid\nflowchart TD\nA --> B\n```\n"
+        let initial = try await render(source, in: web)
+        #expect(initial["renderedDiagrams"] as? Int == 1)
+        _ = try await web.evaluateJavaScript("window.savedHeading=document.querySelector('#content h1');window.savedDiagram=document.querySelector('#content svg');true")
+        let appended = try await render(source + "\n新增正文。", in: web)
+        #expect(appended["renderedDiagrams"] as? Int == 0)
+        #expect(try await web.evaluateJavaScript("savedHeading === document.querySelector('#content h1') && savedDiagram === document.querySelector('#content svg')") as? Bool == true)
+        let identical = try await render(source + "\n新增正文。", in: web)
+        #expect(identical["unchanged"] as? Bool == true)
+        #expect(try await web.evaluateJavaScript("document.querySelector('#content').textContent.includes('新增正文。')") as? Bool == true)
+    }
+
+    @Test("Reference definitions invalidate affected text and cached diagrams have unique IDs")
+    func referencesAndDuplicateDiagrams() async throws {
+        let web = try await renderer()
+        defer { web.stopLoading() }
+        _ = try await render("[文档][ref]\n\n[ref]: https://example.com/one", in: web)
+        _ = try await render("[文档][ref]\n\n[ref]: https://example.com/two", in: web)
+        #expect(try await web.evaluateJavaScript("document.querySelector('#content a').href") as? String == "https://example.com/two")
+        let graph = "```mermaid\nflowchart TD\nA --> B\n```\n\n"
+        let result = try await render(graph + graph, in: web)
+        #expect(result["diagrams"] as? Int == 2)
+        #expect(result["renderedDiagrams"] as? Int == 1)
+        #expect(result["reusedDiagrams"] as? Int == 1)
+        #expect(try await web.evaluateJavaScript("(()=>{const ids=[...document.querySelectorAll('#content [id]')].map(n=>n.id);return ids.length===new Set(ids).size})()") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("[...document.querySelectorAll('#content svg')].every(s=>[...s.querySelectorAll('style')].some(n=>n.textContent.includes('#'+s.id)))") as? Bool == true)
+    }
+
+    @Test("Overlapping renders retain only the latest document and a changed graph is rebuilt")
+    func latestRequestWins() async throws {
+        let web = try await renderer()
+        defer { web.stopLoading() }
+        _ = try await execute("return await Promise.all([window.renderMarkdown(old),window.renderMarkdown(next),window.renderMarkdown(final)])",
+            arguments: ["old": "```mermaid\nflowchart TD\nA --> B\n```", "next": "intermediate", "final": "# 最新内容"], in: web)
+        #expect(try await web.evaluateJavaScript("document.querySelector('#content').textContent.trim()") as? String == "最新内容")
+        let result = try await render("```mermaid\nflowchart TD\nA --> C\n```", in: web)
+        #expect(result["renderedDiagrams"] as? Int == 1)
+        #expect(try await web.evaluateJavaScript("document.querySelector('#content svg').textContent.includes('C')") as? Bool == true)
+    }
+
+    @Test("Appearance changes refresh diagram styling without another source update")
+    func appearanceInvalidatesDiagrams() async throws {
+        let web = try await renderer()
+        defer { web.stopLoading() }
+        let source = "```mermaid\nflowchart TD\nA --> B\n```"
+        _ = try await execute("return await window.renderMarkdown(source,false)", arguments: ["source": source], in: web)
+        _ = try await web.evaluateJavaScript("window.previousDiagram=document.querySelector('#content svg');window.previousColour=getComputedStyle(document.body).color;true")
+        _ = try await execute("return await window.renderMarkdown(source,true)", arguments: ["source": source], in: web)
+        #expect(try await web.evaluateJavaScript("document.querySelector('#content svg') !== previousDiagram && document.documentElement.dataset.appearance==='dark' && getComputedStyle(document.body).color !== previousColour") as? Bool == true)
+        let repeated = try #require(try await execute("return await window.renderMarkdown(source,true)", arguments: ["source": source], in: web) as? [String: Any])
+        #expect(repeated["unchanged"] as? Bool == true)
+    }
+
     @Test("Markdown files retain their exact source and non-file URLs are never fetched")
     func localFilesOnly() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".MD")

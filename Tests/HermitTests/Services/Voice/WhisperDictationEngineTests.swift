@@ -10,6 +10,64 @@ import Testing
 /// the one in `finishAudio()`.
 @Suite("Whisper dictation engine")
 struct WhisperDictationEngineTests {
+    private static let normalEnergy = AppEnergyPolicy(lowPowerMode: false, thermalState: .nominal)
+
+    @Test("Long recordings and power constraints reduce advisory preview work")
+    func previewBudget() {
+        let normal = Self.normalEnergy
+        #expect(WhisperPreviewBudget(audioSeconds: 3, energy: normal).interval == .milliseconds(900))
+        #expect(WhisperPreviewBudget(audioSeconds: 20, energy: normal).interval == .seconds(2))
+        #expect(WhisperPreviewBudget(audioSeconds: 45, energy: normal).interval == .seconds(4))
+        #expect(WhisperPreviewBudget(audioSeconds: 90, energy: normal).interval == .seconds(8))
+        let saving = AppEnergyPolicy(lowPowerMode: true, thermalState: .nominal)
+        #expect(WhisperPreviewBudget(audioSeconds: 3, energy: saving).interval == .seconds(4))
+        let critical = AppEnergyPolicy(lowPowerMode: false, thermalState: .critical)
+        #expect(!WhisperPreviewBudget(audioSeconds: 3, energy: critical).allowsPreview)
+    }
+
+    @Test("Unchanged audio is not decoded repeatedly; identical previews publish once")
+    func skipsRepeatedAudioAndText() async throws {
+        let store = ScriptedTranscriber(answers: ["same", "same", "complete"])
+        let engine = WhisperDictationEngine(store: store, variant: "test", language: "zh", label: "test",
+                                           energyPolicy: { Self.normalEnergy })
+        let consumer = Task { () throws -> [DictationUpdate] in
+            var result: [DictationUpdate] = []
+            for try await update in engine.updates { result.append(update) }
+            return result
+        }
+        defer { engine.cancel(); consumer.cancel() }
+        try await engine.start()
+        engine.append(try buffer(frames: 48_000))
+        #expect(await eventually { await store.sampleCounts.count == 1 })
+        try await Task.sleep(for: .milliseconds(1100))
+        #expect(await store.sampleCounts.count == 1)
+        engine.append(try buffer(frames: 16_000))
+        #expect(await eventually { await store.sampleCounts.count == 2 })
+        await engine.finishAudio()
+        let result = try await consumer.value
+        #expect(result == [.init(finalizedText: "", volatileText: "same"),
+                           .init(finalizedText: "complete", volatileText: "")])
+        let counts = await store.sampleCounts
+        try #require(counts.count == 3)
+        #expect(counts[0] > 32_000 && counts[0] <= 48_000)
+        #expect(counts[1] > counts[0] && counts[1] <= 64_000)
+        #expect(counts.last == 64_000, "final decoding drains and retains the converter's EOS tail")
+    }
+
+    @Test("Critical thermal budget still finalizes the entire recording immediately")
+    func thermalBudgetPreservesFinalAudio() async throws {
+        let store = ScriptedTranscriber(answers: ["full recording"])
+        let engine = WhisperDictationEngine(store: store, variant: "test", language: "zh", label: "test",
+            energyPolicy: { .init(lowPowerMode: true, thermalState: .critical) })
+        try await engine.start()
+        for _ in 0..<40 { engine.append(try buffer(frames: 16_000)) }
+        #expect(await store.sampleCounts.isEmpty)
+        await engine.finishAudio()
+        var result: [DictationUpdate] = []
+        for try await update in engine.updates { result.append(update) }
+        #expect(await store.sampleCounts == [640_000])
+        #expect(result == [.init(finalizedText: "full recording", volatileText: "")])
+    }
 
     /// Holds work even after cancellation, like a CoreML operation already
     /// running. Releasing before entry is also safe for test failure cleanup.
@@ -126,7 +184,8 @@ struct WhisperDictationEngineTests {
     @Test("Final decoding waits for a cancelled preview to actually return")
     func finalWaitsForUncooperativePreview() async throws {
         let store = SuspendedTranscriber()
-        let engine = WhisperDictationEngine(store: store, variant: "test", language: "zh", label: "test")
+        let engine = WhisperDictationEngine(store: store, variant: "test", language: "zh", label: "test",
+                                           energyPolicy: { Self.normalEnergy })
         try await engine.start()
         engine.append(try buffer(frames: 48_000))
         #expect(await eventually { await store.calls == 1 })
@@ -222,7 +281,8 @@ struct WhisperDictationEngineTests {
     private func makeEngine(_ store: ScriptedTranscriber,
                             language: String? = "zh") -> WhisperDictationEngine {
         WhisperDictationEngine(store: store, variant: "openai_whisper-small",
-                               language: language, label: "Small · Chinese")
+                               language: language, label: "Small · Chinese",
+                               energyPolicy: { Self.normalEnergy })
     }
 
     @Test("Final pass reads every sample appended, and lands as finalized text")

@@ -27,6 +27,25 @@ extension WhisperTranscribing {
 
 extension WhisperModelStore: WhisperTranscribing {}
 
+/// Only advisory previews slow down; final recognition retains all audio.
+struct WhisperPreviewBudget: Equatable {
+    let interval: Duration
+    let allowsPreview: Bool
+
+    init(audioSeconds: Double, energy: AppEnergyPolicy) {
+        let lengthInterval: Double
+        switch audioSeconds {
+        case ..<15: lengthInterval = 0.9
+        case ..<30: lengthInterval = 2
+        case ..<60: lengthInterval = 4
+        default: lengthInterval = 8
+        }
+        let energyInterval = energy.terminalFramesPerSecond == 60 ? 0.9 : energy.samplingInterval
+        interval = .seconds(max(lengthInterval, energyInterval))
+        allowsPreview = energy.terminalFramesPerSecond > 10
+    }
+}
+
 /// Dictation backed by a local Whisper model.
 ///
 /// Structurally unlike the Apple engines, and the difference is inherent to
@@ -36,9 +55,9 @@ extension WhisperModelStore: WhisperTranscribing {}
 /// hears a sentence whose language changes halfway through. So this engine
 /// buffers the microphone and *re-transcribes*:
 ///
-/// - While listening it runs a pass over everything heard so far, at most one
-///   at a time, and publishes the result as the volatile hypothesis. Live text
-///   for free, at whatever cadence the model can sustain.
+/// - While listening it runs full-context previews, at most one at a time.
+///   Unchanged audio is not decoded again; long recordings and constrained
+///   power/thermal states reduce this advisory work.
 /// - On `finishAudio()` it runs one last pass over the complete recording and
 ///   publishes that as finalized. This is the transcript that matters — full
 ///   context, so the tail of a sentence can still fix the head of it.
@@ -63,6 +82,7 @@ final class WhisperDictationEngine: DictationEngine {
     /// Whisper language code, or nil to let the model detect it.
     private let language: String?
     private let contextualStrings: [String]
+    private let energyPolicy: @Sendable () -> AppEnergyPolicy
     private let updateContinuation: AsyncThrowingStream<DictationUpdate, Error>.Continuation
     private let converter = DictationBufferConverter()
 
@@ -104,12 +124,14 @@ final class WhisperDictationEngine: DictationEngine {
     }
 
     init(store: any WhisperTranscribing, variant: String, language: String?, label: String,
-         contextualStrings: [String] = []) {
+         contextualStrings: [String] = [],
+         energyPolicy: @escaping @Sendable () -> AppEnergyPolicy = { .current }) {
         self.store = store
         self.variant = variant
         self.language = language
         self.label = label
         self.contextualStrings = VoiceVocabulary.normalized(contextualStrings)
+        self.energyPolicy = energyPolicy
         (updates, updateContinuation) = AsyncThrowingStream.makeStream()
     }
 
@@ -259,33 +281,40 @@ final class WhisperDictationEngine: DictationEngine {
 
     // MARK: Live preview
 
-    /// Re-transcribe what's been heard so far, over and over, publishing each
-    /// result as the volatile hypothesis.
-    ///
-    /// Self-throttling by construction: passes are strictly sequential and the
-    /// gap after one is at least as long as that pass took. On a fast model
-    /// the preview updates about once a second; on `large-v3-turbo` with a
-    /// long utterance it slows to every few seconds, which is the correct
-    /// degradation — the preview is a courtesy, and the pass that counts is
-    /// the one in `finishAudio()`.
+    /// Keep full context instead of stitching independently decoded windows,
+    /// which can duplicate or drop words. Only the preview cadence adapts.
     private func runPreviewLoop() async {
-        let minimumGap = Duration.milliseconds(900)
+        var lastSampleCount = 0
+        var lastText: String?
         while !Task.isCancelled {
-            try? await Task.sleep(for: minimumGap)
+            let budget = WhisperPreviewBudget(audioSeconds: recordedSeconds, energy: energyPolicy())
+            do { try await Task.sleep(for: budget.interval) } catch { return }
             if Task.isCancelled { return }
-            guard let snapshot = lock.withLock({ state == .recording ? samples : nil }) else { return }
-            guard snapshot.count >= Self.previewFloorSamples else { continue }
+            // Recheck after the wait: a thermal transition may have happened
+            // while sleeping. Do not even copy the sample buffer when paused.
+            guard WhisperPreviewBudget(audioSeconds: recordedSeconds, energy: energyPolicy()).allowsPreview else { continue }
+            let snapshot: [Float]? = lock.withLock {
+                guard state == .recording, samples.count >= Self.previewFloorSamples,
+                      samples.count > lastSampleCount else { return nil }
+                return samples
+            }
+            guard let snapshot else {
+                if lock.withLock({ state != .recording }) { return }
+                continue
+            }
+            lastSampleCount = snapshot.count
             let started = ContinuousClock.now
             do {
                 let text = try await store.transcribe(
                     samples: snapshot, language: language, variant: variant, contextualStrings: contextualStrings)
                 if Task.isCancelled { return }
-                if !text.isEmpty {
+                if !text.isEmpty, lastText != text {
                     lock.withLock {
                         guard state == .recording else { return }
                         updateContinuation.yield(
                             DictationUpdate(finalizedText: "", volatileText: text))
                     }
+                    lastText = text
                 }
             } catch {
                 // A failed preview says nothing about the final pass — the
@@ -295,7 +324,7 @@ final class WhisperDictationEngine: DictationEngine {
             // Back off by however long that took, so a slow model yields the
             // CPU instead of queueing passes back to back.
             let elapsed = ContinuousClock.now - started
-            if elapsed > minimumGap, !Task.isCancelled {
+            if elapsed > budget.interval, !Task.isCancelled {
                 try? await Task.sleep(for: elapsed)
             }
         }

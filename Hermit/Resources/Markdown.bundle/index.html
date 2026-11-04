@@ -4,36 +4,11 @@
 <style>
 :root{color-scheme:light dark;--bg:#fff;--fg:#20252d;--muted:#646a73;--line:#dce0e5;--code:#f3f5f7;--accent:#3370ff}
 @media(prefers-color-scheme:dark){:root{--bg:#0c1924;--fg:#d5dfe9;--muted:#9baaba;--line:#334453;--code:#172937;--accent:#8ab4ff}}
+:root[data-appearance=default]{color-scheme:light;--bg:#fff;--fg:#20252d;--muted:#646a73;--line:#dce0e5;--code:#f3f5f7;--accent:#3370ff}
+:root[data-appearance=dark]{color-scheme:dark;--bg:#0c1924;--fg:#d5dfe9;--muted:#9baaba;--line:#334453;--code:#172937;--accent:#8ab4ff}
 *{box-sizing:border-box}body{margin:0;padding:20px 18px 48px;background:var(--bg);color:var(--fg);font:17px/1.75 -apple-system,BlinkMacSystemFont,sans-serif;overflow-wrap:anywhere}h1,h2,h3,h4{line-height:1.4;margin:1.1em 0 .55em}h1{font-size:1.65em}h2{font-size:1.4em}h3{font-size:1.2em}p{margin:.7em 0}li{margin:.35em 0}ul,ol{padding-left:1.6em}a{color:var(--accent)}blockquote{border-left:3px solid var(--accent);padding:2px 14px;margin:14px 0;color:var(--muted)}code{font: .87em/1.6 ui-monospace,Menlo,monospace;background:var(--code);border-radius:4px;padding:2px 4px}pre{padding:14px;border-radius:10px;background:var(--code);overflow:auto;white-space:pre;overflow-wrap:normal}pre code{padding:0;background:none}hr{border:0;border-top:1px solid var(--line);margin:24px 0}.table-scroll{overflow:auto}table{border-collapse:collapse;min-width:100%;margin:12px 0}th,td{padding:8px 12px;border:1px solid var(--line);min-width:90px}th{background:var(--code);text-align:left}.diagram{overflow:auto;margin:16px 0;padding:12px;background:var(--code);border:1px solid var(--line);border-radius:10px}.diagram svg{display:block;max-width:none;height:auto;margin:auto}.diagram-error{font-size:.85em;color:var(--muted)}input{pointer-events:none}
 </style>
 <script nonce="hermit-preview" src="marked.js"></script><script nonce="hermit-preview" src="purify.min.js"></script><script nonce="hermit-preview" src="mermaid.min.js"></script>
 </head><body><main id="content" aria-label="Markdown 预览"></main>
-<script nonce="hermit-preview">
-let generation=0;
-window.renderMarkdown=async function(source){
- const run=++generation, target=document.getElementById('content');
- const clean=DOMPurify.sanitize(marked.parse(source.slice(0,200000),{gfm:true,breaks:false}),{USE_PROFILES:{html:true},FORBID_TAGS:['script','style','iframe','object','embed','img','video','audio','form'],FORBID_ATTR:['style','src','srcset','id']});
- target.innerHTML=clean;
- target.querySelectorAll('a').forEach(a=>{if(!/^https?:\/\//i.test(a.getAttribute('href')||''))a.removeAttribute('href')});
- target.querySelectorAll('table').forEach(t=>{const wrap=document.createElement('div');wrap.className='table-scroll';t.replaceWith(wrap);wrap.append(t)});
- mermaid.initialize({startOnLoad:false,securityLevel:'strict',htmlLabels:false,theme:matchMedia('(prefers-color-scheme:dark)').matches?'dark':'default',maxTextSize:20000,maxEdges:400,suppressErrorRendering:true,flowchart:{htmlLabels:false,useMaxWidth:false},secure:['secure','securityLevel','startOnLoad','maxTextSize','maxEdges','themeCSS','fontFamily','altFontFamily','htmlLabels']});
- const diagrams=[...target.querySelectorAll('code.language-mermaid')];let rendered=0;
- for(let i=0;i<diagrams.length;i++){
-  if(run!==generation)return {cancelled:true};
-  const code=diagrams[i], pre=code.parentElement;
-  if(i>=8||code.textContent.length>20000)continue;
-  // Display-only diagrams: disallow per-document configuration and callbacks.
-  const graph=code.textContent.replace(/%%\{[\s\S]*?\}%%/g,'').replace(/^---[\s\S]*?\n---\s*\n/,'');
-  try{
-   const result=await mermaid.render('hermit-diagram-'+run+'-'+i,graph);
-   if(run!==generation)return {cancelled:true};
-   const box=document.createElement('div');box.className='diagram';
-   box.innerHTML=DOMPurify.sanitize(result.svg,{USE_PROFILES:{svg:true,svgFilters:true},ADD_TAGS:['style'],FORBID_TAGS:['foreignObject','script','image','a'],FORBID_ATTR:['href','xlink:href']});
-   pre.replaceWith(box);rendered++;
-  }catch(e){
-   const note=document.createElement('p');note.className='diagram-error';note.textContent='图表内容不完整或格式不受支持，已保留源码。';pre.before(note);
-  }
- }
- return {diagrams:rendered,headings:target.querySelectorAll('h1,h2,h3').length,tables:target.querySelectorAll('table').length};
-};
-</script></body></html>
+<style>pre.mermaid-preview{margin:16px 0;padding:0;background:none;white-space:normal;overflow:visible}.mermaid-preview .diagram{margin:0}</style>
+<script nonce="hermit-preview" src="renderer.js"></script></body></html>
