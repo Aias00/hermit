@@ -63,6 +63,8 @@ struct TerminalScreen: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @State private var active: SessionHub.ActiveSession?
+    @State private var presentationOwner = UUID()
+    @State private var screenIsVisible = false
     @State private var showWindowsSheet = false
     @State private var showSessionsSheet = false
     @State private var showPaneSheet = false
@@ -140,12 +142,16 @@ struct TerminalScreen: View {
     /// Minted on mic tap (not at screen init) so idle terminals never touch
     /// audio plumbing.
     @State private var dictation: VoiceDictationController?
+    @State private var dictationDraft: TerminalComposerDraft?
     @State private var dictationStartTask: Task<Void, Never>?
     @State private var dictationFinishTask: Task<Void, Never>?
     /// Live image-attachment flow; non-nil while its overlay is up. Minted
     /// when the picker returns (not on chip tap) so cancelling the picker
     /// leaves no state behind.
-    @State private var imageAttachment: ImageAttachmentController?
+    private var imageAttachment: ImageAttachmentController? {
+        get { composerDraft.imageAttachment }
+        nonmutating set { composerDraft.imageAttachment = newValue }
+    }
     #if DEBUG
     @State private var seededImageDraft = false
     #endif
@@ -163,9 +169,16 @@ struct TerminalScreen: View {
     }
 
     private func openOutputReader(preview: Bool = false) {
-        guard let coordinator = typingCoordinator else { return }
+        Log.input.notice("output reader: requested coordinator=\(typingCoordinator != nil, privacy: .public) surface=\(typingCoordinator?.terminalView != nil, privacy: .public)")
+        guard let coordinator = typingCoordinator else {
+            composerSendError = "终端画面尚未就绪，请稍后查看。"
+            return
+        }
         let screenOnly = connection.multiplexer != .none || connection.connectionProtocol == .mosh
-        guard let snapshot = TerminalOutputSnapshot.capture(coordinator, screenOnly: screenOnly) else { return }
+        guard let snapshot = TerminalOutputSnapshot.capture(coordinator, screenOnly: screenOnly) else {
+            composerSendError = "终端画面尚未就绪，请稍后查看。"
+            return
+        }
         let owner = active
         let pane = tmuxSnapshot?.activePaneId
         let generation = coordinator.outputGeneration
@@ -187,11 +200,14 @@ struct TerminalScreen: View {
                 return TerminalOutputSnapshot.capture(coordinator, screenOnly: screenOnly)
             }, revision: { [weak coordinator] in stillOwnsSource() ? coordinator?.outputRevision : nil }, preview: preview)
         presentSheet { outputReader = context }
+        Log.input.notice("output reader: presentation requested")
     }
 
     private var fileUploads: FileUploadQueue { composerDraft.uploads }
     @State private var photoPickerPresented = false
     @State private var photoSelection: [PhotosPickerItem] = []
+    @State private var attachmentPickerDraft: TerminalComposerDraft?
+    @State private var uploadDetailsDraft: TerminalComposerDraft?
     /// Whether the clipboard currently carries an image — drives the chip
     /// menu's "Paste image" entry. Type metadata only (`hasImages`), which is
     /// cheap and never triggers the system paste prompt; the actual data read
@@ -651,7 +667,7 @@ struct TerminalScreen: View {
                 cancelDictation()
             }
             if phase == .active {
-                if let active, hub.visibleSession === active {
+                if let active, hub.ownsVisiblePresentation(active, owner: presentationOwner) {
                     active.resumeHerdrFrames()
                 }
                 clipboardHasImage = UIPasteboard.general.hasImages
@@ -676,6 +692,7 @@ struct TerminalScreen: View {
             if open { disarmStickyCtrlIfNeeded() }
             else { restoreFocusAfterSheet() }
         }
+        .onChange(of: active?.inputTarget) { _, _ in adoptComposerDraft() }
         .onChange(of: tmuxSnapshot?.activePaneId) { _, _ in disarmStickyCtrlIfNeeded() }
         .onChange(of: typingCoordinator.map { ObjectIdentifier($0) }) { _, _ in disarmStickyCtrlIfNeeded() }
         .onChange(of: terminalLocationID) { previous, current in
@@ -715,7 +732,8 @@ struct TerminalScreen: View {
             }
             await connectAndAttach()
         }
-        .onDisappear {
+        .onDisappear { [presentationOwner] in
+            screenIsVisible = false
             disarmStickyCtrlIfNeeded()
             cancelDictation()
             accessLoginTask?.cancel()
@@ -725,8 +743,7 @@ struct TerminalScreen: View {
             // windows isn't stranded at the phone width. Re-pinned in .task on
             // return. (A presented sheet doesn't fire onDisappear, so opening the
             // windows/sessions picker won't release the pin.)
-            active?.releaseWindowPinsForBackground(reason: "screen-disappeared")
-            if hub.visibleSession === active { hub.visibleSession = nil }
+            if let active { hub.releaseVisiblePresentation(active, owner: presentationOwner) }
             HardwareKeys.shared.uninstall(owner: hardwareKeyOwner)
         }
         .onChange(of: appearanceKey) { applyAppearance() }
@@ -786,6 +803,7 @@ struct TerminalScreen: View {
     var body: some View {
         contentWithLifecycle
         .onChange(of: launchIsConnected, initial: true) { _, connected in
+            if connected { adoptComposerDraft() }
             #if DEBUG
             if connected {
                 seedImageDraftForUITest()
@@ -861,14 +879,17 @@ struct TerminalScreen: View {
                                  currentRevision: context.revision, snapshot: context.snapshot, showsPreview: context.preview)
         }
         .appSheet(isPresented: $showsFileUploads) {
-            FileUploadQueueView(queue: fileUploads, canRetry: launchIsConnected) {
-                startFileUploads(retry: true)
+            let owner = uploadDetailsDraft ?? composerDraft
+            FileUploadQueueView(queue: owner.uploads, canRetry: launchIsConnected) {
+                startFileUploads(retry: true, draft: owner)
             }
         }
         .fileImporter(isPresented: $filePickerPresented, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            let owner = attachmentPickerDraft ?? composerDraft
+            attachmentPickerDraft = nil
             switch result {
-            case .success(let urls): uploadLocalFiles(urls)
-            case .failure(let error): composerSendError = error.localizedDescription
+            case .success(let urls): uploadLocalFiles(urls, draft: owner)
+            case .failure(let error): owner.errorMessage = error.localizedDescription
             }
         }
         .photosPicker(isPresented: $photoPickerPresented,
@@ -882,7 +903,9 @@ struct TerminalScreen: View {
             CameraCaptureView { data in
                 showCamera = false
                 guard let data else { return }
-                guard let controller = makeImageAttachmentController() else { return }
+                let owner = attachmentPickerDraft ?? composerDraft
+                attachmentPickerDraft = nil
+                guard let controller = makeImageAttachmentController(draft: owner) else { return }
                 controller.start(pickedData: [data])
             }
             .ignoresSafeArea()
@@ -993,11 +1016,8 @@ struct TerminalScreen: View {
     /// so a now-present tmux / mosh-server is picked up automatically.
     private func reconnect() {
         guard let active else { return }
-        // Manual reconnects (protocol switch, Install Assist) swap in a
-        // brand-new session whose connState opens .connecting, so the
-        // .reconnecting onChange never fires for them — collapse the keyboard
-        // here for the same reason it collapses there.
-        keyboardIntent = .down
+        // Keep the editor and its keyboard intent through session replacement.
+        // Connection/target guards prevent writes while the new channel dials.
         let opensNewShell = connection.transport == .cloudflareSSH && connection.multiplexer == .none
             && (wasEverLive || active.shellWasReopened)
         Task {
@@ -1005,6 +1025,10 @@ struct TerminalScreen: View {
             guard hub.sessions[connection.id] === session, !session.isStopping else { return }
             session.shellWasReopened = opensNewShell
             self.active = session
+            if screenIsVisible {
+                presentationOwner = UUID()
+                hub.claimVisiblePresentation(session, owner: presentationOwner)
+            } else { hub.releaseVisiblePresentation(session, owner: presentationOwner) }
             await hub.start(session, theme: theme, fontSize: settings.fontSize, fontName: settings.fontName,
                         cursorShape: settings.cursorShape, cursorColorId: effectiveCursorColorId,
                         cursorBlink: settings.cursorBlink)
@@ -1983,15 +2007,18 @@ struct TerminalScreen: View {
     /// this closure was one straw too many for the view body's already-huge
     /// modifier-chain expression, blowing the type checker's budget.
     private func connectAndAttach() async {
+        screenIsVisible = true
         let session = hub.prepare(connection)
         active = session
-        composerDraft = session.composerDraft
+        adoptComposerDraft()
         // Foreground/background transitions re-pin/release for the terminal
         // the user is actually looking at.
-        hub.visibleSession = session
+        hub.claimVisiblePresentation(session, owner: presentationOwner)
         await hub.start(session, theme: theme, fontSize: settings.fontSize, fontName: settings.fontName,
                         cursorShape: settings.cursorShape, cursorColorId: effectiveCursorColorId,
                         cursorBlink: settings.cursorBlink)
+        guard !Task.isCancelled, screenIsVisible,
+              hub.ownsVisiblePresentation(session, owner: presentationOwner) else { return }
         // Returning to an already-alive session (Back→Home doesn't disconnect,
         // and start() is idempotent): onDisappear released our window-size pin
         // so a desktop client could reclaim its width. Re-pin to the phone grid
@@ -2026,6 +2053,17 @@ struct TerminalScreen: View {
         selectPendingPaneIfReady()
     }
 
+    private func adoptComposerDraft() {
+        guard let active else { return }
+        let next = active.selectComposerDraft()
+        guard next !== composerDraft else { return }
+        composerEditor.finishComposition()
+        disarmStickyCtrlIfNeeded()
+        composerDraft = next
+        // Keep the existing input destination and keyboard intent. Swapping
+        // draft contents does not require a responder transfer.
+    }
+
     private func send(shortcut: TerminalShortcut) {
         if shortcut.kind == .ctrl {
             toggleStickyCtrl()
@@ -2033,7 +2071,7 @@ struct TerminalScreen: View {
         }
         disarmStickyCtrlIfNeeded()
         if shortcut.kind == .image {
-            presentSheet { photoPickerPresented = true }
+            presentAttachmentPicker { photoPickerPresented = true }
             return
         }
         if shortcut.kind == .files {
@@ -2041,6 +2079,8 @@ struct TerminalScreen: View {
             return
         }
         if shortcut.kind == .paste {
+            guard let owner = active, let target = owner.inputTarget else { return }
+            let draft = composerDraft
             // UIPasteboard reads are synchronous and can block for well over a
             // second: a cross-app paste triggers iOS's "Allow Paste?" prompt,
             // and the property getter waits on that (plus the pasteboardd XPC
@@ -2051,6 +2091,10 @@ struct TerminalScreen: View {
             // alive while it waits.
             Task {
                 let text = await Task.detached { UIPasteboard.general.string }.value
+                guard active === owner, owner.inputTarget == target else {
+                    draft.errorMessage = TerminalDraftSendError.targetChanged.localizedDescription
+                    return
+                }
                 guard let text, !text.isEmpty else {
                     // No text — an image-only clipboard routes into the attach
                     // flow instead (copy a screenshot, tap paste: the Ctrl+V
@@ -2058,7 +2102,8 @@ struct TerminalScreen: View {
                     // priority when both are present: pasting text is this
                     // chip's core job.
                     let images = await Task.detached { ClipboardImageReader.read() }.value
-                    if !images.isEmpty, let controller = makeImageAttachmentController() {
+                    guard active === owner, owner.inputTarget == target else { return }
+                    if !images.isEmpty, let controller = makeImageAttachmentController(draft: draft) {
                         controller.start(pickedData: images)
                         return
                     }
@@ -2068,7 +2113,7 @@ struct TerminalScreen: View {
                 }
                 // Bracketed-paste-aware: raw bytes into Claude Code executed a
                 // multi-line prompt LINE BY LINE.
-                active?.sendPaste(text)
+                owner.sendPaste(text)
             }
             return
         }
@@ -2086,14 +2131,15 @@ struct TerminalScreen: View {
         // previously fell through to a closed SSH session and silently
         // dropped every shortcut).
         let stages = shortcut.encodedStages()
-        guard let first = stages.first else { return }
-        active?.sendInput(first)
+        guard let first = stages.first, let owner = active, let target = owner.inputTarget else { return }
+        owner.sendInput(first)
         guard stages.count > 1 else { return }
         let rest = stages.dropFirst()
         Task {
             for stage in rest {
                 try? await Task.sleep(for: Self.keySequenceGap)
-                active?.sendInput(stage)
+                guard active === owner, owner.inputTarget == target, !Task.isCancelled else { return }
+                owner.sendInput(stage)
             }
         }
     }
@@ -2183,13 +2229,15 @@ struct TerminalScreen: View {
                               let byte = text.utf8.first, (0x40...0x7e).contains(byte) else { return false }
                         sendRemoteControl(byte & 0x1f)
                         return true
-                    }, onLiteralInput: disarmStickyCtrlIfNeeded)
+                    }, onLiteralInput: disarmStickyCtrlIfNeeded, draft: composerDraft)
                     .frame(maxWidth: .infinity)
                     .accessibilityIdentifier("terminal-composer")
                 conversationIcon("paperplane.fill", label: String(localized: "Send + Return"), identifier: "conversation-send") { submitComposer() }
-                    .accessibilityHint("Send the draft to the terminal, then press Return.")
+                    .accessibilityHint("发送完整草稿并提交，无需再次回车。")
                     .disabled(!launchIsConnected || composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || composerIsSending || imageAttachment != nil || fileUploads.isRunning)
+                        || composerIsSending || composerDraft.requiresSendReview
+                        || active?.inputTarget == nil || active?.inputTarget != composerDraft.target
+                        || imageAttachment != nil || fileUploads.isRunning)
             }
             .padding(.leading, 12).padding(.trailing, 3).padding(.vertical, 3)
             .background(TerminalChrome.control.opacity(0.85), in: RoundedRectangle(cornerRadius: 22))
@@ -2199,11 +2247,11 @@ struct TerminalScreen: View {
                     .allowsHitTesting(false)
             }
             Menu {
-                Button("照片图库", systemImage: "photo") { presentSheet { photoPickerPresented = true } }
+                Button("照片图库", systemImage: "photo") { presentAttachmentPicker { photoPickerPresented = true } }
                 if CameraCaptureView.isAvailable {
-                    Button("拍照", systemImage: "camera") { presentSheet { showCamera = true } }
+                    Button("拍照", systemImage: "camera") { presentAttachmentPicker { showCamera = true } }
                 }
-                Button("本地文件（单个最多 20 MB）", systemImage: "doc") { presentSheet { filePickerPresented = true } }
+                Button("本地文件（单个最多 20 MB）", systemImage: "doc") { presentAttachmentPicker { filePickerPresented = true } }
                 Button("服务器文件", systemImage: "folder") { active?.openWorkingDirectory() }
             } label: {
                 Image(systemName: "paperclip").font(.system(size: 19)).frame(width: 34, height: 34)
@@ -2276,6 +2324,7 @@ struct TerminalScreen: View {
     /// focus change (for example an approval or text entered on another device).
     private func submitCurrentInput(fromDraft: Bool = false) {
         guard launchIsConnected, !composerIsSending, imageAttachment == nil, !fileUploads.isRunning else { return }
+        guard !composerDraft.requiresSendReview || (terminalKeyboardActive && !fromDraft) else { return }
         disarmStickyCtrlIfNeeded()
         if !composerText.isEmpty, fromDraft || !terminalKeyboardActive { submitComposer() }
         else {
@@ -2294,20 +2343,89 @@ struct TerminalScreen: View {
     private func submitComposer() {
         guard launchIsConnected, !composerIsSending, imageAttachment == nil, !fileUploads.isRunning,
               !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let active else { return }
+              let active, let target = active.inputTarget else { return }
         let draft = composerDraft
-        let text = draft.text
-        draft.errorMessage = nil
-        draft.isSending = true
+        guard let attempt = draft.beginSubmission(to: target, label: composerTargetTitle) else { return }
         Task { @MainActor in
-            defer { draft.isSending = false }
-            do {
-                try await active.submitLine(text)
-                if draft.text == text { draft.text = "" }
-            } catch {
-                draft.errorMessage = error.localizedDescription
+            await draft.complete(attempt) { text, target in
+                try await active.submitLine(text, to: target)
             }
         }
+    }
+
+    private var composerTargetTitle: String {
+        let pane = composerDraft.target?.paneID
+        let location: String
+        if let paneID = pane, let snapshot = tmuxSnapshot, let pane = snapshot.panes[paneID],
+           let tab = snapshot.windows[pane.windowId], let workspace = snapshot.sessions[tab.sessionId] {
+            location = workspace.name + " › " + tab.name + " · 窗格 " + String(pane.index)
+        } else { location = pane == nil ? "Shell" : "原窗格 " + (pane ?? "") }
+        return connection.displayName + " › " + location
+    }
+
+    private var composerTargetBar: some View {
+        HStack(spacing: 8) {
+            Label {
+                Text(verbatim: "发送到：" + composerTargetTitle).lineLimit(1).truncationMode(.middle)
+            } icon: { Image(systemName: "scope") }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("conversation-send-target")
+            if composerDraft.delivery != .idle {
+                Text(composerDeliveryTitle)
+                    .foregroundStyle(composerDraft.delivery == .submitted ? Color.green : Color.orange)
+                    .accessibilityIdentifier("conversation-send-state")
+            }
+        }
+        .font(.system(size: 11)).foregroundStyle(TerminalChrome.foreground.opacity(0.8))
+        .padding(.horizontal, 14).padding(.top, 6)
+    }
+
+    private var composerDeliveryTitle: String {
+        switch composerDraft.delivery {
+        case .idle: return ""
+        case .sending: return "发送中"
+        case .submitted: return "已提交终端"
+        case .unconfirmed: return "未确认"
+        case .failed: return "发送失败"
+        }
+    }
+
+    private var composerFeedback: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let sendError = composerSendError ?? remoteInputError {
+                Text(sendError).font(.system(size: 12)).foregroundStyle(.orange)
+                    .accessibilityIdentifier("conversation-send-error")
+            }
+            if composerDraft.requiresSendReview {
+                HStack(spacing: 16) {
+                    Button { openOutputReader() } label: {
+                        Text("查看远端").fixedSize(horizontal: true, vertical: false)
+                            .frame(minWidth: 80, minHeight: 44).contentShape(Rectangle())
+                    }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.roundedRectangle(radius: 10))
+                        .accessibilityIdentifier("conversation-send-inspect")
+                    Menu("确认结果") {
+                        Button("远端已收到") { resolveComposerResult(received: true) }
+                        Button("未收到，保留草稿待重发") { resolveComposerResult(received: false) }
+                    }
+                    .accessibilityIdentifier("conversation-send-resolve")
+                }
+                .font(.system(size: 12)).frame(minHeight: 36)
+            }
+        }
+        .padding(.horizontal, 14).padding(.top, 6)
+    }
+
+    private var remoteInputError: String? {
+        guard let control = active?.herdrControl,
+              control.inputErrorPaneID == composerDraft.target?.paneID else { return nil }
+        return control.inputError
+    }
+
+    private func resolveComposerResult(received: Bool) {
+        composerDraft.resolveUnconfirmed(received: received)
+        if let pane = composerDraft.target?.paneID { active?.herdrControl?.acknowledgeInputError(for: pane) }
     }
     private var supplementaryKeysPanel: some View {
         let shortcuts = shortcutStore.supplementaryToolbar(
@@ -2397,6 +2515,11 @@ struct TerminalScreen: View {
     private var bottomAccessory: some View {
         VStack(spacing: 0) {
             if let dictation {
+                if let owner = dictationDraft, owner !== composerDraft {
+                    Text("语音结果将加入开始录音时的窗格草稿。")
+                        .font(.caption).foregroundStyle(.orange).padding(.horizontal, 14).padding(.top, 6)
+                        .accessibilityIdentifier("conversation-voice-original-target")
+                }
                 DictationOverlayView(
                     controller: dictation,
                     onCancel: { dismissDictationToDraft() },
@@ -2432,7 +2555,10 @@ struct TerminalScreen: View {
             if !fileUploads.items.isEmpty {
                 HStack(spacing: 12) {
                     if fileUploads.isRunning { ProgressView().tint(Ink.accent) }
-                    Button { presentSheet { showsFileUploads = true } } label: {
+                    Button {
+                        uploadDetailsDraft = composerDraft
+                        presentSheet { showsFileUploads = true }
+                    } label: {
                         HStack {
                             Label("File uploads", systemImage: "arrow.up.doc")
                             Text(verbatim: "\(fileUploads.completedCount)/\(fileUploads.items.count)")
@@ -2446,10 +2572,8 @@ struct TerminalScreen: View {
                     }
                 }.padding(12).background(.white.opacity(0.07))
             }
-            if let sendError = composerSendError ?? active?.herdrControl?.inputError {
-                Text(sendError).font(.system(size: 12)).foregroundStyle(.orange)
-                    .padding(.horizontal, 14).padding(.top, 6)
-            }
+            if composerDraft.requiresSendReview || composerSendError != nil || remoteInputError != nil { composerFeedback }
+            composerTargetBar
             inputDestinationHint
             draftComposer
             conversationKeyBar
@@ -2468,7 +2592,9 @@ struct TerminalScreen: View {
     /// (HEIC included) without a photo-library permission prompt — PHPicker
     /// runs out of process and only the selection crosses back.
     private func beginImageAttachment(_ items: [PhotosPickerItem]) {
-        guard let controller = makeImageAttachmentController() else { return }
+        let owner = attachmentPickerDraft ?? composerDraft
+        attachmentPickerDraft = nil
+        guard let controller = makeImageAttachmentController(draft: owner) else { return }
         Task {
             var picked: [Data] = []
             for item in items {
@@ -2477,10 +2603,11 @@ struct TerminalScreen: View {
                 }
             }
             guard !picked.isEmpty else {
-                imageAttachment = nil
+                if owner.imageAttachment === controller { owner.imageAttachment = nil }
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
                 return
             }
+            guard owner.imageAttachment === controller else { return }
             controller.start(pickedData: picked)
         }
     }
@@ -2491,14 +2618,16 @@ struct TerminalScreen: View {
     /// on a clipboard the Claude Code PROCESS can read, i.e. the server's).
     private func beginClipboardImageAttachment() {
         disarmStickyCtrlIfNeeded()
-        guard let controller = makeImageAttachmentController() else { return }
+        let owner = composerDraft
+        guard let controller = makeImageAttachmentController(draft: owner) else { return }
         Task {
             let images = await Task.detached { ClipboardImageReader.read() }.value
             guard !images.isEmpty else {
-                imageAttachment = nil
+                if owner.imageAttachment === controller { owner.imageAttachment = nil }
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
                 return
             }
+            guard owner.imageAttachment === controller else { return }
             controller.start(pickedData: images)
         }
     }
@@ -2508,8 +2637,8 @@ struct TerminalScreen: View {
     /// inside the flow — pure mosh dials an SSH connection on demand (no
     /// second Face ID; credentials are cached), and a dial failure surfaces
     /// in the overlay's failed state with a Retry, not a dead chip.
-    private func makeImageAttachmentController() -> ImageAttachmentController? {
-        guard let active else { return nil }
+    private func makeImageAttachmentController(draft: TerminalComposerDraft? = nil) -> ImageAttachmentController? {
+        guard let active, active.viewModel.connState == .live else { return nil }
         let controller = ImageAttachmentController(uploaderProvider: { [weak active] in
             guard let active else { throw SSHError.sessionClosed }
             return try await active.acquireFileTransferSSH()
@@ -2518,8 +2647,13 @@ struct TerminalScreen: View {
             guard let active else { return [] }
             return paths.map { active.imageUploads.record(remotePath: $0).number }
         }
-        imageAttachment = controller
+        (draft ?? composerDraft).imageAttachment = controller
         return controller
+    }
+
+    private func presentAttachmentPicker(_ open: @escaping () -> Void) {
+        attachmentPickerDraft = composerDraft
+        presentSheet(open)
     }
 
     #if DEBUG
@@ -2599,19 +2733,20 @@ struct TerminalScreen: View {
     }
 
     /// Upload through the existing private SSH upload directory, never through the PTY.
-    private func uploadLocalFiles(_ urls: [URL]) {
-        guard !urls.isEmpty, !fileUploads.isRunning, active != nil else { return }
-        fileUploads.enqueue(urls)
-        startFileUploads()
+    private func uploadLocalFiles(_ urls: [URL], draft: TerminalComposerDraft? = nil) {
+        let owner = draft ?? composerDraft
+        guard !urls.isEmpty, !owner.uploads.isRunning, active != nil else { return }
+        owner.uploads.enqueue(urls)
+        startFileUploads(draft: owner)
     }
 
-    private func startFileUploads(retry: Bool = false) {
-        guard let owner = active, owner.connection.id == connection.id else { return }
+    private func startFileUploads(retry: Bool = false, draft: TerminalComposerDraft? = nil) {
+        guard let owner = active, owner.connection.id == connection.id, owner.viewModel.connState == .live else { return }
         // Capture the owning draft. A later navigation/reconnect must never
         // append a completed remote path to another host's composer.
-        let draft = composerDraft
+        let draft = draft ?? composerDraft
         let batch = FileUploadBatch { try await owner.acquireFileTransferSSH() }
-        fileUploads.start(retry: retry, upload: { url, name, progress in
+        draft.uploads.start(retry: retry, upload: { url, name, progress in
             try await batch.upload(url, named: name, progress: progress)
         }, publish: { [weak draft] path in
             draft?.text += ImageAttachmentPipeline.insertText(forRemotePaths: [path], style: .barePath)
@@ -2634,6 +2769,7 @@ struct TerminalScreen: View {
             }
             return
         }
+        dictationDraft = composerDraft
         Haptics.tap()
         #if DEBUG && targetEnvironment(simulator)
         Log.voice.info("UI fixture gate: lab=\(connection.displayName == "Isolated-UI-Lab") loopback=\(connection.host == "127.0.0.1") draft=\(ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_VOICE_DRAFT")) failure=\(ProcessInfo.processInfo.arguments.contains("-MOSHPIT_SEED_VOICE_FAILURE"))")
@@ -2687,6 +2823,7 @@ struct TerminalScreen: View {
     /// attachments and dictation, and preserves them if the transport fails.
     private func finishDictation(reviewedText: String) {
         guard let dictation, dictationFinishTask == nil else { return }
+        let owner = dictationDraft ?? composerDraft
         dictationFinishTask = Task { @MainActor in
             let text: String?
             if case .failed = dictation.phase {
@@ -2704,11 +2841,12 @@ struct TerminalScreen: View {
             // Consuming the controller releases the recording. The reviewed
             // text is the user's choice, including any edits made in the panel.
             if text != nil || dictation.phase == .idle {
-                composerText = DictationTranscript.join(composerText, reviewedText)
-                activateDraftKeyboard()
+                owner.text = DictationTranscript.join(owner.text, reviewedText)
+                if owner === composerDraft { activateDraftKeyboard() }
                 Haptics.success()
             }
             self.dictation = nil
+            dictationDraft = nil
             dictationFinishTask = nil
         }
     }
@@ -2729,6 +2867,7 @@ struct TerminalScreen: View {
         dictationFinishTask = nil
         dictation?.cancel()
         dictation = nil
+        dictationDraft = nil
         dictationReviewOwnsKeyboard = false
     }
 }

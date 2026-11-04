@@ -348,6 +348,48 @@ struct HerdrControlClientTests {
 
     // MARK: - Reading
 
+    @Test("Raw input errors identify their pane and reviewing another pane cannot clear them")
+    func inputErrorOwnership() async {
+        let client = HerdrControlClient(runner: FakeRunner(response: "__moshpit_rc=1"))
+        client.sendBytes(Data("rejected".utf8), paneId: "w1:p1")
+        do { try await client.flushInput() } catch {}
+        #expect(client.inputError != nil && client.inputErrorPaneID == "w1:p1")
+        client.acknowledgeInputError(for: "w1:p2")
+        #expect(client.inputError != nil)
+        client.acknowledgeInputError(for: "w1:p1")
+        #expect(client.inputError == nil && client.inputErrorPaneID == nil)
+        client.stop()
+    }
+
+    @Test("A captured composer target cannot silently follow a later Herdr selection")
+    func composerTargetRejectsSelectionChange() async throws {
+        let runner = FakeRunner(response: Self.twoWorkspaces)
+        let client = await started(runner)
+        var connection = ServerConnection(name: "isolated", host: "192.0.2.1", port: 22,
+                                          username: "tester", authMethod: .password)
+        connection.multiplexer = .herdr
+        let session = SessionHub.ActiveSession(connection: connection)
+        session.installForTesting(moshTransport: nil, herdrControl: client)
+        session.viewModel.markConnected()
+        let original = try #require(session.inputTarget)
+        let draft = session.selectComposerDraft()
+        draft.text = "belongs to pane 2"
+        runner.setResponse(Self.twoWorkspaces.replacingOccurrences(of: "\"focused_pane_id\":\"w1:p2\"",
+            with: "\"focused_pane_id\":\"w1:p1\""))
+        client.refresh()
+        await settle(until: { client.snapshot.activePaneId == "w1:p1" })
+        #expect(session.inputTarget != original)
+        let other = session.selectComposerDraft()
+        #expect(other !== draft && other.text.isEmpty)
+        do {
+            try await session.submitLine("belongs to pane 2", to: original)
+            Issue.record("a changed selection must reject before writing")
+        } catch TerminalDraftSendError.targetChanged { }
+        #expect(runner.inputs.isEmpty)
+        #expect(draft.text == "belongs to pane 2")
+        await session.stop()
+    }
+
     @Test("Hook observation time advances only for verified snapshots or a stopped server")
     func hookObservationRequiresVerifiedRead() async throws {
         let runner = FakeRunner(response: "shell noise")

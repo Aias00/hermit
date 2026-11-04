@@ -2,15 +2,157 @@ import Foundation
 import Observation
 import MoshpitKit
 
-/// Unsent input belongs to the live connection, including while its screen is
-/// offscreen. Keep it in memory only; terminal text may contain credentials.
+enum TerminalInputTarget: Hashable {
+    case shell
+    case pane(multiplexer: String, id: String)
+
+    var paneID: String? {
+        if case .pane(_, let id) = self { return id }
+        return nil
+    }
+}
+
+enum TerminalDraftSendError: LocalizedError {
+    case targetChanged, notReady
+    var errorDescription: String? {
+        switch self {
+        case .targetChanged: return "发送目标已变化，内容未发送，草稿保留在原窗格。"
+        case .notReady: return "终端尚未就绪，内容未发送，草稿已保留。"
+        }
+    }
+}
+
+/// In-memory input for one pane. Never persist terminal text or attachments.
 @Observable
 @MainActor
 final class TerminalComposerDraft {
-    var text = ""
+    enum Delivery: Equatable {
+        case idle, sending, submitted, unconfirmed, failed
+    }
+    let id = UUID()
+    var text = "" {
+        didSet {
+            if !oldValue.utf8.elementsEqual(text.utf8) {
+                if selection.length == 0, selection.location == (oldValue as NSString).length {
+                    selection = NSRange(location: (text as NSString).length, length: 0)
+                }
+                editRevision &+= 1
+                if delivery == .submitted { delivery = .idle }
+            }
+        }
+    }
+    var selection = NSRange(location: 0, length: 0)
     var isSending = false
     var errorMessage: String?
+    private(set) var delivery: Delivery = .idle
+    private(set) var target: TerminalInputTarget?
+    private(set) var targetLabel = ""
+    @ObservationIgnored private var editRevision: UInt64 = 0
+    @ObservationIgnored private var sentRevision: UInt64?
+    @ObservationIgnored private var activeAttempt: UUID?
     let uploads = FileUploadQueue()
+    var imageAttachment: ImageAttachmentController?
+
+    var requiresSendReview: Bool { delivery == .unconfirmed }
+
+    fileprivate func bind(to target: TerminalInputTarget) { self.target = target }
+
+    struct Attempt {
+        let id: UUID
+        let text: String
+        let target: TerminalInputTarget
+        let revision: UInt64
+    }
+
+    func beginSubmission(to target: TerminalInputTarget, label: String) -> Attempt? {
+        guard !isSending, !requiresSendReview,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard self.target == target else {
+            delivery = .failed
+            errorMessage = TerminalDraftSendError.targetChanged.localizedDescription
+            return nil
+        }
+        let attempt = Attempt(id: UUID(), text: text, target: target, revision: editRevision)
+        activeAttempt = attempt.id
+        sentRevision = attempt.revision
+        targetLabel = label
+        errorMessage = nil
+        delivery = .sending
+        isSending = true
+        return attempt
+    }
+
+    func submit(to target: TerminalInputTarget, label: String,
+                send: (String, TerminalInputTarget) async throws -> Void) async {
+        guard let attempt = beginSubmission(to: target, label: label) else { return }
+        await complete(attempt, send: send)
+    }
+
+    func complete(_ attempt: Attempt, send: (String, TerminalInputTarget) async throws -> Void) async {
+        guard activeAttempt == attempt.id else { return }
+        // Revoke the ticket before awaiting; it cannot be executed twice.
+        activeAttempt = nil
+        defer { isSending = false }
+        do {
+            try await send(attempt.text, attempt.target)
+            if editRevision == attempt.revision { text = ""; selection = NSRange(location: 0, length: 0) }
+            delivery = .submitted
+        } catch {
+            let knownRejection: Bool
+            if error is TerminalDraftSendError { knownRejection = true }
+            else if let failure = error as? HerdrControlClient.SubmissionError {
+                switch failure {
+                case .rejected, .pasteUnavailable: knownRejection = true
+                case .unconfirmed: knownRejection = false
+                }
+            } else { knownRejection = false }
+            delivery = knownRejection ? .failed : .unconfirmed
+            errorMessage = knownRejection ? error.localizedDescription
+                : "发送结果未确认，草稿已保留。请先查看远端，再决定是否重新发送。"
+        }
+    }
+
+    /// Reviewing an uncertain result never resends anything by itself.
+    func resolveUnconfirmed(received: Bool) {
+        guard requiresSendReview else { return }
+        if received, editRevision == sentRevision {
+            text = ""
+            selection = NSRange(location: 0, length: 0)
+        }
+        delivery = received ? .submitted : .idle
+        errorMessage = nil
+    }
+}
+
+@Observable
+@MainActor
+final class TerminalComposerDraftStore {
+    private(set) var current = TerminalComposerDraft()
+    private var drafts: [TerminalInputTarget: TerminalComposerDraft] = [:]
+
+    @discardableResult
+    func select(_ target: TerminalInputTarget?) -> TerminalComposerDraft {
+        // A reconnect's incomplete snapshot must not move an existing draft.
+        guard let target else { return current }
+        if let draft = drafts[target] { current = draft; return draft }
+        // Input typed during the first dial belongs to its first real target.
+        let draft = current.target == nil ? current : TerminalComposerDraft()
+        draft.bind(to: target)
+        drafts[target] = draft
+        current = draft
+        return draft
+    }
+
+    func cancelTransfers() {
+        for draft in drafts.values {
+            draft.uploads.cancel()
+            draft.imageAttachment?.cancel()
+            draft.imageAttachment = nil
+        }
+        current.uploads.cancel()
+        current.imageAttachment?.cancel()
+        current.imageAttachment = nil
+    }
 }
 
 /// View model that owns the SSH session lifecycle for a single terminal screen.

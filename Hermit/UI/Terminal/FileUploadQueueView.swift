@@ -45,7 +45,7 @@ struct FileUploadQueueView: View {
                         .padding(.vertical, 6)
                     }
                 } footer: {
-                    Text("Completed paths stay in this connection's draft. Upload history is kept until cleared or the app closes.")
+                    Text("已完成的路径保留在原窗格的草稿中。上传记录会保留到清除、断开连接或退出 App。")
                 }
                 Section {
                     if queue.isRunning {

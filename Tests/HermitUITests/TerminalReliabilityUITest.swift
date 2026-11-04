@@ -10,6 +10,87 @@ final class TerminalReliabilityUITest: XCTestCase {
     }
 
     @MainActor
+    func testPaneDraftsKeepKeyboardAndUploadsSeparate() throws {
+        let app = try openTerminal(seedFiles: true, explicitNavigation: true)
+        let tabs = app.buttons.matching(NSPredicate(format: "identifier MATCHES %@", "herdr-tab-w[0-9]+:t[0-9]+"))
+        expectation(for: NSPredicate { _, _ in tabs.count >= 2 }, evaluatedWith: app)
+        waitForExpectations(timeout: 20)
+        let first = tabs.element(boundBy: 0), second = tabs.element(boundBy: 1)
+        first.tap()
+        let field = composer(app)
+        let uploads = app.buttons["file-upload-details"]
+        expectation(for: NSPredicate { _, _ in uploads.label.contains("2/3") }, evaluatedWith: uploads)
+        waitForExpectations(timeout: 20)
+        field.tap()
+        field.typeText("pane A")
+        let originalA = try XCTUnwrap(field.value as? String)
+        let expectedA = originalA.replacingOccurrences(of: "pane A", with: "pane A kept focus")
+        app.buttons["conversation-arrow-right"].tap()
+        app.buttons["Esc"].tap()
+        app.typeText(" kept focus")
+        XCTAssertEqual(field.value as? String, expectedA)
+        XCTAssertTrue(app.buttons["file-upload-details"].exists)
+        second.tap()
+        expectation(for: NSPredicate { _, _ in (field.value as? String)?.isEmpty == true }, evaluatedWith: field)
+        waitForExpectations(timeout: 12)
+        XCTAssertFalse(app.buttons["file-upload-details"].exists)
+        app.typeText("pane B")
+        XCTAssertEqual(field.value as? String, "pane B")
+        captureScreenshot(app, name: "p0-pane-B-independent-draft")
+        first.tap()
+        expectation(for: NSPredicate { _, _ in field.value as? String == expectedA }, evaluatedWith: field)
+        waitForExpectations(timeout: 12)
+        XCTAssertTrue(app.buttons["file-upload-details"].exists)
+        app.typeText(" again")
+        XCTAssertEqual(field.value as? String, originalA.replacingOccurrences(of: "pane A", with: "pane A kept focus again"))
+        captureScreenshot(app, name: "p0-pane-A-restored-keyboard")
+    }
+
+    @MainActor
+    func testUnconfirmedSubmissionRequiresReviewAndCannotReplayOnReturn() throws {
+        guard let root = ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"] else {
+            throw XCTSkip("requires isolated session fixture")
+        }
+        let receipt = URL(fileURLWithPath: root).appendingPathComponent("uncertain-" + UUID().uuidString + ".log")
+        defer { try? FileManager.default.removeItem(at: receipt) }
+        let app = try openTerminal(explicitNavigation: true)
+        let field = composer(app)
+        field.tap()
+        let command = "printf 'ONCE\\n' >> '" + receipt.path + "' # __MOSHPIT_UNCONFIRMED_DRAFT__"
+        field.typeText(command)
+        app.buttons["conversation-send"].tap()
+        let status = app.descendants(matching: .any).matching(identifier: "conversation-send-state").firstMatch
+        let uncertain = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            status.exists && status.label == "未确认"
+        }, object: app)
+        let result = XCTWaiter.wait(for: [uncertain], timeout: 20)
+        if result != .completed { print(app.debugDescription); captureScreenshot(app, name: "p0-uncertain-state-failure") }
+        XCTAssertEqual(result, .completed)
+        if !FileManager.default.fileExists(atPath: receipt.path) {
+            print(app.debugDescription)
+            captureScreenshot(app, name: "p0-uncertain-receipt-failure")
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: receipt.path))
+        XCTAssertEqual(field.value as? String, command)
+        XCTAssertFalse(app.buttons["conversation-send"].isEnabled)
+        app.typeText("\n\n")
+        app.buttons["conversation-enter"].tap()
+        XCTAssertEqual(field.value as? String, command)
+        XCTAssertEqual(try String(contentsOf: receipt, encoding: .utf8), "ONCE\n")
+        captureScreenshot(app, name: "p0-unconfirmed-preserves-draft")
+        app.buttons["conversation-send-inspect"].tap()
+        XCTAssertTrue(app.textFields["terminal-output-query"].waitForExistence(timeout: 8))
+        app.buttons["完成"].tap()
+        app.buttons["conversation-send-resolve"].tap()
+        app.buttons["远端已收到"].tap()
+        expectation(for: NSPredicate { _, _ in (field.value as? String)?.isEmpty == true }, evaluatedWith: field)
+        waitForExpectations(timeout: 8)
+        XCTAssertEqual(status.label, "已提交终端")
+        XCTAssertEqual(try String(contentsOf: receipt, encoding: .utf8), "ONCE\n")
+        captureScreenshot(app, name: "p0-confirmed-receipt")
+    }
+
+    @MainActor
     private func openTerminal(multiplexer: String = "herdr", seedImage: Bool = false,
                               seedVoice: Bool = false, seedVoiceFailure: Bool = false,
                               seedVoiceReview: Bool = false, seedFiles: Bool = false, portOverride: String? = nil, explicitNavigation: Bool = false) throws -> XCUIApplication {
@@ -765,14 +846,17 @@ final class TerminalReliabilityUITest: XCTestCase {
         }, evaluatedWith: app)
         waitForExpectations(timeout: 15)
         XCTAssertEqual(try String(contentsOf: receipt, encoding: .utf8), "VISIBLE_RECONNECT_OK\n")
+        captureScreenshot(app, name: "p0-visible-reconnect-before-live-check")
         let backendLog = URL(fileURLWithPath: root).appendingPathComponent("config/herdr/sessions/ui/herdr-server.log")
-        expectation(for: NSPredicate { _, _ in
+        let liveFrame = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             guard let log = try? String(contentsOf: backendLog, encoding: .utf8),
                   let connected = log.components(separatedBy: "\n").last(where: { $0.contains("terminal attach client connected") }),
                   let token = connected.components(separatedBy: " ").first(where: { $0.hasPrefix("client_id=") }) else { return false }
             return !log.components(separatedBy: "\n").contains { $0.contains("client detached " + token) }
-        }, evaluatedWith: app)
-        waitForExpectations(timeout: 15)
+        }, object: app)
+        let liveResult = XCTWaiter.wait(for: [liveFrame], timeout: 15)
+        if liveResult != .completed { print(app.debugDescription) }
+        XCTAssertEqual(liveResult, .completed)
         captureScreenshot(app, name: "visible-herdr-reconnect")
     }
 

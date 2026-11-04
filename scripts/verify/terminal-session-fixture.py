@@ -95,7 +95,17 @@ def serve(state_path):
                     else:
                         with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as remote:
                             remote.settimeout(12);remote.connect(actual_socket);remote.sendall(request)
-                            client.sendall(remote.makefile('rb').readline(1_000_000))
+                            reply = remote.makefile('rb').readline(1_000_000)
+                            if '__MOSHPIT_UNCONFIRMED_DRAFT__' in message.get('params',{}).get('text',''):
+                                actual = json.loads(reply)
+                                with open(root/'unconfirmed-response.jsonl','a') as f:
+                                    f.write(json.dumps({'method':message.get('method'),'error':actual.get('error'),
+                                                        'result_type':actual.get('result',{}).get('type')})+'\n')
+                                # Execute once, then lose response correlation.
+                                # The app must preserve the draft without replay.
+                                reply = json.dumps({'id':'fixture-wrong-id','result':{}}).encode()+b'\n'
+                                with open(root/'unconfirmed.log','a') as f: f.write('forwarded-once\n')
+                            client.sendall(reply)
                 except (OSError, ValueError): pass
         def accept():
             while not stopped.is_set():

@@ -46,6 +46,11 @@ final class TerminalComposerEditor {
     weak var view: ComposerTextView?
     func insertNewline() { view?.insertDraftLineBreak() }
     func resumeRemoteEditing() { view?.resumeRemoteEditing() }
+    func finishComposition() {
+        guard let view, view.markedTextRange != nil else { return }
+        view.unmarkText()
+        view.delegate?.textViewDidChange?(view)
+    }
 }
 
 /// Multiline editor. With a submit handler, Return sends; Shift+Return adds a line.
@@ -56,6 +61,7 @@ struct TerminalComposerView: UIViewRepresentable {
     let onKeyboardDismiss: () -> Void
     let onSubmit: (() -> Void)?
     let editor: TerminalComposerEditor?
+    let draft: TerminalComposerDraft?
     var onEmptyDelete: (() -> Void)?
     var onEmptyArrow: ((String) -> Void)?
     var onControlKey: ((UInt8) -> Void)?
@@ -67,7 +73,7 @@ struct TerminalComposerView: UIViewRepresentable {
          onSubmit: (() -> Void)? = nil, editor: TerminalComposerEditor? = nil,
          onEmptyDelete: (() -> Void)? = nil, onEmptyArrow: ((String) -> Void)? = nil,
          onControlKey: ((UInt8) -> Void)? = nil, consumeControlText: ((String) -> Bool)? = nil,
-         onLiteralInput: (() -> Void)? = nil) {
+         onLiteralInput: (() -> Void)? = nil, draft: TerminalComposerDraft? = nil) {
         self._text = text
         self._isFocused = isFocused
         self.onFocus = onFocus
@@ -79,6 +85,7 @@ struct TerminalComposerView: UIViewRepresentable {
         self.onControlKey = onControlKey
         self.consumeControlText = consumeControlText
         self.onLiteralInput = onLiteralInput
+        self.draft = draft
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -103,16 +110,17 @@ struct TerminalComposerView: UIViewRepresentable {
         view.accessibilityIdentifier = "terminal-composer"
         view.accessibilityLabel = "待发送内容"
         context.coordinator.configureReturn(view)
+        if let draft { view.restoreDraft(draft.text, selection: draft.selection) }
         editor?.view = view
         return view
     }
 
     func updateUIView(_ view: ComposerTextView, context: Context) {
         let coordinator = context.coordinator
-        coordinator.parent = self
+        coordinator.updateParent(self, view: view)
         coordinator.configureReturn(view)
         editor?.view = view
-        view.updateDraftText(text)
+        view.updateDraftText(draft?.text ?? text)
         view.updatePlaceholder()
         coordinator.updateFocus(view)
     }
@@ -129,7 +137,33 @@ struct TerminalComposerView: UIViewRepresentable {
         private var focusGeneration = 0
         private var preservesFocusForPendingEnd = false
         private var resolvingEndEditing = false
+        private var isUpdatingDraft = false
         init(_ parent: TerminalComposerView) { self.parent = parent }
+
+        /// Reuse the editor/responder while replacing only its pane-owned
+        /// contents. Old IME text and undo history cannot enter the new pane.
+        func updateParent(_ next: TerminalComposerView, view: ComposerTextView) {
+            let switched = parent.draft?.id != next.draft?.id
+            if switched {
+                if view.markedTextRange != nil {
+                    view.unmarkText()
+                    textViewDidChange(view)
+                }
+                saveSelection(view)
+            }
+            parent = next
+            if switched, let draft = next.draft {
+                isUpdatingDraft = true
+                view.restoreDraft(draft.text, selection: draft.selection)
+                isUpdatingDraft = false
+            }
+        }
+
+        private func saveSelection(_ view: UITextView) {
+            guard !isUpdatingDraft, let draft = parent.draft,
+                  view.text.utf8.elementsEqual(draft.text.utf8) else { return }
+            draft.selection = view.selectedRange
+        }
 
         func configureReturn(_ view: ComposerTextView) {
             let keyType: UIReturnKeyType = parent.onSubmit == nil ? .default : .send
@@ -244,10 +278,15 @@ struct TerminalComposerView: UIViewRepresentable {
             return hasPresentation(root)
         }
         func textViewDidChange(_ textView: UITextView) {
-            parent.text = textView.text
+            guard !isUpdatingDraft else { return }
+            if let draft = parent.draft { draft.text = textView.text }
+            else { parent.text = textView.text }
+            saveSelection(textView)
             (textView as? ComposerTextView)?.updatePlaceholder()
             textView.invalidateIntrinsicContentSize()
         }
+
+        func textViewDidChangeSelection(_ textView: UITextView) { saveSelection(textView) }
 
     }
 }
@@ -410,7 +449,7 @@ final class ComposerTextView: UITextView {
     /// External additions (voice and attachments) follow a caret at the end.
     /// An in-progress edit or selection elsewhere keeps its position.
     func updateDraftText(_ draft: String) {
-        guard text != draft, markedTextRange == nil else { return }
+        guard !text.utf8.elementsEqual(draft.utf8), markedTextRange == nil else { return }
         deletedLocalText = false
         let selection = selectedRange
         let wasAtEnd = selection.length == 0 && selection.location == (text as NSString).length
@@ -418,6 +457,17 @@ final class ComposerTextView: UITextView {
         let length = (draft as NSString).length
         let start = wasAtEnd ? length : min(selection.location, length)
         selectedRange = NSRange(location: start, length: min(selection.length, length - start))
+    }
+
+    func restoreDraft(_ draft: String, selection: NSRange) {
+        undoManager?.removeAllActions()
+        deletedLocalText = false
+        text = draft
+        let length = (draft as NSString).length
+        let start = min(selection.location, length)
+        selectedRange = NSRange(location: start, length: min(selection.length, length - start))
+        updatePlaceholder()
+        invalidateIntrinsicContentSize()
     }
 
     override func layoutSubviews() {

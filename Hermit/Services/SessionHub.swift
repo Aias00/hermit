@@ -117,7 +117,25 @@ final class SessionHub {
     @MainActor
     final class ActiveSession: Identifiable {
         let connection: ServerConnection
-        var composerDraft = TerminalComposerDraft()
+        var composerDrafts = TerminalComposerDraftStore()
+        var composerDraft: TerminalComposerDraft { composerDrafts.current }
+
+        var inputTarget: TerminalInputTarget? {
+            if let herdr = herdrControl, connection.multiplexer == .herdr {
+                guard herdr.snapshot.isAttached, let pane = herdr.snapshot.activePaneId,
+                      herdr.snapshot.panes[pane] != nil else { return nil }
+                return .pane(multiplexer: "herdr", id: pane)
+            }
+            if let control = tmuxControl {
+                guard control.snapshot.isAttached, let pane = control.snapshot.activePaneId,
+                      control.snapshot.panes[pane] != nil else { return nil }
+                return .pane(multiplexer: "tmux", id: pane)
+            }
+            return connection.multiplexer == .none || degrade != nil ? .shell : nil
+        }
+
+        @discardableResult
+        func selectComposerDraft() -> TerminalComposerDraft { composerDrafts.select(inputTarget) }
         /// Launch actions belong to the session, so cached navigation
         /// destinations and iPad re-hosting cannot lose or replay the command.
         var pendingInitialCommand: String?
@@ -649,7 +667,7 @@ final class SessionHub {
         /// re-applies them when the terminal returns. Covers SSH + the mosh sidecar.
         func releaseWindowPinsForBackground(reason: String = "background") {
             if connection.multiplexer == .herdr {
-                Log.ssh.debug("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr presentation: released reason=\(reason, privacy: .public)")
+                Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr presentation: released reason=\(reason, privacy: .public)")
             }
             herdrPresentationRequested = false
             tmuxController?.releaseWindowPins()
@@ -1032,17 +1050,26 @@ final class SessionHub {
 
         /// Submit a draft without treating a silent input drop as success.
         func submitLine(_ text: String) async throws {
+            guard let target = inputTarget else { throw TerminalDraftSendError.notReady }
+            try await submitLine(text, to: target)
+        }
+
+        /// The caller captures the pane before scheduling this async operation.
+        /// A changed selection is a rejection, never a new send destination.
+        func submitLine(_ text: String, to target: TerminalInputTarget) async throws {
             coordinator.cancelPendingWheel()
-            guard viewModel.connState == .live else { throw SSHError.sessionClosed }
+            guard viewModel.connState == .live else { throw TerminalDraftSendError.notReady }
+            guard inputTarget == target else { throw TerminalDraftSendError.targetChanged }
             if let herdr = herdrControl, connection.multiplexer == .herdr {
-                guard let pane = herdr.snapshot.activePaneId else { throw SSHError.ptyNotReady }
+                guard let pane = target.paneID else { throw TerminalDraftSendError.notReady }
                 try await herdr.submitLine(text, paneId: pane)
             } else if let controller = tmuxController {
-                guard let pane = controller.snapshot.activePaneId else { throw SSHError.ptyNotReady }
+                guard let pane = target.paneID else { throw TerminalDraftSendError.notReady }
                 try await controller.submitLine(text, paneId: pane)
             } else if let transport = moshTransport {
                 await moshWriteChain?.value
-                guard viewModel.connState == .live else { throw SSHError.sessionClosed }
+                guard viewModel.connState == .live else { throw TerminalDraftSendError.notReady }
+                guard inputTarget == target else { throw TerminalDraftSendError.targetChanged }
                 var payload = Data(text.utf8)
                 if activeTerminal?.bracketedPasteMode == true {
                     payload = Data("\u{1b}[200~".utf8) + payload + Data("\u{1b}[201~".utf8)
@@ -1917,7 +1944,7 @@ final class SessionHub {
                                 let firstPaint = !self.herdrFramePainted
                                 self.herdrFramePainted = true
                                 if firstPaint {
-                                    Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: first-frame received")
+                                    Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: first-frame received surface=\(coordinator.terminalView != nil, privacy: .public)")
                                     self.herdrFirstFrameTask?.cancel()
                                     self.herdrFirstFrameTask = nil
                                     self.herdrFrameRecoveryBackoff.succeeded()
@@ -1950,7 +1977,7 @@ final class SessionHub {
                             guard let self, self.herdrFrameGeneration == generation else { continue }
                             let unexpectedExit = herdrAcceptsFrames && herdrExpectedCloses == 0
                                 && herdrReleaseWaiters.isEmpty && herdrFrameTarget != nil
-                            Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: reader-ready received")
+                            Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: reader-ready received expected=\(herdrExpectedCloses, privacy: .public) suspended=\(herdrFrameSuspended, privacy: .public)")
                             herdrLoopReady = true
                             herdrReaderReady = true
                             herdrAcceptsFrames = false
@@ -1973,7 +2000,7 @@ final class SessionHub {
                         case .closed:
                             await MainActor.run {
                                 guard let self, self.herdrFrameGeneration == generation else { return }
-                                Log.ssh.debug("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: closed expected=\(self.herdrExpectedCloses, privacy: .public) suspended=\(self.herdrFrameSuspended, privacy: .public)")
+                                Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr frame: closed expected=\(self.herdrExpectedCloses, privacy: .public) suspended=\(self.herdrFrameSuspended, privacy: .public)")
                                 self.herdrAcceptsFrames = false
                                 self.herdrFramePainted = false
                                 if self.herdrExpectedCloses > 0 {
@@ -3148,7 +3175,7 @@ final class SessionHub {
         /// with it (``inheritedPinLedger``); the replacement re-pins the same
         /// window on attach and settles the rest on the real disconnect.
         func stop(forReconnect: Bool = false) async {
-            if !forReconnect { composerDraft.uploads.cancel() }
+            if !forReconnect { composerDrafts.cancelTransfers() }
             retryScheduledAt = nil
             resetPlainSSHObservation()
             herdrFrameRecoveryTask?.cancel()
@@ -3869,6 +3896,28 @@ final class SessionHub {
     /// this one — re-pinning windows nobody is looking at would shrink them
     /// for desktop clients for no benefit.
     weak var visibleSession: ActiveSession?
+    @ObservationIgnored private var visiblePresentationOwner: UUID?
+
+    func claimVisiblePresentation(_ session: ActiveSession, owner: UUID) {
+        if let previous = visibleSession, previous !== session {
+            previous.releaseWindowPinsForBackground(reason: "screen-replaced")
+        }
+        visibleSession = session
+        visiblePresentationOwner = owner
+    }
+
+    func ownsVisiblePresentation(_ session: ActiveSession, owner: UUID) -> Bool {
+        visibleSession === session && visiblePresentationOwner == owner
+    }
+
+    @discardableResult
+    func releaseVisiblePresentation(_ session: ActiveSession, owner: UUID) -> Bool {
+        guard ownsVisiblePresentation(session, owner: owner) else { return false }
+        session.releaseWindowPinsForBackground(reason: "screen-disappeared")
+        visibleSession = nil
+        visiblePresentationOwner = nil
+        return true
+    }
 
     /// A dial can finish after its screen disappeared or the app backgrounded.
     /// Late completion must not turn metadata recovery into terminal ownership.
@@ -4027,7 +4076,7 @@ final class SessionHub {
             // A reconnect/reconfiguration is still the same saved connection.
             // Carry its in-memory draft through replacement, including a send
             // already waiting for acknowledgement. Explicit disconnect removes it.
-            let draft = self.sessions[connection.id]?.composerDraft
+            let drafts = self.sessions[connection.id]?.composerDrafts
             let existing = self.sessions[connection.id]
             if let existing,
                force || !Self.sameSessionConfiguration(existing.connection, connection) {
@@ -4039,7 +4088,7 @@ final class SessionHub {
             // Creation belongs to the same ordered operation as teardown:
             // an older caller must not resume later and reinstall stale config.
             let session = self.prepare(connection)
-            if let draft { session.composerDraft = draft }
+            if let drafts { session.composerDrafts = drafts }
             // Keep the old identity through teardown so a disappearing screen
             // can still revoke it. Transfer only ownership that survived awaits.
             if let existing, self.visibleSession === existing { self.visibleSession = session }

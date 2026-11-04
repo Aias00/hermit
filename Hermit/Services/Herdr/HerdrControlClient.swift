@@ -665,13 +665,20 @@ final class HerdrControlClient: MultiplexerControlling {
     @ObservationIgnored private var inputTail: Task<Void, Error>?
     @ObservationIgnored private var inputGeneration = UUID()
     private(set) var inputError: String?
+    private(set) var inputErrorPaneID: String?
+
+    func acknowledgeInputError(for pane: String) {
+        guard inputErrorPaneID == pane else { return }
+        inputError = nil
+        inputErrorPaneID = nil
+    }
 
     /// Byte payloads stay on the terminal's stdin, including when they contain
     /// passwords. Shell command arguments are visible in remote process lists.
     @ObservationIgnored var rawInputWriter: (@MainActor (Data, String) async throws -> Void)?
     @ObservationIgnored var rawSubmitWriter: (@MainActor (String, String) async throws -> Void)?
 
-    private func enqueueInput(_ operation: @escaping @MainActor () async throws -> Void) -> Task<Void, Error> {
+    private func enqueueInput(paneID: String, _ operation: @escaping @MainActor () async throws -> Void) -> Task<Void, Error> {
         let previous = inputTail
         let generation = inputGeneration
         let task = Task { @MainActor [weak self] in
@@ -680,7 +687,10 @@ final class HerdrControlClient: MultiplexerControlling {
                 try Task.checkCancellation()
                 guard let self, self.inputGeneration == generation else { throw SubmissionError.unconfirmed }
                 try await operation()
-                if self.inputGeneration == generation { self.inputError = nil }
+                if self.inputGeneration == generation {
+                    self.inputError = nil
+                    self.inputErrorPaneID = nil
+                }
             } catch {
                 // Drop the already-queued tail (especially Enter after missing
                 // text), but give the NEXT explicit user action a fresh queue.
@@ -689,6 +699,7 @@ final class HerdrControlClient: MultiplexerControlling {
                     self.inputTail = nil
                     self.pendingText = nil
                     self.inputError = error.localizedDescription
+                    self.inputErrorPaneID = paneID
                 }
                 throw error
             }
@@ -713,7 +724,7 @@ final class HerdrControlClient: MultiplexerControlling {
         }
         let pending = PendingText(pane: paneId, data: data)
         pendingText = pending
-        _ = enqueueInput { [weak self] in
+        _ = enqueueInput(paneID: paneId) { [weak self] in
             guard let self else { throw SubmissionError.unconfirmed }
             pending.started = true
             if let rawInputWriter {
@@ -729,7 +740,7 @@ final class HerdrControlClient: MultiplexerControlling {
 
     func sendKey(_ key: String, paneId: String) {
         pendingText = nil
-        _ = enqueueInput { [weak self] in
+        _ = enqueueInput(paneID: paneId) { [weak self] in
             guard let self else { throw SubmissionError.unconfirmed }
             let accepted = await withTimeoutValue(12) { @MainActor in
                 let result = try await self.run("pane send-keys \(HerdrLaunch.quote(paneId)) \(HerdrLaunch.quote(key))")
@@ -847,7 +858,7 @@ final class HerdrControlClient: MultiplexerControlling {
 
     func submitLine(_ text: String, paneId: String, timeout: Double = 12) async throws {
         pendingText = nil
-        let task = enqueueInput { [weak self] in
+        let task = enqueueInput(paneID: paneId) { [weak self] in
             guard let self else { throw SubmissionError.unconfirmed }
             do {
                 try await sendPrivateInput(method: "pane.send_input", pane: paneId,

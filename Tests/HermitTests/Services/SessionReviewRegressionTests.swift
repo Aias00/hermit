@@ -12,6 +12,24 @@ struct SessionReviewRegressionTests {
         return config
     }
 
+    @Test("A retiring screen cannot release a newer presentation of the same connection")
+    func visiblePresentationOwnership() async {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        let config = connection()
+        let session = hub.prepare(config)
+        let oldOwner = UUID(), newOwner = UUID()
+        hub.claimVisiblePresentation(session, owner: oldOwner)
+        hub.claimVisiblePresentation(session, owner: newOwner)
+        #expect(!hub.releaseVisiblePresentation(session, owner: oldOwner))
+        #expect(hub.visibleSession === session)
+        let replacement = await hub.replaceConnection(config, force: true)
+        #expect(hub.ownsVisiblePresentation(replacement, owner: newOwner))
+        #expect(!hub.releaseVisiblePresentation(session, owner: oldOwner))
+        #expect(hub.releaseVisiblePresentation(replacement, owner: newOwner))
+        #expect(hub.visibleSession == nil)
+        await hub.disconnect(config.id)
+    }
+
     @Test("Unsent input survives navigation and reconnect, but belongs only to its connection")
     func composerDraftLifetime() async {
         let hub = SessionHub(metrics: SessionMetricsRegistry())
@@ -73,6 +91,28 @@ struct SessionReviewRegressionTests {
         #expect(transport.writer.written.contains(Data("echo composer\r".utf8)))
         await session.stop()
         HostCapabilityCache.shared.invalidate(config.id)
+    }
+
+    @Test("Replacing a connection carries all pane drafts, including an offscreen uncertain send")
+    func allPaneDraftsSurviveReplacement() async {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        let config = connection()
+        let original = hub.prepare(config)
+        let aTarget = TerminalInputTarget.pane(multiplexer: "herdr", id: "w1:p1")
+        let bTarget = TerminalInputTarget.pane(multiplexer: "herdr", id: "w1:p2")
+        let a = original.composerDrafts.select(aTarget)
+        a.text = "A"
+        await a.submit(to: aTarget, label: "A") { _, _ in throw HerdrControlClient.SubmissionError.unconfirmed }
+        let b = original.composerDrafts.select(bTarget)
+        b.text = "B"
+        b.selection = NSRange(location: 0, length: 1)
+        let replacement = await hub.replaceConnection(config, force: true)
+        #expect(replacement.composerDrafts === original.composerDrafts)
+        #expect(replacement.composerDraft === b)
+        #expect(replacement.composerDrafts.select(aTarget) === a)
+        #expect(a.requiresSendReview && a.text == "A")
+        #expect(replacement.composerDrafts.select(bTarget).selection == NSRange(location: 0, length: 1))
+        await hub.disconnect(config.id)
     }
 
     private func moshSession(hadContact: Bool) throws -> (SessionHub.ActiveSession, MoshTransport) {
