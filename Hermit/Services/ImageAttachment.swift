@@ -396,6 +396,7 @@ final class ImageAttachmentController {
     /// attachments that already carry a remote path.
     private func upload() async {
         do {
+            try Task.checkCancellation()
             let uploader = try await uploaderProvider()
             let totalBytes = max(1, processed.reduce(0) { $0 + $1.data.count })
             var doneBytes = 0

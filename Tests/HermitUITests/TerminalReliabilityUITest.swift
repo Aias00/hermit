@@ -47,6 +47,81 @@ final class TerminalReliabilityUITest: XCTestCase {
     }
 
     @MainActor
+    func testImageCompletionPreservesHiddenKeyboardAndDirectInput() throws {
+        let gate = try imageUploadGate()
+        defer { try? FileManager.default.removeItem(at: gate) }
+        for directInput in [false, true] {
+            try Data().write(to: gate)
+            let app = try openTerminal(seedImage: true, explicitNavigation: true)
+            let overlay = app.descendants(matching: .any).matching(identifier: "image-attachment-overlay").firstMatch
+            XCTAssertTrue(overlay.waitForExistence(timeout: 20))
+            let field = composer(app)
+            field.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+            let direct = app.buttons["conversation-direct-input"]
+            if directInput {
+                direct.tap()
+                XCTAssertTrue(direct.isSelected)
+            } else {
+                app.buttons["conversation-keyboard-toggle"].tap()
+                XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+            }
+            try FileManager.default.removeItem(at: gate)
+            expectation(for: NSPredicate { _, _ in
+                (field.value as? String)?.contains("/IMG-") == true
+                    && !overlay.exists
+            }, evaluatedWith: app)
+            waitForExpectations(timeout: 25)
+            XCTAssertEqual(direct.isSelected, directInput)
+            XCTAssertEqual(app.keyboards.firstMatch.exists, directInput)
+            captureScreenshot(app, name: directInput ? "image-keeps-direct-input" : "image-keeps-keyboard-hidden")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testImageUploadSurvivesManualReconnectAndCanRetry() throws {
+        let gate = try imageUploadGate()
+        try Data().write(to: gate)
+        defer { try? FileManager.default.removeItem(at: gate) }
+        let app = try openTerminal(seedImage: true, explicitNavigation: true)
+        let overlay = app.descendants(matching: .any).matching(identifier: "image-attachment-overlay").firstMatch
+        XCTAssertTrue(overlay.waitForExistence(timeout: 20))
+        let field = composer(app)
+        field.tap()
+        field.typeText("keep image ")
+        app.buttons["conversation-menu"].tap()
+        app.buttons["重新连接"].tap()
+        try FileManager.default.removeItem(at: gate)
+        let retry = app.buttons["image-attach-retry"]
+        expectation(for: NSPredicate { _, _ in
+            retry.exists || (field.value as? String)?.contains("/IMG-") == true
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 25)
+        if retry.exists {
+            // The old SFTP channel can fail while the replacement SSH dials.
+            let direct = app.buttons["conversation-direct-input"]
+            expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: direct)
+            waitForExpectations(timeout: 25)
+            retry.tap()
+        }
+        expectation(for: NSPredicate { _, _ in
+            (field.value as? String)?.contains("/IMG-") == true
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 25)
+        XCTAssertTrue((field.value as? String)?.hasPrefix("keep image ") == true)
+        captureScreenshot(app, name: "image-survives-reconnect")
+    }
+
+    private func imageUploadGate() throws -> URL {
+        guard let root = ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"],
+              root.hasPrefix("/private/tmp/moshpit-ui-lab-") || root.hasPrefix("/tmp/moshpit-ui-lab-") else {
+            throw XCTSkip("requires a dedicated temporary terminal session fixture")
+        }
+        return URL(fileURLWithPath: root).appendingPathComponent("sftp-hold")
+    }
+
+    @MainActor
     func testUnconfirmedSubmissionRequiresReviewAndCannotReplayOnReturn() throws {
         guard let root = ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"] else {
             throw XCTSkip("requires isolated session fixture")
@@ -834,6 +909,10 @@ final class TerminalReliabilityUITest: XCTestCase {
         defer { try? FileManager.default.removeItem(at: receipt) }
         let draft = "printf 'VISIBLE_RECONNECT_OK\\n' >> '" + receipt.path + "'"
         field.tap()
+        // Other cases intentionally send Escape/arrows to this lab shell.
+        // Start this receipt command at a clean prompt, not its pending edit.
+        app.buttons["conversation-ctrl"].tap()
+        app.typeText("c")
         app.typeText(draft)
         app.buttons["conversation-menu"].tap()
         app.buttons["重新连接"].tap()

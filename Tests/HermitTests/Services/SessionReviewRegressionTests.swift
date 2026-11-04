@@ -115,6 +115,51 @@ struct SessionReviewRegressionTests {
         await hub.disconnect(config.id)
     }
 
+    @Test("Manual replacement retains every pane's images and explicit disconnect clears them")
+    func imageDraftsSurviveReplacement() async {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        let config = connection()
+        let original = hub.prepare(config)
+        let a = original.composerDrafts.select(.pane(multiplexer: "herdr", id: "w1:p1"))
+        let b = original.composerDrafts.select(.pane(multiplexer: "herdr", id: "w1:p2"))
+        let first = ImageAttachmentController(uploaderProvider: { throw SSHError.sessionClosed })
+        let second = ImageAttachmentController(uploaderProvider: { throw SSHError.sessionClosed })
+        a.imageAttachment = first
+        b.imageAttachment = second
+        a.uploads.enqueue([URL(fileURLWithPath: "/review-first.txt")])
+        original.imageUploads.record(remotePath: "/uploads/existing.jpg")
+        let replacement = await hub.replaceConnection(config, force: true)
+        #expect(a.imageAttachment === first)
+        #expect(b.imageAttachment === second)
+        #expect(a.uploads.items.first?.state == .queued)
+        #expect(replacement.composerDrafts === original.composerDrafts)
+        #expect(replacement.imageUploads.entries == original.imageUploads.entries)
+        #expect(replacement.imageUploads.record(remotePath: "/uploads/next.jpg").number == 2)
+        await hub.disconnect(config.id)
+        #expect(a.imageAttachment == nil && b.imageAttachment == nil)
+        #expect(a.uploads.items.first?.state == .cancelled)
+    }
+
+    @Test("Changing the host replaces its screen identity; a plain reconnect preserves it")
+    func reconfigurationReplacesPresentation() async {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        var config = connection()
+        let original = hub.prepare(config)
+        let reconnected = await hub.replaceConnection(config, force: true, preservingPresentation: true)
+        #expect(reconnected.presentationID == original.presentationID)
+        let fromEditor = await hub.replaceConnection(config, force: true)
+        #expect(fromEditor.presentationID != reconnected.presentationID)
+        let image = ImageAttachmentController(uploaderProvider: { throw SSHError.sessionClosed })
+        fromEditor.composerDraft.imageAttachment = image
+        fromEditor.imageUploads.record(remotePath: "/uploads/previous-host.jpg")
+        config.host = "192.0.2.2"
+        let changed = await hub.replaceConnection(config, preservingPresentation: true)
+        #expect(changed.presentationID != fromEditor.presentationID)
+        #expect(changed.composerDraft.imageAttachment == nil)
+        #expect(changed.imageUploads.entries.isEmpty)
+        await hub.disconnect(config.id)
+    }
+
     private func moshSession(hadContact: Bool) throws -> (SessionHub.ActiveSession, MoshTransport) {
         let config = connection()
         let session = SessionHub.ActiveSession(connection: config)

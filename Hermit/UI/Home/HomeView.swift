@@ -332,7 +332,7 @@ struct HomeView: View {
                     // SwiftUI has no way to veto that gesture, so the terminal
                     // keeps the standard push.
                     TerminalScreen(connection: connection, hub: hub)
-                        .id(ObjectIdentifier(session))
+                        .id(session.presentationID)
                 }
             }
         }
@@ -356,7 +356,7 @@ struct HomeView: View {
                                onToggleSidebar: { toggleSidebar() })
                     // A different host is a different screen: without this the
                     // struct is reused and keeps the first host's state.
-                    .id(ObjectIdentifier(session))
+                    .id(session.presentationID)
             } else {
                 ContentUnavailableView {
                     Label("No Terminal Open", systemImage: "terminal")

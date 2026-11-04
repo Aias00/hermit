@@ -1021,7 +1021,7 @@ struct TerminalScreen: View {
         let opensNewShell = connection.transport == .cloudflareSSH && connection.multiplexer == .none
             && (wasEverLive || active.shellWasReopened)
         Task {
-            let session = await hub.replaceConnection(connection, force: true)
+            let session = await hub.replaceConnection(connection, force: true, preservingPresentation: true)
             guard hub.sessions[connection.id] === session, !session.isStopping else { return }
             session.shellWasReopened = opensNewShell
             self.active = session
@@ -2639,13 +2639,14 @@ struct TerminalScreen: View {
     /// in the overlay's failed state with a Retry, not a dead chip.
     private func makeImageAttachmentController(draft: TerminalComposerDraft? = nil) -> ImageAttachmentController? {
         guard let active, active.viewModel.connState == .live else { return nil }
-        let controller = ImageAttachmentController(uploaderProvider: { [weak active] in
-            guard let active else { throw SSHError.sessionClosed }
-            return try await active.acquireFileTransferSSH()
+        let connectionID = active.connection.id
+        let controller = ImageAttachmentController(uploaderProvider: { [weak hub] in
+            guard let session = hub?.sessions[connectionID], !session.isStopping else { throw SSHError.sessionClosed }
+            return try await session.acquireFileTransferSSH()
         })
-        controller.onReady = { [weak active] paths in
-            guard let active else { return [] }
-            return paths.map { active.imageUploads.record(remotePath: $0).number }
+        controller.onReady = { [weak hub] paths in
+            guard !Task.isCancelled, let session = hub?.sessions[connectionID] else { return [] }
+            return paths.map { session.imageUploads.record(remotePath: $0).number }
         }
         (draft ?? composerDraft).imageAttachment = controller
         return controller
@@ -2727,7 +2728,8 @@ struct TerminalScreen: View {
               let text = controller.insertText(style: activePaneInsertStyle) else { return }
         composerText += text
         imageAttachment = nil
-        activateDraftKeyboard()
+        // Upload completion only changes draft data. Keep the user's current
+        // keyboard visibility and explicit terminal-input mode.
         Haptics.success()
         if submit { submitComposer() }
     }

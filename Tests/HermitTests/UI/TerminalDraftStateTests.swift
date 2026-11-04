@@ -158,4 +158,55 @@ struct TerminalDraftStateTests {
         #expect(a.text == "拼音")
         #expect(b.text.isEmpty && view.text.isEmpty)
     }
+
+    @Test("Upload and voice additions survive repeated IME callbacks, with or without a render")
+    func markedTextPreservesExternalAdditions() {
+        for renderBeforeEdit in [false, true] {
+            let draft = TerminalComposerDraftStore().select(first)
+            let editor = TerminalComposerView(text: Binding(get: { draft.text }, set: { draft.text = $0 }),
+                isFocused: .constant(false), onFocus: {}, onSubmit: {}, draft: draft)
+            let coordinator = editor.makeCoordinator()
+            let view = ComposerTextView()
+            view.delegate = coordinator
+            view.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0))
+            coordinator.textViewDidChange(view)
+            draft.text += " /uploads/file.txt"
+            if renderBeforeEdit { coordinator.synchronizeDraft(view) }
+            view.setMarkedText("nin", selectedRange: NSRange(location: 3, length: 0))
+            coordinator.textViewDidChange(view)
+            #expect(draft.text == "nin /uploads/file.txt")
+            #expect(view.markedTextRange != nil)
+            draft.text += " 语音补充"
+            view.setMarkedText("您好", selectedRange: NSRange(location: 2, length: 0))
+            coordinator.textViewDidChange(view)
+            view.unmarkText()
+            coordinator.textViewDidChange(view)
+            #expect(draft.text == "您好 /uploads/file.txt 语音补充")
+            #expect(view.text == draft.text)
+            coordinator.synchronizeDraft(view)
+            view.insertText("!")
+            #expect(draft.text == "您好 /uploads/file.txt 语音补充!")
+        }
+    }
+
+    @Test("Switching panes commits the old composition together with pending attachments")
+    func markedTextHandoffPreservesExternalAdditions() {
+        let store = TerminalComposerDraftStore()
+        let a = store.select(first), b = store.select(second)
+        func editor(_ draft: TerminalComposerDraft) -> TerminalComposerView {
+            TerminalComposerView(text: Binding(get: { draft.text }, set: { draft.text = $0 }),
+                isFocused: .constant(false), onFocus: {}, onSubmit: {}, draft: draft)
+        }
+        let coordinator = editor(a).makeCoordinator()
+        let view = ComposerTextView()
+        view.delegate = coordinator
+        view.setMarkedText("拼音", selectedRange: NSRange(location: 2, length: 0))
+        coordinator.textViewDidChange(view)
+        a.text += " /uploads/file.txt"
+        coordinator.updateParent(editor(b), view: view)
+        #expect(a.text == "拼音 /uploads/file.txt")
+        #expect(b.text.isEmpty && view.text.isEmpty)
+        coordinator.updateParent(editor(a), view: view)
+        #expect(view.text == a.text)
+    }
 }

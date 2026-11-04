@@ -51,8 +51,17 @@ def ssh_command(root):
     command = os.environ.get('SSH_ORIGINAL_COMMAND', '')
     os.chdir(root)
     env = environment(root)
+    if command in ('fixture-sftp', 'printf %s "$HOME"'):
+        # A test-owned gate lets UI tests choose when an actual upload finishes.
+        # Bounded so a failed runner cannot strand this private SSH subsystem.
+        deadline = time.monotonic() + 30
+        while (root/'sftp-hold').exists() and time.monotonic() < deadline:
+            time.sleep(.05)
     if command == 'fixture-sftp':
         os.execve('/usr/libexec/sftp-server', ['sftp-server', '-d', str(root)], env)
+    elif command == 'printf %s "$HOME"':
+        # The exec upload fallback must use this lab too, never the user's home.
+        sys.stdout.write(str(root))
     elif command:
         os.execve('/bin/bash', ['bash', '--noprofile', '--norc', '-c', command], env)
     else:

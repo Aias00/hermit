@@ -117,6 +117,9 @@ final class SessionHub {
     @MainActor
     final class ActiveSession: Identifiable {
         let connection: ServerConnection
+        /// A transport replacement does not replace the visible editor. Host
+        /// reconfiguration still gets a new screen and fresh configuration.
+        var presentationID = UUID()
         var composerDrafts = TerminalComposerDraftStore()
         var composerDraft: TerminalComposerDraft { composerDrafts.current }
 
@@ -3174,8 +3177,8 @@ final class SessionHub {
         /// until the replacement paints. The pins it owed the server travel
         /// with it (``inheritedPinLedger``); the replacement re-pins the same
         /// window on attach and settles the rest on the real disconnect.
-        func stop(forReconnect: Bool = false) async {
-            if !forReconnect { composerDrafts.cancelTransfers() }
+        func stop(forReconnect: Bool = false, preservingComposerDrafts: Bool = false) async {
+            if !forReconnect && !preservingComposerDrafts { composerDrafts.cancelTransfers() }
             retryScheduledAt = nil
             resetPlainSSHObservation()
             herdrFrameRecoveryTask?.cancel()
@@ -4068,7 +4071,8 @@ final class SessionHub {
     /// Ensure a saved/editable connection uses its current transport settings.
     /// Metadata changes alone must not interrupt a working terminal.
     @discardableResult
-    func replaceConnection(_ connection: ServerConnection, force: Bool = false) async -> ActiveSession {
+    func replaceConnection(_ connection: ServerConnection, force: Bool = false,
+                           preservingPresentation: Bool = false) async -> ActiveSession {
         let previous = connectionOperations[connection.id]
         let token = UUID()
         let task = Task { @MainActor in
@@ -4080,15 +4084,26 @@ final class SessionHub {
             let existing = self.sessions[connection.id]
             if let existing,
                force || !Self.sameSessionConfiguration(existing.connection, connection) {
+                if !Self.sameSessionConfiguration(existing.connection, connection) {
+                    // A changed destination must not resume an automatic image
+                    // upload selected for the previous host/transport.
+                    existing.composerDrafts.cancelTransfers()
+                }
                 // Already inside the queue: using public disconnect here would
                 // enqueue behind this very operation and deadlock.
-                await self.disconnectCurrent(connection.id, preservingVisibleSession: true)
+                await self.disconnectCurrent(connection.id, preservingSessionState: true)
                 HostCapabilityCache.shared.invalidate(connection.id)
             }
             // Creation belongs to the same ordered operation as teardown:
             // an older caller must not resume later and reinstall stale config.
             let session = self.prepare(connection)
             if let drafts { session.composerDrafts = drafts }
+            if let existing, Self.sameSessionConfiguration(existing.connection, connection) {
+                session.imageUploads = existing.imageUploads
+                if preservingPresentation {
+                    session.presentationID = existing.presentationID
+                }
+            }
             // Keep the old identity through teardown so a disappearing screen
             // can still revoke it. Transfer only ownership that survived awaits.
             if let existing, self.visibleSession === existing { self.visibleSession = session }
@@ -4273,17 +4288,19 @@ final class SessionHub {
         finishConnectionOperation(connectionId, token: token)
     }
 
-    private func disconnectCurrent(_ connectionId: UUID, preservingVisibleSession: Bool = false) async {
+    private func disconnectCurrent(_ connectionId: UUID, preservingSessionState: Bool = false) async {
         guard let active = sessions[connectionId] else { return }
         active.isStopping = true
-        await active.stop()
+        // Replacing a transport retains the pane's attachments and retry data.
+        // Explicit disconnect still discards all in-flight draft work.
+        await active.stop(preservingComposerDrafts: preservingSessionState)
         // Synchronous prepare() can register a newer object during stop's
         // network awaits. The old teardown owns only the object it captured.
         guard sessions[connectionId] === active else { return }
         await SSHService.shared.clearCachedSecret(for: connectionId)
         guard sessions[connectionId] === active else { return }
         sessions[connectionId] = nil
-        if !preservingVisibleSession, visibleSession === active { visibleSession = nil }
+        if !preservingSessionState, visibleSession === active { visibleSession = nil }
         var m = metrics.metrics[connectionId] ?? SessionMetrics()
         m.state = .saved
         m.connectedAt = nil

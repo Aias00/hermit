@@ -111,6 +111,7 @@ struct TerminalComposerView: UIViewRepresentable {
         view.accessibilityLabel = "待发送内容"
         context.coordinator.configureReturn(view)
         if let draft { view.restoreDraft(draft.text, selection: draft.selection) }
+        context.coordinator.synchronizeDraft(view)
         editor?.view = view
         return view
     }
@@ -120,7 +121,7 @@ struct TerminalComposerView: UIViewRepresentable {
         coordinator.updateParent(self, view: view)
         coordinator.configureReturn(view)
         editor?.view = view
-        view.updateDraftText(draft?.text ?? text)
+        coordinator.synchronizeDraft(view)
         view.updatePlaceholder()
         coordinator.updateFocus(view)
     }
@@ -138,7 +139,22 @@ struct TerminalComposerView: UIViewRepresentable {
         private var preservesFocusForPendingEnd = false
         private var resolvingEndEditing = false
         private var isUpdatingDraft = false
-        init(_ parent: TerminalComposerView) { self.parent = parent }
+        private var editorText: String
+        init(_ parent: TerminalComposerView) {
+            self.parent = parent
+            editorText = parent.draft?.text ?? parent.text
+        }
+
+        func synchronizeDraft(_ view: ComposerTextView) {
+            // Keep the IME's marked range intact. External additions remain in
+            // the model until a later edit/commit can merge them into the view.
+            guard view.markedTextRange == nil else { return }
+            isUpdatingDraft = true
+            view.updateDraftText(parent.draft?.text ?? parent.text)
+            editorText = view.text
+            isUpdatingDraft = false
+            saveSelection(view)
+        }
 
         /// Reuse the editor/responder while replacing only its pane-owned
         /// contents. Old IME text and undo history cannot enter the new pane.
@@ -155,6 +171,7 @@ struct TerminalComposerView: UIViewRepresentable {
             if switched, let draft = next.draft {
                 isUpdatingDraft = true
                 view.restoreDraft(draft.text, selection: draft.selection)
+                editorText = view.text
                 isUpdatingDraft = false
             }
         }
@@ -279,8 +296,17 @@ struct TerminalComposerView: UIViewRepresentable {
         }
         func textViewDidChange(_ textView: UITextView) {
             guard !isUpdatingDraft else { return }
-            if let draft = parent.draft { draft.text = textView.text }
-            else { parent.text = textView.text }
+            let modelText = parent.draft?.text ?? parent.text
+            // Upload and voice results append to the draft while UIKit owns
+            // an IME composition. Carry that suffix through every IME update,
+            // including callbacks arriving before the next SwiftUI render.
+            let suffix = modelText.utf8.starts(with: editorText.utf8)
+                ? String(decoding: modelText.utf8.dropFirst(editorText.utf8.count), as: UTF8.self) : ""
+            editorText = textView.text
+            let merged = editorText + suffix
+            if let draft = parent.draft { draft.text = merged }
+            else { parent.text = merged }
+            if let view = textView as? ComposerTextView { synchronizeDraft(view) }
             saveSelection(textView)
             (textView as? ComposerTextView)?.updatePlaceholder()
             textView.invalidateIntrinsicContentSize()
