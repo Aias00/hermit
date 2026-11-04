@@ -144,6 +144,8 @@ protocol MultiplexerControlling: AnyObject, Observable {
     /// `@moshpit_*` options; herdr's snapshot poll already carries it, so
     /// this just brings the next read forward.
     func pollAgentHooks()
+    /// Shared throttling for automatic consumers; explicit refreshes stay immediate.
+    func pollAgentHooksIfNeeded(now: Date, minimumInterval: TimeInterval)
     /// True while a user-initiated refresh is in flight (drives the spinner).
     var isRefreshing: Bool { get }
     func selectWindow(_ windowId: String)
@@ -180,5 +182,9 @@ protocol MultiplexerControlling: AnyObject, Observable {
 
 extension MultiplexerControlling {
     var agentHooksObservedAt: Date? { nil }
+    func pollAgentHooksIfNeeded(now: Date, minimumInterval: TimeInterval) {
+        if let observed = agentHooksObservedAt, (0..<minimumInterval).contains(now.timeIntervalSince(observed)) { return }
+        pollAgentHooks()
+    }
     func worktreeRepo(for sessionId: String) -> String? { nil }
 }

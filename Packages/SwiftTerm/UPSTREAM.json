@@ -16,6 +16,8 @@
     "Clamp IME UTF-16 candidate selections to grapheme boundaries without changing committed text or whitespace.",
     "Atomically coalesce skipped Metal draws with GPU completion; release failed frames without busy retries.",
     "Expose a mouse-mode generation so hosts can discard queued pointer input when a program disables and re-enables reporting in one output chunk.",
-    "Clamp legacy mouse coordinates before UInt8 conversion and remove pixel-protocol coordinate logging."
+    "Clamp legacy mouse coordinates before UInt8 conversion and remove pixel-protocol coordinate logging.",
+    "Invalidate and merge only changed iOS Metal rows at the live viewport; retain full invalidation for history and structural updates.",
+    "Expose a bounded presentation frame-rate budget so hosts can reduce redraw cadence in low-power and thermal states without delaying terminal parsing."
   ]
 }

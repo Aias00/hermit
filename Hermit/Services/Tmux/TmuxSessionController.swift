@@ -186,6 +186,9 @@ final class TmuxSessionController: MultiplexerControlling {
     /// incomplete rather than as "no agent here".
     private(set) var agentHooksLoaded = false
     private(set) var agentHooksObservedAt: Date?
+    @ObservationIgnored private var automaticHookPollInFlight = false
+    @ObservationIgnored private var lastAutomaticHookPoll: Date?
+    @ObservationIgnored private var automaticHookPollGeneration = UUID()
 
     /// Invoked on the main actor at the end of each ``pollAgentHooks()`` after
     /// ``agentHooks`` has been rebuilt, so the monitor can re-sync the Vibe
@@ -317,6 +320,9 @@ final class TmuxSessionController: MultiplexerControlling {
     /// Stop pumping bytes and reset the parser. Does **not** close the
     /// underlying SSH session — the caller owns that lifecycle.
     func detach() async {
+        automaticHookPollGeneration = UUID()
+        automaticHookPollInFlight = false
+        lastAutomaticHookPoll = nil
         pumpTask?.cancel()
         pumpTask = nil
         eventPump?.cancel()
@@ -2898,8 +2904,26 @@ final class TmuxSessionController: MultiplexerControlling {
     /// so cross-session agents all appear). `enqueue` already drops pre-attach
     /// commands, but guarding here avoids the wasted command + callback slot.
     func pollAgentHooks() {
+        readAgentHooks()
+    }
+
+    func pollAgentHooksIfNeeded(now: Date, minimumInterval: TimeInterval) {
+        guard snapshot.isAttached, !automaticHookPollInFlight else { return }
+        if let last = lastAutomaticHookPoll, (0..<minimumInterval).contains(now.timeIntervalSince(last)) { return }
+        if let observed = agentHooksObservedAt, (0..<minimumInterval).contains(now.timeIntervalSince(observed)) { return }
+        automaticHookPollInFlight = true
+        lastAutomaticHookPoll = now
+        let generation = automaticHookPollGeneration
+        readAgentHooks { [weak self] in
+            guard let self, self.automaticHookPollGeneration == generation else { return }
+            self.automaticHookPollInFlight = false
+        }
+    }
+
+    private func readAgentHooks(completion: (() -> Void)? = nil) {
         guard snapshot.isAttached else { return }
         sendCommand("list-panes -a -F \(Self.agentHookFormat)") { [weak self] response in
+            defer { completion?() }
             guard !response.isError else { return }
             self?.parseAgentHooks(response.lines)
         }

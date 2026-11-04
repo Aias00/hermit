@@ -17,6 +17,74 @@ import UserNotifications
 @Suite("AgentActivityMonitor")
 @MainActor
 struct AgentActivityMonitorTests {
+    @Test("native events still work with background sweeps paused; idle never becomes completion")
+    func nativeIdleAndPausedSweeps() async throws {
+        let suite = "test.nativeenergy.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.notificationsEnabled = true
+        var requests: [UNNotificationRequest] = []
+        var snapshots: [AgentWidgetState] = []
+        let monitor = AgentActivityMonitor(settings: settings, publishesLiveActivity: false,
+            deliverNotification: { requests.append($0) }, authorizeNotifications: {},
+            persistWidgetState: { snapshots.append($0) }, reloadWidgetTimeline: {})
+        var connection = ServerConnection(name: "Energy", host: "192.0.2.1", username: "test", authMethod: .password)
+        connection.multiplexer = .herdr
+        let runner = HerdrControlClientTests.FakeRunner()
+        let client = HerdrControlClient(runner: runner)
+        defer { client.stop(); monitor.untrack(connectionId: connection.id) }
+        monitor.track(connection: connection, controller: client)
+        monitor.setForeground(false)
+        func report(_ phase: String) async {
+            runner.setResponse("""
+            {"workspaces":[{"workspace_id":"w1","label":"project"}],
+             "tabs":[{"tab_id":"w1:t1","workspace_id":"w1","number":1}],
+             "panes":[{"pane_id":"w1:p1","tab_id":"w1:t1","agent":"codex","agent_status":"\(phase)"}]}
+            """)
+            await client.pollNowForTesting()
+        }
+        await report("working")
+        await report("working")
+        #expect(snapshots.count == 1 && snapshots.last?.workingCount == 1)
+        await report("idle")
+        #expect(snapshots.last?.items.isEmpty == true && requests.isEmpty)
+        await report("working")
+        await report("done")
+        #expect(requests.count == 1, "explicit completion still delivers with the foreground sweep stopped")
+    }
+
+
+    @Test("identical widget state is coalesced; transitions and freshness heartbeat still publish")
+    func widgetUpdateCoalescing() throws {
+        let suite = "test.widgetenergy.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var snapshots: [AgentWidgetState] = []
+        var reloads = 0
+        let monitor = AgentActivityMonitor(settings: AppSettings(defaults: defaults), publishesLiveActivity: false,
+            authorizeNotifications: {}, persistWidgetState: { snapshots.append($0) },
+            reloadWidgetTimeline: { reloads += 1 })
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let agent = AgentActivityAttributes.Agent(id: "one", connectionId: UUID().uuidString,
+            paneId: "%1", command: "codex", location: "work", detail: "分析工程",
+            state: .working, startedAt: now)
+        var state = AgentActivityAttributes.ContentState(agents: [agent], workingCount: 1, attentionCount: 0)
+        monitor.writeWidgetSnapshot(state, now: now)
+        for second in 1..<60 { monitor.writeWidgetSnapshot(state, now: now.addingTimeInterval(Double(second))) }
+        #expect(snapshots.count == 1 && reloads == 1)
+        monitor.writeWidgetSnapshot(state, now: now.addingTimeInterval(60))
+        #expect(snapshots.count == 2 && snapshots.last?.updatedAt == now.addingTimeInterval(60))
+        state.agents[0].state = .attention
+        state.workingCount = 0
+        state.attentionCount = 1
+        monitor.writeWidgetSnapshot(state, now: now.addingTimeInterval(61))
+        #expect(snapshots.count == 3 && reloads == 3)
+        #expect(snapshots.last?.items.first?.state == "attention")
+        monitor.writeWidgetSnapshot(.init(agents: [], workingCount: 0, attentionCount: 0),
+                                    now: now.addingTimeInterval(62))
+        #expect(snapshots.count == 4 && snapshots.last?.items.isEmpty == true)
+    }
 
     @Test("Native HERDR transitions deliver one routed notification and respect detail privacy")
     func nativeHerdrNotifications() async throws {

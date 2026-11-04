@@ -74,6 +74,7 @@ final class TerminalHostContainer: UIView {
         accessibilityIdentifier = "terminal-input-surface"
         NotificationCenter.default.addObserver(self, selector: #selector(applyRendererPreference),
             name: Self.rendererPreferenceChanged, object: nil)
+        energyObservation = EnergyPolicyObservation { [weak self] in self?.applyEnergyPolicy() }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -84,12 +85,18 @@ final class TerminalHostContainer: UIView {
         super.didMoveToWindow()
         if window == nil { onDetached?() }
         applyRendererPreference()
+        applyEnergyPolicy()
     }
 
     var onDetached: (() -> Void)?
     /// The screen can keep ordinary typing in its bottom editor. Advanced
     /// terminal hosts without an editor retain the native responder path.
     var onKeyboardRequest: (() -> Void)?
+    private var energyObservation: EnergyPolicyObservation?
+
+    private func applyEnergyPolicy() {
+        terminalView?.maximumFramesPerSecond = AppEnergyPolicy.current.terminalFramesPerSecond
+    }
 
     @objc private func applyRendererPreference() {
         // Metal needs an attached surface. Reused panes pick up the preference
@@ -259,6 +266,7 @@ final class TerminalHostContainer: UIView {
         terminalView = terminal
         addSubview(terminal)
         applyRendererPreference()
+        applyEnergyPolicy()
         // Only adopt the container's bounds when the container HAS bounds. A
         // freshly created container is .zero until its first layout pass, and
         // framing a REUSED terminal to .zero makes SwiftTerm reflow the whole

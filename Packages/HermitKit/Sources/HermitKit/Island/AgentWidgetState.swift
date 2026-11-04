@@ -50,6 +50,7 @@ public struct AgentWidgetState: Codable, Equatable {
 /// suite works without provisioning; on device the App Group capability must be
 /// enabled for both the app and the extension.
 public enum AgentWidgetStore {
+    public static let widgetKind = "MoshpitAgentStatus"
     public static let appGroup = "group.com.cluas.moshpit"
     private static let key = "moshpit.widget.agentState"
 

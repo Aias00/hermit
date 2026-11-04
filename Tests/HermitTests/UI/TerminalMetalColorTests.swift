@@ -6,6 +6,38 @@ import MetalKit
 
 @Suite("Metal terminal colors", .serialized)
 struct TerminalMetalColorTests {
+    @Test("incremental output reuses unchanged Metal rows and matches a full redraw")
+    @MainActor
+    func incrementalRowsMatchFullRedraw() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 240))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let terminal = TerminalView(frame: window.bounds,
+            font: UIFont.monospacedSystemFont(ofSize: 15, weight: .regular))
+        controller.view.addSubview(terminal)
+        terminal.feed(text: "\u{1b}[?25l\u{1b}[32m稳定内容 中文\r\n第二行\r\n第三行\u{1b}[0m")
+        _ = try await captureMetal(terminal, device: device, scale: window.screen.scale)
+        let surface = try #require(terminal.subviews.compactMap { $0 as? MTKView }.first)
+        let renderer = try #require(surface.delegate as? MetalTerminalRenderer)
+        terminal.feed(text: "\u{1b}[1;1H\u{1b}[31m更新一行\u{1b}[0m")
+        terminal.updateDisplay()
+        // A second update before presentation must merge its dirty row.
+        terminal.feed(text: "\u{1b}[3;1H第三行更新")
+        terminal.updateDisplay()
+        let incremental = try await captureMetal(terminal, device: device, scale: window.screen.scale)
+        #expect(renderer.debugRowsRebuilt > 0 && renderer.debugRowsRebuilt <= 3)
+        #expect(renderer.debugRowsCached > 0)
+        terminal.getTerminal().updateFullScreen()
+        terminal.updateDisplay()
+        let complete = try await captureMetal(terminal, device: device, scale: window.screen.scale)
+        let incrementalData = try #require(incremental.dataProvider?.data) as Data
+        let completeData = try #require(complete.dataProvider?.data) as Data
+        #expect(incrementalData == completeData, "partial invalidation must not leave stale rows")
+    }
+
     @Test("foreground colors and emoji survive Metal rendering", arguments: ["ansi", "indexed", "truecolor"] )
     @MainActor
     func ansiColors(_ mode: String) async throws {

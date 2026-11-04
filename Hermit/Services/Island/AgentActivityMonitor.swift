@@ -39,7 +39,7 @@ final class AgentActivityMonitor {
     // than this reverts to the output heuristic. The sweep runs every 2s and
     // polls each sweep, so ~2 poll intervals of slack avoids flapping on a
     // single dropped round-trip.
-    private let hookGrace: TimeInterval = 5
+    private var hookGrace: TimeInterval { max(5, AppEnergyPolicy.current.samplingInterval * 2 + 1) }
 
     /// Agent labels that are Hermit's own plumbing, never a row on the island.
     ///
@@ -218,6 +218,12 @@ final class AgentActivityMonitor {
         pendingAnnounce[key] = PendingAnnounce(episode: episode, task: task)
     }
     @ObservationIgnored private var sweepTimer: Timer?
+    @ObservationIgnored private var foreground = true
+    @ObservationIgnored private var energyObservation: EnergyPolicyObservation?
+    @ObservationIgnored private var lastWidgetSnapshot: AgentWidgetState?
+    @ObservationIgnored private let persistWidgetState: (AgentWidgetState) -> Void
+    @ObservationIgnored private let reloadWidgetTimeline: () -> Void
+    @ObservationIgnored private var retiredLegacyActivities = false
     @ObservationIgnored private let settings: AppSettings
     #if canImport(ActivityKit)
     @ObservationIgnored private var activity: Activity<AgentActivityAttributes>?
@@ -233,13 +239,33 @@ final class AgentActivityMonitor {
          deliverNotification: @escaping (UNNotificationRequest) -> Void = { UNUserNotificationCenter.current().add($0) },
          authorizeNotifications: @escaping () -> Void = {
              UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+         },
+         persistWidgetState: @escaping (AgentWidgetState) -> Void = { AgentWidgetStore.write($0) },
+         reloadWidgetTimeline: @escaping () -> Void = {
+             WidgetCenter.shared.reloadTimelines(ofKind: AgentWidgetStore.widgetKind)
          }) {
         self.settings = settings
         self.publishesLiveActivity = publishesLiveActivity
         self.announceDelay = announceDelay ?? Self.announceGrace
         self.deliverNotification = deliverNotification
         self.authorizeNotifications = authorizeNotifications
+        self.persistWidgetState = persistWidgetState
+        self.reloadWidgetTimeline = reloadWidgetTimeline
         loadAnnounced()
+        energyObservation = EnergyPolicyObservation { [weak self] in self?.refreshScheduling() }
+    }
+
+    deinit { sweepTimer?.invalidate() }
+
+    func setForeground(_ active: Bool) {
+        foreground = active
+        refreshScheduling()
+    }
+
+    func refreshScheduling() {
+        sweepTimer?.invalidate()
+        sweepTimer = nil
+        startSweepTimerIfNeeded()
     }
 
     // MARK: - Lifecycle
@@ -562,20 +588,25 @@ final class AgentActivityMonitor {
     // MARK: - Sweep
 
     private func startSweepTimerIfNeeded() {
-        guard sweepTimer == nil else { return }
-        sweepTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        guard sweepTimer == nil, foreground,
+              settings.liveActivityEnabled || settings.notificationsEnabled, !conns.isEmpty else { return }
+        let interval = AppEnergyPolicy.current.samplingInterval
+        sweepTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.sweep() }
         }
+        sweepTimer?.tolerance = interval * 0.2
     }
 
     private func sweep() {
+        guard foreground, settings.liveActivityEnabled || settings.notificationsEnabled else { return }
         let now = Date()
 
         // Phase B — drive a hook poll for every tracked controller on the same
         // cadence as the heuristic sweep. Each completion calls back into
         // applyAgentHooks (via onAgentHooksUpdated) which re-syncs the island.
         for ref in conns.values {
-            ref.controller?.pollAgentHooks()
+            ref.controller?.pollAgentHooksIfNeeded(now: now,
+                minimumInterval: AppEnergyPolicy.current.samplingInterval * 0.8)
         }
 
         // Looking at a prompt acknowledges it. The island keeps showing the
@@ -600,6 +631,9 @@ final class AgentActivityMonitor {
 
         var changed = false
         for (key, var p) in panes {
+            // Native HERDR reports are authoritative even when its event
+            // channel lets snapshot polls back off beyond the heuristic grace.
+            if conns[key.conn]?.controller?.multiplexer == .herdr { continue }
             // Fallback restoration — a hook-owned pane whose stamp has gone
             // stale (option unset, dropped from the poll past hookGrace) returns
             // to heuristic governance. Re-arm its bookkeeping from now so the
@@ -695,6 +729,16 @@ final class AgentActivityMonitor {
         guard let controller = conns[connectionId]?.controller else { return }
         let now = Date()
         var changed = false
+
+        if controller.multiplexer == .herdr {
+            for key in panes.keys where key.conn == connectionId {
+                let hook = controller.agentHooks[key.pane]
+                if hookState(hook?.state) == nil || Self.reservedAgents.contains(hook?.agent ?? "") {
+                    panes[key] = nil
+                    changed = true
+                }
+            }
+        }
 
         for (paneId, hook) in controller.agentHooks {
             guard let mapped = hookState(hook.state) else { continue }
@@ -943,6 +987,13 @@ final class AgentActivityMonitor {
         writeWidgetSnapshot(state)
 
         #if canImport(ActivityKit)
+        if !publishesLiveActivity {
+            if !retiredLegacyActivities {
+                endAllActivities()
+                retiredLegacyActivities = true
+            }
+            return
+        }
         guard !state.agents.isEmpty else {
             endAllActivities()
             return
@@ -1003,7 +1054,7 @@ final class AgentActivityMonitor {
     /// Mirror the current agent list into the App Group for the home/lock-screen
     /// Widget, then nudge WidgetKit to refresh (the widget otherwise only pulls
     /// on the OS's slow schedule).
-    private func writeWidgetSnapshot(_ state: AgentActivityAttributes.ContentState) {
+    func writeWidgetSnapshot(_ state: AgentActivityAttributes.ContentState, now: Date = Date()) {
         let items = state.agents.map {
             AgentWidgetState.Item(id: $0.id, command: $0.command, location: $0.location,
                                   detail: $0.detail,
@@ -1011,15 +1062,22 @@ final class AgentActivityMonitor {
                                   deepLink: AgentDeepLink.string(connectionId: $0.connectionId,
                                                                  paneId: $0.paneId))
         }
-        AgentWidgetStore.write(AgentWidgetState(
+        let snapshot = AgentWidgetState(
             items: items,
             attentionCount: state.attentionCount,
             workingCount: state.workingCount,
             headlineDeepLink: state.headlineDeepLink,
-            updatedAt: Date()))
-        #if canImport(WidgetKit)
-        WidgetCenter.shared.reloadAllTimelines()
-        #endif
+            updatedAt: now)
+        if let previous = lastWidgetSnapshot {
+            var comparison = snapshot
+            comparison.updatedAt = previous.updatedAt
+            // The freshness heartbeat keeps the widget honest without writing
+            // and waking its extension for every identical hook observation.
+            if comparison == previous, (0..<60.0).contains(now.timeIntervalSince(previous.updatedAt)) { return }
+        }
+        lastWidgetSnapshot = snapshot
+        persistWidgetState(snapshot)
+        reloadWidgetTimeline()
     }
 
     private func requestNotificationAuthorizationIfNeeded() {

@@ -203,6 +203,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     var search: SearchService!
     var debug: UIView?
     var pendingDisplay: Bool = false
+    /// Limits presentation work; terminal parsing and input remain immediate.
+    public var maximumFramesPerSecond: Int = 60
 #if canImport(MetalKit)
     var metalView: MTKView?
     var metalRenderer: MetalTerminalRenderer?
@@ -1634,6 +1636,29 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return nil
         }
         return firstRow...lastRow
+    }
+
+    func invalidateMetalRows(_ range: ClosedRange<Int>?) {
+        guard let range else { return }
+        if let pending = metalDirtyRange {
+            metalDirtyRange = min(pending.lowerBound, range.lowerBound)...max(pending.upperBound, range.upperBound)
+        } else {
+            metalDirtyRange = range
+        }
+    }
+
+    /// Terminal update ranges are screen-relative. Partial cache invalidation
+    /// is safe at the live viewport; history may shift when scrollback trims.
+    func invalidateMetalUpdate(start: Int, end: Int) {
+        guard let visible = metalVisibleRange() else { return }
+        let buffer = terminal.displayBuffer
+        guard buffer.yDisp == buffer.yBase, start >= 0, end >= start, end < terminal.rows else {
+            invalidateMetalRows(visible)
+            return
+        }
+        let first = max(visible.lowerBound, buffer.yBase + start)
+        let last = min(visible.upperBound, buffer.yBase + end)
+        if first <= last { invalidateMetalRows(first...last) }
     }
 #endif
     

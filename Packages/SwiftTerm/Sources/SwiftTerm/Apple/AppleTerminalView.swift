@@ -1641,11 +1641,9 @@ extension TerminalView {
         setNeedsDisplay(region)
 #endif
         #else
-        // TODO iOS: need to update the code above, but will do that when I get some real
-        // life data being fed into it.
         #if canImport(MetalKit)
         if metalView != nil {
-            metalDirtyRange = metalVisibleRange()
+            invalidateMetalUpdate(start: rowStart, end: rowEnd)
             requestMetalDisplay()
         } else {
             setNeedsDisplay(bounds)
@@ -1729,14 +1727,19 @@ extension TerminalView {
     {
         // throttle
         if !pendingDisplay {
-            let fps60 = 16670000
-            // let fps30 = 16670000*2
-            let fpsDelay = fps60
             pendingDisplay = true
             DispatchQueue.main.asyncAfter(
-                deadline: DispatchTime (uptimeNanoseconds: DispatchTime.now().uptimeNanoseconds + UInt64 (fpsDelay)),
+                deadline: DispatchTime (uptimeNanoseconds: DispatchTime.now().uptimeNanoseconds + displayUpdateDelayNanoseconds),
                 execute: updateDisplay)
         }
+    }
+
+    private var displayUpdateDelayNanoseconds: UInt64 {
+#if os(iOS) || os(visionOS)
+        return 1_000_000_000 / UInt64(max(1, min(60, maximumFramesPerSecond)))
+#else
+        return 16_670_000
+#endif
     }
 
 #if canImport(MetalKit)
@@ -1752,11 +1755,9 @@ extension TerminalView {
             return
         }
         if !pendingMetalDisplay {
-            let fps60 = 16670000
-            let fpsDelay = fps60
             pendingMetalDisplay = true
             DispatchQueue.main.asyncAfter(
-                deadline: DispatchTime (uptimeNanoseconds: DispatchTime.now().uptimeNanoseconds + UInt64 (fpsDelay))) { [weak self] in
+                deadline: DispatchTime (uptimeNanoseconds: DispatchTime.now().uptimeNanoseconds + displayUpdateDelayNanoseconds)) { [weak self] in
                     guard let self else { return }
                     self.pendingMetalDisplay = false
                     self.metalView?.setNeedsDisplay(self.metalView?.bounds ?? .zero)

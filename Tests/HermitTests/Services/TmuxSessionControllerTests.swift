@@ -45,6 +45,29 @@ private func makeAttachedController() async -> (TmuxSessionController, MockTmuxT
 @MainActor
 struct TmuxSessionControllerTests {
 
+    @Test("automatic hook consumers share one in-flight read and a minimum request interval")
+    func automaticHookPollsAreCoalesced() async throws {
+        let (controller, transport) = await makeAttachedController()
+        #expect(await waitUntil { await transport.recordedCommands().count >= 3 })
+        pushOneWindowDiscovery(transport)
+        #expect(await waitUntil { controller.snapshot.activePaneId == "%0" })
+        await settleControlChatter(transport, answered: 3)
+        let initialCount = await transport.recordedCommands().count
+        let now = Date()
+        for _ in 0..<10 { controller.pollAgentHooksIfNeeded(now: now, minimumInterval: 1.6) }
+        #expect(await waitUntil { await transport.recordedCommands().count == initialCount + 1 })
+        controller.pollAgentHooksIfNeeded(now: now.addingTimeInterval(10), minimumInterval: 1.6)
+        #expect(await transport.recordedCommands().count == initialCount + 1,
+                "a slow reply cannot cause concurrent duplicate reads")
+        transport.pushText("%begin 9 9 0\n%0|working|codex||node|task\n%end 9 9 0\n")
+        #expect(await waitUntil { controller.agentHooksLoaded })
+        controller.pollAgentHooksIfNeeded(now: now.addingTimeInterval(0.1), minimumInterval: 1.6)
+        #expect(await transport.recordedCommands().count == initialCount + 1)
+        controller.pollAgentHooksIfNeeded(now: now.addingTimeInterval(3), minimumInterval: 1.6)
+        #expect(await waitUntil { await transport.recordedCommands().count == initialCount + 2 })
+        await controller.detach()
+    }
+
     @Test("A rejected paste stage reports failure and never sends Enter")
     func failedSubmitNeverSendsEnter() async throws {
         let (controller, transport) = await makeAttachedController()

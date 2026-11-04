@@ -210,23 +210,32 @@ final class ConnectionLiveActivity {
     private var desiredCanStart = false
     private var revision = 0
     private var delivery: Task<Void, Never>?
+    private var energyObservation: EnergyPolicyObservation?
 
     init(settings: AppSettings, hub: SessionHub,
          backend: (any ConnectionActivityBackend)? = nil) {
         self.settings = settings
         self.hub = hub
         self.backend = backend ?? SystemConnectionActivityBackend()
+        energyObservation = EnergyPolicyObservation { [weak self] in
+            guard let self else { return }
+            self.setForeground(self.foreground)
+        }
     }
+
+    deinit { timer?.invalidate() }
 
     func setForeground(_ active: Bool) {
         foreground = active
         timer?.invalidate()
         timer = nil
         refresh(force: true)
-        if active {
-            timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        if active && settings.liveActivityEnabled {
+            let interval = AppEnergyPolicy.current.samplingInterval
+            timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh() }
             }
+            timer?.tolerance = interval * 0.2
         }
     }
 
@@ -246,7 +255,10 @@ final class ConnectionLiveActivity {
                 let controller: (any MultiplexerControlling)?
                 if let herdr = session.herdrControl { controller = herdr }
                 else { controller = session.tmuxControl }
-                if shouldPoll && state == .connected { controller?.pollAgentHooks() }
+                if shouldPoll && state == .connected {
+                    controller?.pollAgentHooksIfNeeded(now: now,
+                        minimumInterval: AppEnergyPolicy.current.samplingInterval * 0.8)
+                }
                 let shellCommand = controller == nil ? session.plainSSHCommand : nil
                 let observedAt = controller?.agentHooksObservedAt ?? shellCommand?.observedAt
                 let context = controller.flatMap {

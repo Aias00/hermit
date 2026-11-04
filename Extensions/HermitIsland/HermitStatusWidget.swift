@@ -59,7 +59,7 @@ struct AgentStatusProvider: TimelineProvider {
 
 struct HermitStatusWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "MoshpitAgentStatus", provider: AgentStatusProvider()) { entry in
+        StaticConfiguration(kind: AgentWidgetStore.widgetKind, provider: AgentStatusProvider()) { entry in
             AgentStatusWidgetView(state: entry.state, isStale: entry.isStale)
                 .widgetURL(entry.state.headlineDeepLink.flatMap(URL.init(string:)))
         }

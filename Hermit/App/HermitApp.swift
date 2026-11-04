@@ -204,15 +204,18 @@ struct HermitApp: App {
             }
             .onAppear {
                 connectionActivity.setForeground(scenePhase == .active)
+                monitor.setForeground(scenePhase == .active)
                 CloudSyncService.shared.configure(CloudSyncLocalStore(
                     connections: store, keys: sshKeys, themes: themes, appThemes: appThemes,
                     shortcuts: shortcuts, settings: settings, keychain: keychainHolder.service))
                 if scenePhase == .active { Task { await CloudSyncService.shared.sync() } }
             }
             .onChange(of: settings.liveActivityEnabled) { _, _ in
-                connectionActivity.refresh(force: true)
+                connectionActivity.setForeground(scenePhase == .active)
+                monitor.refreshScheduling()
             }
             .onChange(of: settings.notificationsEnabled) { _, enabled in
+                monitor.refreshScheduling()
                 PushService.shared.setNotificationsEnabled(enabled)
                 guard enabled else { return }
                 for session in hub.sessions.values {
@@ -248,6 +251,7 @@ struct HermitApp: App {
                     Task { await CloudSyncService.shared.sync() }
                     hub.setForeground(true)
                     connectionActivity.setForeground(true)
+                    monitor.setForeground(true)
                     // Re-announce this phone to its relays. Unconditional: a
                     // relay that lost its registry would otherwise never hear
                     // from us again, and every push it was asked to send would
@@ -260,6 +264,7 @@ struct HermitApp: App {
                 case .background:
                     hub.setForeground(false)
                     connectionActivity.setForeground(false)
+                    monitor.setForeground(false)
                 case .inactive:   break
                 @unknown default: break
                 }
