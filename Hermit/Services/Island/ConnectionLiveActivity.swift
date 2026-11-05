@@ -25,7 +25,7 @@ struct ConnectionActivityEntry: Equatable {
 enum ConnectionActivitySnapshot {
     static func make(entries: [ConnectionActivityEntry], preferredID: UUID?,
                      foreground: Bool, showHostNames: Bool, now: Date,
-                     showTaskDetails: Bool = false)
+                     showTaskDetails: Bool = false, recentCompletionID: String? = nil)
         -> ConnectionActivityAttributes.ContentState? {
         guard !entries.isEmpty else { return nil }
         // A remote prompt takes precedence over the screen currently visible.
@@ -69,7 +69,15 @@ enum ConnectionActivitySnapshot {
             if ($0.id == preferredPane) != ($1.id == preferredPane) { return $0.id == preferredPane }
             return $0.id.compare($1.id, options: .numeric) == .orderedAscending
         }
-        let visibleTasks = Array(allTasks.prefix(3))
+        var visibleTasks = Array(allTasks.prefix(3))
+        // Reserve a row briefly for the explicit completion being announced.
+        // Other working panes must not force that event into a second card.
+        if let recentCompletionID,
+           let completed = allTasks.first(where: { $0.id == recentCompletionID && $0.state == .done }) {
+            let leading = Array(allTasks.filter { $0.state == .attention }.prefix(2)) + [completed]
+            let included = Set(leading.map(\.id))
+            visibleTasks = leading + Array(allTasks.filter { !included.contains($0.id) }.prefix(3 - leading.count))
+        }
         return .init(connectionCount: entries.count,
                      headlineName: showHostNames ? boundedAlias(headline.name) : nil,
                      connectionState: headline.state,
@@ -207,6 +215,7 @@ final class ConnectionLiveActivity {
     private var timer: Timer?
     private var foreground = false
     private var lastHookPoll: Date = .distantPast
+    private var recentCompletion: (id: String, until: Date)?
     private var lastSubmitted: ConnectionActivityAttributes.ContentState?
     private var desired: ConnectionActivityAttributes.ContentState?
     private var desiredCanStart = false
@@ -242,9 +251,22 @@ final class ConnectionLiveActivity {
     }
 
     func refresh(force: Bool = false, now: Date = Date()) {
+        submit(snapshot(now: now, pollHooks: true), canStart: foreground, force: force)
+    }
+
+    /// Resolve against all known task panes, including those outside the three
+    /// rows in the current activity. This performs no network request and does
+    /// not create an activity if the user dismissed it.
+    func snapshot(for event: AgentTaskEvent) -> ConnectionActivityAttributes.ContentState? {
+        let now = Date()
+        if event.state == .done { recentCompletion = (event.taskID, now.addingTimeInterval(30)) }
+        return snapshot(now: now, pollHooks: false)
+    }
+
+    private func snapshot(now: Date, pollHooks: Bool) -> ConnectionActivityAttributes.ContentState? {
         let entries: [ConnectionActivityEntry]
         if settings.liveActivityEnabled {
-            let shouldPoll = foreground && now.timeIntervalSince(lastHookPoll) >= 10
+            let shouldPoll = pollHooks && foreground && now.timeIntervalSince(lastHookPoll) >= 10
             if shouldPoll { lastHookPoll = now }
             entries = hub.sessions.values.map { session in
                 let state: ConnectionActivityAttributes.ConnectionState
@@ -296,11 +318,11 @@ final class ConnectionLiveActivity {
                     } ?? [])
             }
         } else { entries = [] }
-        let content = ConnectionActivitySnapshot.make(entries: entries,
+        return ConnectionActivitySnapshot.make(entries: entries,
             preferredID: hub.visibleSession?.connection.id, foreground: foreground,
             showHostNames: settings.liveActivityShowHostNames, now: now,
-            showTaskDetails: settings.lockScreenDetailEnabled)
-        submit(content, canStart: foreground, force: force)
+            showTaskDetails: settings.lockScreenDetailEnabled,
+            recentCompletionID: recentCompletion.flatMap { $0.until > now ? $0.id : nil })
     }
 
     /// Coalesce steady state (including its timestamps), but periodically renew

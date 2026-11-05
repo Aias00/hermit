@@ -67,6 +67,57 @@ struct AgentTaskPresentationTests {
         #expect(TaskActivityPresentation.applying(signal, to: donePoll)?.isRepeat == true)
     }
 
+    @Test("A completion outside the first three rows is merged using the complete model without double-counting")
+    func hiddenCompletionUsesExistingCard() throws {
+        let contexts = (1...14).map { index in
+            ConnectionActivityContext(workspaceName: "work-\(index)", programName: "Codex",
+                taskState: "working", paneID: "w1:p\(index)", taskDetail: "task \(index)")
+        }
+        var entry = ConnectionActivityEntry(id: connection, name: "Host", state: .connected,
+            working: 14, observedAt: now, tasks: contexts)
+        let before = try #require(ConnectionActivitySnapshot.make(entries: [entry], preferredID: nil,
+            foreground: true, showHostNames: true, now: now))
+        let signal = AgentTaskEvent(connectionID: connection, paneID: "w1:p14", state: .done,
+            occurredAt: now.addingTimeInterval(1), receivedAt: now.addingTimeInterval(2))
+        #expect(before.tasks?.contains(where: { $0.id == signal.taskID }) == false)
+        #expect(TaskActivityPresentation.applying(signal, to: before) == nil,
+                "this was the previous path to an ordinary notification")
+        entry.working = 13
+        entry.done = 1
+        entry.tasks[13].taskState = "done"
+        entry.observedAt = now.addingTimeInterval(1)
+        let refreshed = try #require(ConnectionActivitySnapshot.make(entries: [entry], preferredID: nil,
+            foreground: true, showHostNames: true, now: now.addingTimeInterval(1),
+            recentCompletionID: signal.taskID))
+        let update = try #require(TaskActivityPresentation.applying(signal, to: before, refreshedSnapshot: refreshed))
+        #expect(update.content.tasks?.first?.id == signal.taskID)
+        #expect(AgentDeepLink.parse(update.content.deepLink)?.paneId == signal.paneID)
+        #expect(update.content.tasks?.count == 3 && update.content.totalTaskCount == 14)
+        #expect(update.content.doneCount == 1 && update.content.workingCount == 13)
+        #expect(TaskActivityPresentation.applying(signal, to: update.content, refreshedSnapshot: refreshed)?.isRepeat == true)
+        var newer = before
+        newer.updatedAt = now.addingTimeInterval(10)
+        #expect(TaskActivityPresentation.applying(signal, to: newer, refreshedSnapshot: refreshed) == nil,
+                "a snapshot captured before a queued update must not replace newer state")
+        let privateState = try #require(ConnectionActivitySnapshot.make(entries: [entry], preferredID: nil,
+            foreground: true, showHostNames: false, now: now, recentCompletionID: signal.taskID))
+        #expect(privateState.tasks?.first?.workspaceName == nil && privateState.tasks?.first?.detail == nil)
+        entry.tasks[0].taskState = "attention"
+        let waiting = try #require(ConnectionActivitySnapshot.make(entries: [entry], preferredID: nil,
+            foreground: true, showHostNames: true, now: now, recentCompletionID: signal.taskID))
+        #expect(waiting.tasks?.first?.state == .attention)
+        #expect(waiting.tasks?.contains(where: { $0.id == signal.taskID }) == true,
+                "a completion gets a row while urgent prompts retain precedence")
+        entry.tasks[0].taskState = "working"
+        entry.tasks[13].taskState = "working"
+        entry.done = 0
+        entry.working = 14
+        let newTurn = try #require(ConnectionActivitySnapshot.make(entries: [entry], preferredID: nil,
+            foreground: true, showHostNames: true, now: now, recentCompletionID: signal.taskID))
+        #expect(newTurn.tasks?.contains(where: { $0.id == signal.taskID }) == false,
+                "an old completion cannot pin a pane that started working again")
+    }
+
     @Test("Attention rises to the top, and an old event cannot undo a later event")
     func attentionPriorityAndOrder() throws {
         let completed = try #require(TaskActivityPresentation.applying(event(), to: snapshot())).content

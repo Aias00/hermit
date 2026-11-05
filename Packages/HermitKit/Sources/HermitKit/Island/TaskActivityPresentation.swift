@@ -11,7 +11,14 @@ public enum TaskActivityPresentation {
     }
 
     public static func applying(_ event: AgentTaskEvent,
-                                to original: ConnectionActivityAttributes.ContentState) -> Update? {
+                                to original: ConnectionActivityAttributes.ContentState,
+                                refreshedSnapshot: ConnectionActivityAttributes.ContentState? = nil) -> Update? {
+        if let snapshot = refreshedSnapshot, snapshot.updatedAt >= original.updatedAt,
+           snapshot.tasks?.contains(where: { $0.id == event.taskID && $0.state.rawValue == event.state.rawValue }) == true {
+            // Use the complete model's counters rather than guessing the old
+            // phase of a pane omitted from the activity's bounded task rows.
+            return applying(event, to: reconciling(snapshot, with: original))
+        }
         guard var rows = original.tasks,
               let index = rows.firstIndex(where: { $0.id == event.taskID }) else { return nil }
         let previous = rows[index]
@@ -31,7 +38,9 @@ public enum TaskActivityPresentation {
         rows[index].eventID = event.id
         rows[index].eventAt = event.occurredAt
         rows[index].eventPresentation = nil
-        rows.sort { $0.state.priority < $1.state.priority }
+        // Keep an explicit recent-completion row where the full model placed
+        // it. Only a new attention event needs to reorder the existing rows.
+        if next == .attention { rows.sort { $0.state.priority < $1.state.priority } }
         result.tasks = rows
         result.updatedAt = event.receivedAt
         if previous.state != next {
@@ -45,8 +54,8 @@ public enum TaskActivityPresentation {
             else { result.doneCount += 1 }
         }
         let headline = AgentDeepLink.parse(result.deepLink)
-        if next == .attention {
-            // The card's body tap must open the prompt that just became urgent,
+        if next == .attention || next == .done && rows.first?.id == event.taskID {
+            // A new prompt or headline completion must open its own pane,
             // even when a different pane was the previous headline.
             if headline?.connectionId != event.connectionID {
                 result.headlineName = previous.hostName
@@ -120,13 +129,15 @@ public enum TaskActivityDelivery {
     }
 
     public static func present(_ event: AgentTaskEvent, notification: UNNotificationContent?,
-                               alert: Bool, externalNotification: Bool = false) async -> Bool {
+                               alert: Bool, externalNotification: Bool = false,
+                               refreshedSnapshot: ConnectionActivityAttributes.ContentState? = nil) async -> Bool {
         let previous = tail
         let work = Task { () -> Bool in
             await previous?.value
             for activity in Activity<ConnectionActivityAttributes>.activities {
                 guard activity.activityState == .active || activity.activityState == .stale,
-                      let update = TaskActivityPresentation.applying(event, to: activity.content.state) else { continue }
+                      let update = TaskActivityPresentation.applying(event, to: activity.content.state,
+                                                                    refreshedSnapshot: refreshedSnapshot) else { continue }
                 // An NSE updates silently before the ordinary push is handed
                 // to willPresent. If the app is foreground, replace that still
                 // pending alert with an ActivityKit alert instead of losing it.

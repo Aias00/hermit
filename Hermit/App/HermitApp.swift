@@ -46,7 +46,12 @@ struct HermitApp: App {
         let store = ConnectionStore(readiness: .system)
         let hub = SessionHub(metrics: metrics)
         // ConnectionActivityMonitor already owns the Lock Screen activity.
-        let taskNotificationRouter = AgentTaskNotificationRouter(settings: settings)
+        let connectionActivity = ConnectionLiveActivity(settings: settings, hub: hub)
+        let taskNotificationRouter = AgentTaskNotificationRouter(settings: settings,
+            presentActivity: { event, notification, alert in
+                await TaskActivityDelivery.present(event, notification: notification, alert: alert,
+                    refreshedSnapshot: connectionActivity.snapshot(for: event))
+            })
         let monitor = AgentActivityMonitor(settings: settings, publishesLiveActivity: false,
             deliverNotification: { taskNotificationRouter.submit($0) })
         let router = DeepLinkRouter()
@@ -56,7 +61,7 @@ struct HermitApp: App {
         _store = State(initialValue: store)
         _hub = State(initialValue: hub)
         _monitor = State(initialValue: monitor)
-        _connectionActivity = State(initialValue: ConnectionLiveActivity(settings: settings, hub: hub))
+        _connectionActivity = State(initialValue: connectionActivity)
         _router = State(initialValue: router)
         _notificationHandler = State(initialValue: notificationHandler)
         _taskNotificationRouter = State(initialValue: taskNotificationRouter)

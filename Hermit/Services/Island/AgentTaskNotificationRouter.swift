@@ -43,6 +43,7 @@ final class AgentTaskNotificationRouter {
             guard self.settings.notificationsEnabled,
                   let fallback = request.content.mutableCopy() as? UNMutableNotificationContent else { return }
             fallback.userInfo[AgentTaskEvent.fallbackKey] = true
+            Log.island.info("task delivery: presentation=notification (activity unavailable or task unresolved)")
             self.deliver(.init(identifier: request.identifier, content: fallback, trigger: request.trigger))
         }
     }
@@ -54,6 +55,7 @@ final class AgentTaskNotificationRouter {
         let covered = settings.liveActivityEnabled
             ? await presentActivity(event, content, !visible && settings.notificationsEnabled) : false
         if visible || covered {
+            Log.island.info("task delivery: state=\(event.state.rawValue, privacy: .public) presentation=\(visible ? "visible-pane" : "activity", privacy: .public)")
             var ids = ["moshpit.done.\(event.connectionID.uuidString).\(event.paneID)"]
             if PushStanding.standing(conn: event.connectionID.uuidString).allSatisfy({ $0.pane == event.paneID }) {
                 ids.append("moshpit.attention.\(event.connectionID.uuidString)")
