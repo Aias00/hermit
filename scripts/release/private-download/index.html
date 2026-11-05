@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex,nofollow">
+<title>Hermit · 私有更新</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#22232b;background:#f5f5fa;color-scheme:light;--panel:#fff;--line:#e9e9f1;--muted:#737581;--accent:#6155df}
+*{box-sizing:border-box}body{margin:0;padding:0 22px 44px}main{max-width:680px;margin:auto}header{display:flex;align-items:center;justify-content:space-between;padding:28px 0 42px;font-size:14px;font-weight:600}.private{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;font-weight:500}.private svg{width:14px;height:14px}svg{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.icon{display:grid;place-items:center;width:70px;height:70px;background:linear-gradient(145deg,#8e80ff,#6556db);border-radius:20px;box-shadow:0 6px 18px #6b5ed323;color:#fff}.icon svg{width:40px;height:40px;stroke-width:2}h1{font-size:34px;letter-spacing:-1.1px;margin:20px 0 8px}p{line-height:1.7}.intro{color:var(--muted);font-size:15px;margin:0 0 28px}.card{border:1px solid var(--line);border-radius:22px;background:var(--panel);padding:24px;margin:16px 0}.top{display:flex;align-items:center;justify-content:space-between;gap:12px}.eyebrow{font-size:12px;color:var(--muted);margin:0 0 10px}.version{font-size:24px;font-weight:650;letter-spacing:-.6px}.badge{background:#f0edff;color:var(--accent);font-size:12px;font-weight:600;padding:6px 10px;border-radius:9px;white-space:nowrap}.meta{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:24px 0;padding-top:20px;border-top:1px solid var(--line)}dt{font-size:12px;color:var(--muted);margin-bottom:7px}dd{margin:0;font-size:14px;overflow-wrap:anywhere}.download{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:52px;border-radius:13px;background:var(--accent);color:white;text-decoration:none;font-size:16px;font-weight:600;border:none}.download svg{width:20px;height:20px}.download[aria-disabled=true]{pointer-events:none;opacity:.45}.help{font-size:12px;line-height:1.7;color:var(--muted);text-align:center;margin:12px 0 0}h2{font-size:16px;margin:0 0 16px;font-weight:650}ul,ol{padding-left:20px;margin:0}li{font-size:14px;line-height:1.8;margin:8px 0}details{margin:16px 0}summary{cursor:pointer;font-size:14px;font-weight:600;padding:8px 0}details p{font-size:13px;color:var(--muted);margin:8px 0}.hash{font:11px/1.8 ui-monospace,SFMono-Regular,monospace;word-break:break-all;color:var(--muted);margin-top:12px}footer{color:var(--muted);font-size:12px;margin:28px 2px;line-height:1.8}.error{color:#bd452d}.notice{color:#a75b12;background:#fff6e7;padding:12px;border-radius:10px;font-size:13px;line-height:1.6;margin-top:16px}[hidden]{display:none!important}
+@media(prefers-color-scheme:dark){:root{color:#f0eff7;background:#15151b;color-scheme:dark;--panel:#202027;--line:#32323c;--muted:#a3a2af;--accent:#9487ff}.badge{background:#37304e}.download{color:#15151b}.notice{background:#3e2e1d;color:#f3bd77}}
+@media(min-width:680px){body{padding-top:18px}header{padding-bottom:50px}.card{padding:28px}}
+</style>
+<main>
+<header><span>HERMIT</span><span class="private"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>私有更新</span></header>
+<div class="icon" aria-hidden="true"><svg viewBox="0 0 40 40"><rect x="5" y="7" width="30" height="26" rx="5"/><path d="m11 15 5 5-5 5m11 0h7"/></svg></div>
+<h1>Hermit 更新</h1><p class="intro">在这里获取安装包，查看本次修复。</p>
+<section class="card" aria-label="安装包">
+<p class="eyebrow">可用安装包</p><div class="top"><span class="version" id="version">正在读取…</span><span class="badge" id="signing">检查中</span></div>
+<dl class="meta"><div><dt>文件大小</dt><dd id="size">—</dd></div><div><dt>系统要求</dt><dd id="os">—</dd></div><div><dt>构建来源</dt><dd id="commit">—</dd></div><div><dt>描述文件有效期</dt><dd id="expiry">—</dd></div></dl>
+<a class="download" id="download" aria-disabled="true" download="Hermit.ipa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v5h14v-5"/></svg>下载 IPA 安装包</a>
+<p class="help" id="status" role="status">下载后需通过安装工具完成安装。</p><p class="notice" id="expired" hidden>此包的描述文件已过期，需要重新签名后安装。</p>
+</section>
+<section class="card"><h2>本次更新</h2><ul id="notes"></ul></section>
+<section class="card"><h2>如何安装</h2><ol><li>点击上方按钮，将 IPA 保存到手机的「文件」。</li><li>如果已配置 SideStore 等安装工具，在工具中导入 IPA 并按提示重签、安装。</li><li>没有安装工具时，可让这台 Mac 通过已配对的 Xcode 连接覆盖安装。</li></ol><details><summary>为什么下载后不能直接打开安装？</summary><p>当前提供的是开发签名包，Safari 下载 IPA 不会自动安装 App。网页不能替代 iOS 的签名和安装步骤。</p></details><details><summary>检查下载文件</summary><p>以下 SHA-256 可用于检查下载文件是否完整。</p><div class="hash" id="hash">—</div></details></section>
+<footer>页面仅通过 Tailscale 私有网络提供。<br>手机需开启系统 Tailscale 并连接同一 tailnet；Hermit 内置 Tailscale 仅供 App 自身连接使用。</footer>
+</main>
+<script src="/app.js" defer></script>
+</html>

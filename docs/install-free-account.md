@@ -94,6 +94,24 @@ Vim 等需要逐键输入的程序仍可显式切到「终端输入」。
 
 已有 Tailscale SSH 连接使用有截止时间的真实命令往返验证；失效后只恢复对应连接，继续遵守重试退避。HERDR 渲染通道仍按释放确认和首帧超时恢复。长时间被 iOS 挂起后连接可能失效，这项拆分避免的是无证据的节点重建，不能保证后台永不断线。
 
+### Tailscale 私有安装包下载页
+
+`scripts/release/private-download-server.py` 仅监听 Mac 的 `127.0.0.1`，对外通过 Tailscale Serve 提供 HTTPS。手机浏览器需要系统 Tailscale 连接同一 tailnet；Hermit 内置的节点不会替 Safari 建立路由。访问范围沿用 tailnet 的访问规则。
+
+```bash
+python3 scripts/release/private-download-server.py \
+  --ipa /absolute/path/Hermit.ipa --source-commit <实际构建的完整提交SHA> \
+  --port 18749 --note '本次修复内容'
+
+# 在另一个终端启用独立端口，不覆盖现有 Serve 服务。
+TAILSCALE_BE_CLI=1 /Applications/Tailscale.app/Contents/MacOS/Tailscale \
+  serve --bg --https=10443 http://127.0.0.1:18749
+```
+
+页面从 IPA 读取版本、大小、描述文件类型与有效期，显示 SHA-256，并支持断点续传。带源码构建戳的包不能标成不同的提交。更新 IPA 后需重启下载服务；不会自动把旧包标成最新源码。服务只提供固定页面和选定的 IPA，不提供工程目录浏览。
+
+这是下载页。当前个人开发签名的 IPA 下载后，仍需要 Xcode 或已配置的重签安装工具；网页没有 `itms-services` 安装按钮。保持原签名团队和 Bundle ID 才能沿用已有安装的数据。关闭这个 Serve 入口用 `tailscale serve --https=10443 off`，不要用 `serve reset` 清除其他服务。
+
 ## A. 一次性准备(在 Mac 上,手机可不在场)
 
 1. **加 Apple ID**:Xcode ▸ Settings ▸ Accounts ▸ 左下 `+` ▸ Apple ID ▸ 登录。
