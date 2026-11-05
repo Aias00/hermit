@@ -163,7 +163,7 @@ struct TailscaleAccountTests {
         #expect(await node.closes == 1)
     }
 
-    @Test("Long suspension rebuilds from the same device identity")
+    @Test("An explicit node restart retains the same device identity")
     func restartRetainsAccount() async throws {
         let (vault, node, runtime) = fixture(status: .init(backendState: "Running", accountIdentity: "net/user"))
         defer { try? FileManager.default.removeItem(at: vault.root) }
@@ -174,6 +174,25 @@ struct TailscaleAccountTests {
         #expect(await node.starts == 2)
         #expect(await node.closes == 1)
         await runtime.restart()
+    }
+
+    @MainActor
+    @Test("Foreground refresh observes node health without closing peer flows or logging in",
+          arguments: ["Running", "Starting", "NeedsLogin", "NeedsMachineAuth"])
+    func resumeRetainsNode(backend: String) async throws {
+        let (vault, node, runtime) = fixture(status: .init(backendState: "Running", accountIdentity: "net/user"))
+        defer { try? FileManager.default.removeItem(at: vault.root) }
+        let original = try await runtime.snapshot(startLogin: true)
+        let account = TailscaleAccount(runtime: runtime, pollInterval: .seconds(60))
+        await node.update(.init(backendState: backend, accountIdentity: "net/user",
+                                healthIssues: [.controlUnreachable]))
+        await account.resume()
+        #expect(account.accountID == original.accountID)
+        #expect(account.healthIssues == [.controlUnreachable])
+        #expect(await node.starts == 1)
+        #expect(await node.closes == 0)
+        #expect(await node.logins == 1, "resume must not implicitly start a new login")
+        await account.logout()
     }
 
     @MainActor

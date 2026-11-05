@@ -380,8 +380,10 @@ final class TailscaleAccount {
         } catch { if operation == id { fail(error) } }
     }
 
-    func resume(forceRebuild: Bool = false) async {
-        if forceRebuild { await runtime.restart() }
+    /// Refresh only the node's own state. Time spent in the background, an SSH
+    /// probe failure or a HERDR channel timeout is not evidence of node failure.
+    /// Restarting this shared node would close every host's otherwise live SSH.
+    func resume() async {
         await refresh()
         pollIfNeeded()
     }

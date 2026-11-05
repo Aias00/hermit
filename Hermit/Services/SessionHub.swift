@@ -3884,8 +3884,8 @@ final class SessionHub {
     /// How often to probe live sessions while foreground (NAT-warmth + death
     /// detection + reconnect retry). iOS suspends timers in the background.
     private let keepAliveInterval: TimeInterval = 12
-    /// Background longer than this → force a fresh reconnect on return rather
-    /// than trusting the liveness probe (iOS has almost certainly killed TCP).
+    /// Legacy direct/mosh recovery threshold. Embedded Tailscale retains its
+    /// shared node and probes each existing SSH connection independently.
     private let forceReconnectAfter: TimeInterval = 20
 
     init(metrics: SessionMetricsRegistry) {
@@ -3935,10 +3935,9 @@ final class SessionHub {
         isForeground = active
         if active {
             startPathWatchIfNeeded()
-            // A long suspension almost certainly means iOS killed the socket,
-            // and the liveness probe can false-positive on a half-open channel
-            // (green pill, frozen -CC pane). Past the threshold, force a fresh
-            // reconnect instead of trusting the probe.
+            // Keep the legacy long-suspension policy for direct/mosh sessions.
+            // An embedded Tailscale node is shared across hosts; its lifecycle
+            // must not be driven by an individual SSH or HERDR session.
             let away = lastBackgroundedAt.map { Date().timeIntervalSince($0) } ?? 0
             lastBackgroundedAt = nil
             let force = away > forceReconnectAfter
@@ -3948,12 +3947,12 @@ final class SessionHub {
             // torn down and rebuilt anyway: the replacement pins on attach,
             // and queueing commands on a channel we are about to declare dead
             // only re-lists the window as a pin the teardown must then undo.
-            if !force { visibleSession?.repinForeground() }
+            if !force || visibleSession?.connection.transport == .tailscale { visibleSession?.repinForeground() }
             else { visibleSession?.resumeHerdrFrames() }
-            // Rebuild an embedded node before its SSH/Herdr sessions recover.
-            // Other transports must not wait for Tailscale's control plane.
-            let tailscaleReady = Task { await TailscaleAccount.shared.resume(forceRebuild: force) }
-            Task { await resumeAll(force: force, tailscaleReady: tailscaleReady) }
+            // Node status and established SSH liveness are independent. A slow
+            // control-plane refresh must not delay checking working peer flows.
+            Task { await TailscaleAccount.shared.resume() }
+            Task { await resumeAll(force: force) }
             guard keepAliveTimer == nil else { return }
             keepAliveTimer = Timer.scheduledTimer(withTimeInterval: keepAliveInterval, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in await self?.keepAliveAll() }
@@ -4240,14 +4239,15 @@ final class SessionHub {
     /// actor, exactly as before. Concurrent secret reads are safe now:
     /// `SSHService.resolveSecret` coalesces per-connection, so this can't fan
     /// one foreground-return into a stack of Face ID prompts.
-    func resumeAll(force: Bool = false, tailscaleReady: Task<Void, Never>? = nil) async {
+    func resumeAll(force: Bool = false) async {
         await withTaskGroup(of: Void.self) { group in
             for session in sessions.values {
                 group.addTask { @MainActor in
-                    if session.connection.transport == .tailscale { await tailscaleReady?.value }
-                    if force {
+                    if force && session.connection.transport != .tailscale {
                         await session.forceResume()
                     } else {
+                        // A real SSH round trip detects a half-open peer flow;
+                        // its failure replaces only this session, never the node.
                         await session.resumeIfNeeded(probeTimeout: session.foregroundProbeTimeout)
                     }
                 }

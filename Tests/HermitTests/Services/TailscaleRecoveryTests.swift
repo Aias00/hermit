@@ -15,6 +15,35 @@ struct TailscaleRecoveryTests {
         return value
     }
 
+    @Test("A long background return probes Tailscale SSH and preserves healthy sibling sessions")
+    func longBackgroundProbesEachSSH() async throws {
+        let hub = SessionHub(metrics: SessionMetricsRegistry())
+        let healthy = SessionLifecycleTests.ScriptedTransport(.reply(""))
+        let broken = SessionLifecycleTests.ScriptedTransport(.fail)
+        let healthyScript = DialScript { SSHSession(connection: $0, transport: healthy) }
+        let brokenScript = DialScript { SSHSession(connection: $0, transport: broken) }
+        var first = connection()
+        first.name = "healthy"
+        var second = connection()
+        second.name = "broken"
+        hub.makeSession = { value in
+            SessionHub.ActiveSession(connection: value,
+                dial: value.id == first.id ? healthyScript.dialer : brokenScript.dialer)
+        }
+        let firstSession = hub.prepare(first)
+        let secondSession = hub.prepare(second)
+        await firstSession.start(theme: .githubDark, fontSize: 14)
+        await secondSession.start(theme: .githubDark, fontSize: 14)
+        await hub.resumeAll(force: true)
+        #expect(healthy.commands.contains("true") && broken.commands.contains("true"),
+                "each SSH peer must prove liveness independently of node status")
+        #expect(firstSession.viewModel.status == .connected && healthyScript.dials == 1,
+                "one failed peer must not tear down its healthy sibling")
+        #expect(secondSession.viewModel.status == .reconnecting)
+        await hub.disconnect(first.id)
+        await hub.disconnect(second.id)
+    }
+
     @Test("Account errors stop recovery without opening a Cloudflare or Tailscale login browser")
     func accountFailureStopsRecovery() async {
         let errors: [any Error] = [TailscaleAccountError.loginRequired, TailscaleAccountError.accountMismatch,
