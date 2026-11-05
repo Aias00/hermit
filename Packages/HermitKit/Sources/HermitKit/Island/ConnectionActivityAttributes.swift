@@ -51,7 +51,7 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
             switch self {
             case .working: return "circle"
             case .attention: return "exclamationmark.circle"
-            case .done: return "checkmark.circle"
+            case .done: return "checkmark"
             case .idle: return "pause.circle"
             }
         }

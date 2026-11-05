@@ -29,6 +29,9 @@ private struct ActivityPresentation {
         return task?.symbol ?? state.connectionState.symbol
     }
     var color: Color {
+        // Completion remains the recorded outcome when observations go stale.
+        // Keep the timestamp/history label instead of erasing that distinction.
+        if task == .done, !commandFailed, !shellFinished || state.commandExitCode != nil { return .green }
         if isExpired || task == .idle { return .secondary }
         if commandFailed || task == .attention || state.connectionState == .reconnecting { return .orange }
         if shellFinished && state.commandExitCode == nil { return .cyan }
@@ -122,7 +125,8 @@ struct ConnectionActivityLockScreen: View {
                         if let url = URL(string: task.deepLink) {
                             Link(destination: url) {
                                 ConnectionActivityTaskRow(task: task, isStale: task.isStale(
-                                    at: now, maximumAge: state.freshnessInterval, fallback: isStale))
+                                    at: now, maximumAge: state.freshnessInterval, fallback: isStale),
+                                    showsStaleLabel: !historical)
                             }
                             .accessibilityIdentifier("connection-live-activity-task-\(task.id)")
                         }
@@ -150,34 +154,48 @@ struct ConnectionActivityLockScreen: View {
     }
 }
 
-private struct ConnectionActivityTaskRow: View {
-    let task: ConnectionActivityAttributes.TaskSummary
+struct ConnectionActivityTaskStatus: View {
+    let state: ConnectionActivityAttributes.TaskState
     let isStale: Bool
 
-    private var color: Color {
+    var color: Color {
+        if state == .done { return .green }
         if isStale { return .secondary }
-        switch task.state {
+        switch state {
         case .done: return .green
         case .attention, .working: return .orange
         case .idle: return .secondary
         }
     }
+    var body: some View {
+        Group {
+            if state == .working {
+                Circle().strokeBorder(lineWidth: 1.8).frame(width: 16, height: 16)
+            } else {
+                Image(systemName: state.symbol)
+                    .font(.system(size: 16, weight: state == .done ? .semibold : .medium))
+            }
+        }
+        .foregroundStyle(color).frame(width: 18)
+        .accessibilityLabel(state.label)
+    }
+}
+
+private struct ConnectionActivityTaskRow: View {
+    let task: ConnectionActivityAttributes.TaskSummary
+    let isStale: Bool
+    let showsStaleLabel: Bool
+
     private var subtitle: String {
         let detail = task.state == .idle ? task.state.label : task.detail ?? task.state.label
-        return [isStale ? String(localized: "Last known status") : nil, detail,
+        // The card footer already marks a historical snapshot. Keep individual
+        // stale labels only when they distinguish an old row in a current card.
+        return [isStale && showsStaleLabel ? String(localized: "Last known status") : nil, detail,
                 task.programName, task.hostName].compactMap { $0 }.joined(separator: " · ")
     }
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Group {
-                if task.state == .working {
-                    Circle().strokeBorder(lineWidth: 1.8).frame(width: 16, height: 16)
-                } else {
-                    Image(systemName: task.state.symbol)
-                        .font(.system(size: 16, weight: .medium))
-                }
-            }
-            .foregroundStyle(color).frame(width: 18)
+            ConnectionActivityTaskStatus(state: task.state, isStale: isStale)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: task.workspaceName ?? task.programName ?? String(localized: "Task"))
                     .font(.caption.weight(.semibold)).lineLimit(1).truncationMode(.middle)

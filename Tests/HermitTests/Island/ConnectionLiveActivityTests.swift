@@ -318,6 +318,14 @@ struct ConnectionLiveActivityTests {
         #expect(state.tasks?.allSatisfy { ($0.detail?.utf8.count ?? 0) <= 180 } == true)
     }
 
+    @Test("Explicit completion keeps its green checkmark even in a historical card", arguments: [false, true])
+    func completionCheckmark(stale: Bool) {
+        #expect(ConnectionActivityAttributes.TaskState.done.symbol == "checkmark")
+        #expect(ConnectionActivityTaskStatus(state: .done, isStale: stale).color == .green)
+        #expect(ConnectionActivityTaskStatus(state: .working, isStale: stale).color == (stale ? .secondary : .orange))
+        #expect(ConnectionActivityTaskStatus(state: .idle, isStale: stale).color == .secondary)
+    }
+
     @Test("reference task list fits the card at phone and mini widths and larger type",
           arguments: [320.0, 360.0, 600.0])
     func referenceLayout(width: Double) throws {
@@ -325,17 +333,19 @@ struct ConnectionLiveActivityTests {
         state.headlineName = "Mac mini"
         state.isBackground = true
         state.totalTaskCount = 13
+        state.doneCount = 2
+        state.workingCount = 1
         state.tasks = [
-            .init(id: "1", workspaceName: "stream-agent", programName: "Codex",
-                  detail: "分析当前工程架构", state: .done, deepLink: state.deepLink),
-            .init(id: "2", workspaceName: "toy", programName: "Claude Code",
-                  detail: "设计基于 ESP32 开源方案的软硬件交互玩具", state: .working, deepLink: state.deepLink),
-            .init(id: "3", workspaceName: "idea", programName: "Codex",
-                  detail: "检查当前 SSH 客户端", state: .working, deepLink: state.deepLink)
+            .init(id: "1", workspaceName: "toy", programName: "Codex",
+                  detail: "设计基于 ESP32 开源方案的软硬件交互玩具", state: .done, deepLink: state.deepLink),
+            .init(id: "2", workspaceName: "coding-agent-book", programName: "Codex",
+                  detail: "分析四个项目并编写支持在线阅读的 EPUB 书籍", state: .done, deepLink: state.deepLink),
+            .init(id: "3", workspaceName: "stream-agent", programName: "Codex",
+                  detail: "分析当前工程架构", state: .working, deepLink: state.deepLink)
         ]
         for size in [DynamicTypeSize.large, .xxxLarge, .accessibility1, .accessibility5] {
             for stale in [false, true] {
-                let renderer = ImageRenderer(content: ConnectionActivityLockScreen(state: state, isStale: stale)
+                let renderer = ImageRenderer(content: ConnectionActivityLockScreen(state: state, isStale: stale, now: now)
                     .environment(\.dynamicTypeSize, size)
                     .environment(\.locale, Locale(identifier: "zh-Hans"))
                     .environment(\.colorScheme, .dark).background(Color(white: 0.12)))
