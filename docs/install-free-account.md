@@ -110,9 +110,13 @@ TAILSCALE_BE_CLI=1 /Applications/Tailscale.app/Contents/MacOS/Tailscale \
 
 页面从 IPA 读取版本、大小、描述文件类型与有效期，显示 SHA-256，并支持断点续传。带源码构建戳的包不能标成不同的提交。更新 IPA 后需重启下载服务；不会自动把旧包标成最新源码。服务只提供固定页面和选定的 IPA，不提供工程目录浏览。
 
-本机也通过 `https://app.aias.eu.org` 提供下载页：独立的 Cloudflare Tunnel 直接连接 `http://127.0.0.1:18749`，沿用现有仅本人邮箱的 Cloudflare Access 策略，登录会话有效期 24 小时。页面、版本接口和 IPA 均受保护，Tunnel 端再次校验 Access JWT 的团队和应用 audience。这个入口不依赖手机的系统 Tailscale；tailnet 下载入口可继续使用。
+本机也通过 `https://app.aias.eu.org` 提供下载页：独立的 Cloudflare Tunnel 直接连接 `http://127.0.0.1:18749`，沿用现有仅本人邮箱的 Cloudflare Access 策略，登录会话有效期 24 小时。页面、版本接口、普通 IPA 地址和安装链接生成接口受 Access 保护，Tunnel 端再次校验 Access JWT 的团队和应用 audience。这个入口不依赖手机的系统 Tailscale；tailnet 下载入口可继续使用。
 
-这是下载页。当前个人开发签名的 IPA 下载后，仍需要 Xcode 或已配置的重签安装工具；网页没有 `itms-services` 安装按钮。保持原签名团队和 Bundle ID 才能沿用已有安装的数据。关闭这个 Serve 入口用 `tailscale serve --https=10443 off`，不要用 `serve reset` 清除其他服务。
+配置 `--ota-origin https://app.aias.eu.org` 后，已登录的同源页面可以通过 JSON POST `/api/install` 准备 `itms-services` 安装链接。接口只接受同源请求；未签名或描述文件过期时不生成链接。页面预先准备链接，让点击由用户手势直接交给 iOS；超过有效期后再次点击会更新链接，再由用户确认。
+
+iOS 安装器通过 `/ota/<票据>/manifest.plist` 和 `/ota/<票据>/Hermit.ipa` 读取资源。仅 `/ota/*` 的 Access 应用跳过浏览器登录；Tunnel 也只对这两个精确文件名的路径免除 Access JWT 校验，源站继续校验 HMAC。票据绑定安装包 SHA-256、过期时间、随机数和具体资源，10 分钟内允许系统重试和断点续传；伪造、跨资源、过期或其他安装包的票据会被拒绝。密钥仅在服务内存中存在，重启后旧链接失效。服务不记录请求 URL，页面不持久化票据。不要对整个站点关闭 Access。
+
+当前个人开发签名包的网页安装仍须由真机验证设备授权、签名及开发者模式，显示按钮不代表已安装成功。网页无法读取 iOS 的最终安装结果；失败时保留原 App，通过 Xcode 或已配置的重签工具更新。单独下载 IPA 仍只会保存文件。保持原签名团队和 Bundle ID 才能沿用已有安装的数据。关闭 Tailscale Serve 入口用 `tailscale serve --https=10443 off`，不要用 `serve reset` 清除其他服务。
 
 ## A. 一次性准备(在 Mac 上,手机可不在场)
 

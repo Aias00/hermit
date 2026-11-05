@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Serve one explicitly selected IPA on loopback, behind private Tailscale Serve.
+"""Serve one selected IPA on loopback, behind Tailscale Serve or Access.
 
-No directory listing, upload endpoint or automatic installation. Package bytes
-stay on this Mac. Run --help for the required release/package arguments.
+Optional OTA links expire after ten minutes and are bound to this exact IPA.
+Only the ticket routes can bypass browser login; issuance stays private.
 """
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import plistlib
 import re
+import secrets
 import subprocess
-from urllib.parse import urlsplit
+import time
+from urllib.parse import quote, urlsplit
 import zipfile
 
 
@@ -53,12 +56,66 @@ def inspect_package(path, source_commit, notes):
             expires = profile["ExpirationDate"].replace(tzinfo=timezone.utc).isoformat()
     return {
         "name": info.get("CFBundleDisplayName", "Hermit"),
+        "bundleIdentifier": info["CFBundleIdentifier"],
         "version": info["CFBundleShortVersionString"], "build": info["CFBundleVersion"],
         "minimumOS": info.get("MinimumOSVersion", "18.0"),
         "size": path.stat().st_size, "sha256": digest, "sourceCommit": source_commit,
         "signing": kind, "profileExpiresAt": expires, "notes": notes,
         "download": "/Hermit.ipa", "overTheAirInstall": False,
     }
+
+
+class InstallFlow:
+    lifetime = 600
+
+    def __init__(self, origin, release, clock=time.time):
+        url = urlsplit(origin)
+        if url.scheme != "https" or not url.hostname or url.username or url.password \
+                or url.path not in ("", "/") or url.query or url.fragment:
+            raise ValueError("OTA origin must be an HTTPS origin without a path")
+        self.origin = "https://" + url.netloc
+        self.release = release
+        self.clock = clock
+        # Restarting the server invalidates all previously issued links.
+        self.key = secrets.token_bytes(32)
+
+    @property
+    def available(self):
+        expiry = self.release.get("profileExpiresAt")
+        return self.release["signing"] in ("development", "distribution") and bool(expiry) \
+            and datetime.fromisoformat(expiry).timestamp() > self.clock()
+
+    def token(self, expiry, nonce, resource):
+        message = f"{self.release['sha256']}:{expiry}:{nonce}:{resource}".encode()
+        signature = hmac.new(self.key, message, hashlib.sha256).hexdigest()
+        return f"{expiry}.{nonce}.{signature}"
+
+    def validate(self, token, resource):
+        match = re.fullmatch(r"([0-9]{10,12})\.([A-Za-z0-9_-]{24})\.([a-f0-9]{64})", token)
+        if not match or not self.available:
+            return None
+        expiry, nonce, _ = match.groups()
+        expiry = int(expiry)
+        if not 0 < expiry - self.clock() <= self.lifetime:
+            return None
+        if not hmac.compare_digest(token, self.token(expiry, nonce, resource)):
+            return None
+        return expiry, nonce
+
+    def issue(self):
+        expiry = int(self.clock()) + self.lifetime
+        nonce = secrets.token_urlsafe(18)
+        url = self.origin + "/ota/" + self.token(expiry, nonce, "manifest.plist") + "/manifest.plist"
+        return {"manifestURL": url, "expiresAt": expiry * 1000,
+                "installURL": "itms-services://?action=download-manifest&url=" + quote(url, safe="")}
+
+    def manifest(self, expiry, nonce):
+        url = self.origin + "/ota/" + self.token(expiry, nonce, "Hermit.ipa") + "/Hermit.ipa"
+        return plistlib.dumps({"items": [{
+            "assets": [{"kind": "software-package", "url": url}],
+            "metadata": {"bundle-identifier": self.release["bundleIdentifier"],
+                         "bundle-version": self.release["build"], "kind": "software",
+                         "title": self.release["name"]}}]}, fmt=plistlib.FMT_XML)
 
 
 def byte_range(value, size):
@@ -80,7 +137,7 @@ def byte_range(value, size):
     return start, end
 
 
-def handler(package, release):
+def handler(package, release, install=None):
     package = Path(package).resolve(strict=True)
     original = package.stat()
 
@@ -94,6 +151,40 @@ def handler(package, release):
 
         def do_GET(self):
             self.respond(head=False)
+
+        def fail(self, status, message):
+            data = message.encode()
+            self.headers_for(status, "text/plain; charset=utf-8", len(data))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(data)
+
+        def do_POST(self):
+            if urlsplit(self.path).path != "/api/install" or install is None:
+                self.fail(404, "Not found")
+                return
+            # The Access-protected browser page owns issuance. JSON + exact
+            # Origin checks reject form submissions and cross-site requests.
+            if self.headers.get("Origin") != install.origin \
+                    or self.headers.get_content_type() != "application/json":
+                self.fail(403, "Open the private download page first")
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "-1"))
+                if not 0 <= length <= 1024 or self.headers.get("Transfer-Encoding"):
+                    raise ValueError()
+                if json.loads(self.rfile.read(length)) != {}:
+                    raise ValueError()
+            except (ValueError, UnicodeError):
+                self.fail(400, "Invalid request")
+                return
+            if not install.available:
+                self.fail(409, "Package must be signed with an unexpired profile")
+                return
+            data = json.dumps(install.issue()).encode()
+            self.headers_for(200, "application/json; charset=utf-8", len(data))
+            self.end_headers()
+            self.wfile.write(data)
 
         def headers_for(self, status, kind, size):
             self.send_response(status)
@@ -113,7 +204,23 @@ def handler(package, release):
                     filename, kind = assets[route]
                     data = (ASSETS / filename).read_bytes()
                 elif route == "/api/release":
-                    data, kind = json.dumps(release, ensure_ascii=False).encode(), "application/json; charset=utf-8"
+                    metadata = dict(release)
+                    metadata["overTheAirInstall"] = bool(install and install.available)
+                    if install:
+                        metadata["installOrigin"] = install.origin
+                    data, kind = json.dumps(metadata, ensure_ascii=False).encode(), "application/json; charset=utf-8"
+                elif route.startswith("/ota/"):
+                    parts = route.split("/")
+                    resource = parts[-1]
+                    validated = install.validate(parts[2], resource) if install and len(parts) == 4 \
+                        and resource in ("manifest.plist", "Hermit.ipa") else None
+                    if validated is None:
+                        self.fail(403, "Installation link expired or invalid. Reopen the private page.")
+                        return
+                    if resource == "Hermit.ipa":
+                        self.download(head)
+                        return
+                    data, kind = install.manifest(*validated), "text/xml; charset=utf-8"
                 elif route == "/Hermit.ipa":
                     self.download(head)
                     return
@@ -175,11 +282,13 @@ def main():
     parser.add_argument("--source-commit", required=True, help="Source SHA actually built into this IPA")
     parser.add_argument("--note", action="append", default=[])
     parser.add_argument("--port", type=int, default=18749)
+    parser.add_argument("--ota-origin", help="HTTPS origin with private issuance and ticket-only /ota/ routes")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
         parser.error("--source-commit must be the full source SHA")
     release = inspect_package(args.ipa, args.source_commit, args.note)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(args.ipa, release))
+    install = InstallFlow(args.ota_origin, release) if args.ota_origin else None
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(args.ipa, release, install))
     server.daemon_threads = True
     print(f"Hermit private download ready on 127.0.0.1:{args.port}", flush=True)
     try:
