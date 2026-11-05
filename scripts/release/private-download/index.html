@@ -23,7 +23,7 @@
 </section>
 <section class="card"><h2>本次更新</h2><ul id="notes"></ul></section>
 <section class="card"><h2>如何安装</h2><ol><li>点击上方按钮，将 IPA 保存到手机的「文件」。</li><li>如果已配置 SideStore 等安装工具，在工具中导入 IPA 并按提示重签、安装。</li><li>没有安装工具时，可让这台 Mac 通过已配对的 Xcode 连接覆盖安装。</li></ol><details><summary>为什么下载后不能直接打开安装？</summary><p>当前提供的是开发签名包，Safari 下载 IPA 不会自动安装 App。网页不能替代 iOS 的签名和安装步骤。</p></details><details><summary>检查下载文件</summary><p>以下 SHA-256 可用于检查下载文件是否完整。</p><div class="hash" id="hash">—</div></details></section>
-<footer>页面仅通过 Tailscale 私有网络提供。<br>手机需开启系统 Tailscale 并连接同一 tailnet；Hermit 内置 Tailscale 仅供 App 自身连接使用。</footer>
+<footer id="network-hint">页面仅通过 Tailscale 私有网络提供。<br>手机需开启系统 Tailscale 并连接同一 tailnet；Hermit 内置 Tailscale 仅供 App 自身连接使用。</footer>
 </main>
 <script src="/app.js" defer></script>
 </html>

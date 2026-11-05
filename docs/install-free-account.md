@@ -110,6 +110,8 @@ TAILSCALE_BE_CLI=1 /Applications/Tailscale.app/Contents/MacOS/Tailscale \
 
 页面从 IPA 读取版本、大小、描述文件类型与有效期，显示 SHA-256，并支持断点续传。带源码构建戳的包不能标成不同的提交。更新 IPA 后需重启下载服务；不会自动把旧包标成最新源码。服务只提供固定页面和选定的 IPA，不提供工程目录浏览。
 
+本机也通过 `https://app.aias.eu.org` 提供下载页：独立的 Cloudflare Tunnel 直接连接 `http://127.0.0.1:18749`，沿用现有仅本人邮箱的 Cloudflare Access 策略，登录会话有效期 24 小时。页面、版本接口和 IPA 均受保护，Tunnel 端再次校验 Access JWT 的团队和应用 audience。这个入口不依赖手机的系统 Tailscale；tailnet 下载入口可继续使用。
+
 这是下载页。当前个人开发签名的 IPA 下载后，仍需要 Xcode 或已配置的重签安装工具；网页没有 `itms-services` 安装按钮。保持原签名团队和 Bundle ID 才能沿用已有安装的数据。关闭这个 Serve 入口用 `tailscale serve --https=10443 off`，不要用 `serve reset` 清除其他服务。
 
 ## A. 一次性准备(在 Mac 上,手机可不在场)

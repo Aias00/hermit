@@ -1,6 +1,9 @@
 "use strict";
 (async () => {
   const text = (id, value) => { document.getElementById(id).textContent = value; };
+  if (location.hostname === "app.aias.eu.org") {
+    text("network-hint", "页面与安装包由 Cloudflare Access 保护。验证邮箱后即可访问，无需开启 Tailscale。");
+  }
   try {
     const response = await fetch("/api/release", { cache: "no-store" });
     if (!response.ok) throw new Error("release unavailable");
