@@ -127,10 +127,10 @@ final class NotificationService: UNNotificationServiceExtension {
             PushRemoteNotification.apply(status, to: content, prefs: prefs, label: label)
         }
         bestAttempt = content
-        // Ordinary pushes keep their alert as a reliable background fallback.
-        // Update the matching row silently first so it cannot still say working
-        // while this notification says finished. An NSE cannot suppress the
-        // original alert or turn it into an ActivityKit push.
+        // Legacy APNs compatibility only: current Hermit unregisters ordinary
+        // pushes at the source. An NSE cannot reliably suppress an already sent
+        // alert or convert it into an ActivityKit push. Update existing cards
+        // silently if an older host configuration still delivers one.
         if prefs.liveActivity, status.agent != PushRemoteNotification.selfTestAgent,
            let event = AgentTaskEvent(userInfo: content.userInfo) {
             updateActivity(event) { [weak self] in self?.finish(content) }

@@ -28,6 +28,11 @@ struct PushServiceTests {
         #expect(RemotePushCapability.environment(in: ["aps-environment": true]) == nil)
     }
 
+    @Test("Activity-only policy disables ordinary APNs independently of signing")
+    func activityOnlyPolicy() {
+        #expect(!PushService.shared.supportsRemotePush)
+    }
+
     /// Somewhere for a detached wait to leave its answer.
     @MainActor final class Outcome {
         var value: Bool?

@@ -42,7 +42,7 @@ struct AgentTaskPresentationTests {
         let anotherPane = AgentTaskEvent(connectionID: connection, paneID: "w9:p9", state: .attention,
                                         occurredAt: now)
         #expect(TaskActivityPresentation.applying(anotherPane, to: snapshot()) == nil,
-                "an unrepresented pane must retain its normal notification fallback")
+                "an unrepresented pane cannot update this activity")
     }
 
     @Test("An older poll cannot undo an event, but a newer remote turn supersedes it")
@@ -165,46 +165,41 @@ struct AgentTaskPresentationTests {
         #expect(try JSONEncoder().encode(value).count < 4096)
     }
 
-    @Test("Matching activities consume local notifications; unavailable activities keep a marked fallback")
+    @Test("Task events only update cards, silently, regardless of legacy notification preference")
     func localRouting() async throws {
         let suite = "test.taskrouter.\(UUID())"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
-        settings.notificationsEnabled = true
-        var shown: [UNNotificationRequest] = []
-        var visible = false, covered = true
+        settings.notificationsEnabled = false
+        var covered = true
         var alertFlags: [Bool] = []
+        var removed: [String] = []
         let router = AgentTaskNotificationRouter(settings: settings,
-            isVisible: { _, _ in visible }, presentActivity: { _, _, alert in
+            isVisible: { _, _ in false }, presentActivity: { _, _, alert in
                 alertFlags.append(alert); return covered
-            }, deliver: { shown.append($0) }, remove: { _ in })
+            }, remove: { removed += $0 })
+        for state in [AgentTaskEvent.State.done, .attention] {
+            let content = UNMutableNotificationContent()
+            content.userInfo = AgentTaskEvent(connectionID: connection, paneID: "w1:p1", state: state,
+                                             occurredAt: Date()).userInfo
+            #expect(await router.consume(content))
+            covered = false
+            #expect(await router.consume(content) == false)
+            settings.notificationsEnabled = true
+            router.submit(.init(identifier: "no-card", content: content, trigger: nil))
+            await router.waitForPendingDelivery()
+            covered = true
+        }
+        #expect(alertFlags == Array(repeating: false, count: 6))
+        #expect(removed.contains("moshpit.done.\(connection.uuidString).w1:p1"))
+        settings.liveActivityEnabled = false
         let content = UNMutableNotificationContent()
         content.userInfo = AgentTaskEvent(connectionID: connection, paneID: "w1:p1", state: .done,
                                          occurredAt: Date()).userInfo
-        let request = UNNotificationRequest(identifier: "fixture", content: content, trigger: nil)
-        router.submit(request)
-        await router.waitForPendingDelivery()
-        #expect(shown.isEmpty && alertFlags == [true])
-        covered = false
-        router.submit(request)
-        await router.waitForPendingDelivery()
-        #expect(shown.count == 1)
-        #expect(shown[0].content.userInfo[AgentTaskEvent.fallbackKey] as? Bool == true)
-        visible = true
-        router.submit(request)
-        await router.waitForPendingDelivery()
-        #expect(shown.count == 1 && alertFlags.last == false)
-        visible = false
-        settings.liveActivityEnabled = false
-        let previousAttempts = alertFlags.count
-        router.submit(request)
-        await router.waitForPendingDelivery()
-        #expect(shown.count == 2 && alertFlags.count == previousAttempts)
-        settings.notificationsEnabled = false
-        router.submit(request)
-        await router.waitForPendingDelivery()
-        #expect(shown.count == 2)
+        #expect(await router.consume(content) == false)
+        #expect(alertFlags.count == 6, "disabled cards must not attempt presentation")
+        #expect(!AgentNotifications.ordinaryNotificationsEnabled)
     }
 
     @Test("Queued delivery remains ordered while a previous activity update is suspended")
@@ -216,22 +211,21 @@ struct AgentTaskPresentationTests {
         settings.notificationsEnabled = true
         var gate: CheckedContinuation<Void, Never>?
         var calls = 0
-        var fallback: [String] = []
         let router = AgentTaskNotificationRouter(settings: settings, isVisible: { _, _ in false },
             presentActivity: { _, _, _ in
                 calls += 1
                 if calls == 1 { await withCheckedContinuation { gate = $0 } }
                 return false
-            }, deliver: { fallback.append($0.identifier) }, remove: { _ in })
+            }, remove: { _ in })
         let content = UNMutableNotificationContent()
         content.userInfo = AgentTaskEvent(connectionID: connection, paneID: "w1:p1", state: .attention,
                                          occurredAt: Date()).userInfo
         router.submit(.init(identifier: "first", content: content, trigger: nil))
         router.submit(.init(identifier: "second", content: content, trigger: nil))
         for _ in 0..<100 where gate == nil { await Task.yield() }
-        #expect(calls == 1 && fallback.isEmpty)
+        #expect(calls == 1)
         gate?.resume()
         await router.waitForPendingDelivery()
-        #expect(fallback == ["first", "second"])
+        #expect(calls == 2)
     }
 }

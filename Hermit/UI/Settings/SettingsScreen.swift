@@ -148,10 +148,7 @@ struct SettingsScreen: View {
                         .disabled(!settings.liveActivityEnabled)
                 }
 
-                AgentNotificationSettingsSection {
-                    if liveSession != nil { showHooksInstall = true }
-                    else { showOfflineHostInfo = true }
-                }
+                AgentNotificationSettingsSection()
 
                 voiceGroup(settings: $settings)
 
@@ -645,16 +642,14 @@ struct NotificationInfoView: View {
                     "HERDR 直接报告任务进行中、等待输入和完成状态，不需要给 Codex 或 Claude 单独安装通知脚本。tmux 会话可使用任务钩子或终端铃声。")
                 row("bubbles.and.sparkles.fill", Ink.accent, "Live Activity",
                     "While a session is attached, the Dynamic Island shows whether the agent is working, idle, or waiting on you. Tapping it deep-links straight back to that pane.")
-                row("paperplane.fill", Ink.mosh, "Push, sealed end-to-end",
-                    "连接期间使用本地通知。长期后台或 App 退出后，需要远端持续监听任务状态并通过推送服务投递；只有带推送权限且已完成配对的安装版本支持这条链路。")
-                row("moon.zzz.fill", Ink.meta, "Quiet by design",
-                    "A question must stand for 30 seconds before any phone hears about it — answered at your desk means never announced. All waiting agents share one summary card; only the first rings. A finished turn shows the prompt it answered and only chimes if it ran three minutes or more. Parked agents stay silent.")
-                row("rectangle.stack", Ink.accent, "一张任务状态卡",
-                    "匹配到锁屏实时活动时，直接更新对应任务，避免再添加本地通知。实时活动关闭、被划掉或未包含该任务时，普通通知继续提醒。后台普通推送保留通知兜底，并尝试同步已有卡片。")
+                row("rectangle.stack", Ink.accent, "只使用锁屏卡片",
+                    "任务完成和等待处理只更新已有实时活动，不发送普通通知、横幅或声音。实时活动关闭、被划掉或任务无法解析时，不补发提醒。")
+                row("moon.zzz.fill", Ink.meta, "后台状态更新",
+                    "App 被系统挂起或退出后，卡片可能保留最后已知状态。请留意更新时间；回到 App 后恢复同步。当前未启用远端实时活动推送。")
             }
             .listStyle(.insetGrouped)
             .moshpitForm()
-            .navigationTitle("How notifications work")
+            .navigationTitle("锁屏任务")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

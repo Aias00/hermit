@@ -138,24 +138,13 @@ public enum TaskActivityDelivery {
                 guard activity.activityState == .active || activity.activityState == .stale,
                       let update = TaskActivityPresentation.applying(event, to: activity.content.state,
                                                                     refreshedSnapshot: refreshedSnapshot) else { continue }
-                // An NSE updates silently before the ordinary push is handed
-                // to willPresent. If the app is foreground, replace that still
-                // pending alert with an ActivityKit alert instead of losing it.
-                let receipt = update.content.tasks?.first(where: { $0.id == event.taskID })
-                let replacesPendingPush = notification?.userInfo[PushRemoteNotification.envelopeKey] != nil
-                    && receipt?.eventID == event.id && receipt?.eventPresentation == "notification"
-                if update.isRepeat && !replacesPendingPush { return true }
+                if update.isRepeat { return true }
                 var state = update.content
                 if let index = state.tasks?.firstIndex(where: { $0.id == event.taskID }) {
-                    state.tasks?[index].eventPresentation = externalNotification ? "notification" : (alert ? "activity" : "observed")
+                    state.tasks?[index].eventPresentation = "observed"
                 }
-                let configuration: AlertConfiguration?
-                if alert, let notification, notification.interruptionLevel != .passive {
-                    configuration = AlertConfiguration(title: "\(notification.title)", body: "\(notification.body)",
-                        sound: notification.sound == nil ? .named("hermit-silent.wav") : .default)
-                } else { configuration = nil }
-                await activity.update(ActivityContent(state: state, staleDate: state.staleDate),
-                                      alertConfiguration: configuration)
+                // Always silent, including legacy callers requesting an alert.
+                await activity.update(ActivityContent(state: state, staleDate: state.staleDate))
                 return activity.activityState == .active || activity.activityState == .stale
             }
             return false

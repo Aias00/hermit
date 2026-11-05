@@ -113,8 +113,8 @@ final class PushService: PushCoordinating {
     /// guess gets wrong — a TestFlight build installed over a development one —
     /// self-corrects at the relay, which retries the other host on
     /// BadDeviceToken and remembers the answer.
-    var supportsRemotePush: Bool { RemotePushCapability.environment != nil }
-    var lastRelayError: String? { supportsRemotePush ? lastError : RemotePushCapability.unavailableMessage }
+    var supportsRemotePush: Bool { AgentNotifications.ordinaryNotificationsEnabled && RemotePushCapability.environment != nil }
+    var lastRelayError: String? { supportsRemotePush ? lastError : String(localized: "仅使用锁屏实时活动，普通推送已停用。") }
 
     nonisolated static var apnsEnvironment: String {
         RemotePushCapability.environment ?? "sandbox"
@@ -122,60 +122,14 @@ final class PushService: PushCoordinating {
 
     // MARK: - Token lifecycle
 
-    /// Ask iOS for a device token. Safe to call repeatedly; iOS answers from
-    /// cache when it can, which is why this runs on every launch — tokens rotate
-    /// on restore, reinstall and occasionally on OS update, and a stale one at
-    /// the relay is a notification that silently goes nowhere.
-    ///
-    /// An install with nothing paired never prompts and never registers: there
-    /// is no host that could push to it, so asking would be asking for nothing.
-    ///
-    /// A paired install with permission still UNDECIDED does prompt. It has to:
-    /// authorization is otherwise only ever requested when a session is tracked
-    /// (`AgentActivityMonitor.track`), so someone who paired a host and had not
-    /// yet connected would sit with a working relay, a working hook, and no
-    /// device token — pushes accepted by APNs and dropped on the floor, with
-    /// nothing anywhere saying why. Pairing a host IS the moment the user asked
-    /// for notifications from it.
+    /// This product uses silent Live Activity updates only. Unregister legacy
+    /// ordinary APNs delivery even when an older installation enabled it.
     func registerForRemoteNotifications() {
-        guard AppSettings.agentNotificationsAvailable else { return }
-        guard supportsRemotePush else { return }
-        guard AppSettings.shared.notificationsEnabled else {
-            UIApplication.shared.unregisterForRemoteNotifications()
-            return
-        }
-        let count = pairings.count
-        guard count > 0 else {
-            Log.push.info("no paired hosts — not registering for remote notifications")
-            return
-        }
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
-                Log.push.info("\(count, privacy: .public) paired host(s), notifications authorized — asking iOS for a device token")
-                Task { @MainActor in UIApplication.shared.registerForRemoteNotifications() }
-            case .notDetermined:
-                Log.push.info("\(count, privacy: .public) paired host(s), permission undecided — prompting")
-                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-                    Log.push.info("notification permission granted=\(granted, privacy: .public)")
-                    guard granted else { return }
-                    Task { @MainActor in UIApplication.shared.registerForRemoteNotifications() }
-                }
-            case .denied:
-                // Nothing to do and nothing to say to the OS here — Settings is
-                // the only place this can be reversed, and the pairing screen is
-                // where that belongs, not a prompt iOS will refuse to show
-                // again. Worth a log line, because from the outside it is
-                // indistinguishable from every other reason for silence.
-                Log.push.info("notifications denied — pushes cannot be shown until Settings is changed")
-            @unknown default:
-                break
-            }
-        }
+        UIApplication.shared.unregisterForRemoteNotifications()
     }
 
     func handle(deviceToken data: Data) {
+        guard AgentNotifications.ordinaryNotificationsEnabled else { return }
         let hex = data.moshpitHexString
         let changed = hex != deviceToken
         // A prefix only: enough to line up with the relay's own fingerprints in
@@ -436,8 +390,7 @@ final class PushService: PushCoordinating {
     }
 
     func setNotificationsEnabled(_ enabled: Bool) {
-        if enabled { registerForRemoteNotifications() }
-        else { UIApplication.shared.unregisterForRemoteNotifications() }
+        UIApplication.shared.unregisterForRemoteNotifications()
     }
 
     /// Forget a host. Local-only, and that is now the whole story: deleting the

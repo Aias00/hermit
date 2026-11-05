@@ -1,5 +1,7 @@
 # Remote agent notifications (APNs)
 
+> 当前 Hermit 采用仅锁屏实时活动策略：不注册普通 APNs，不请求通知权限，也不发本地通知；没有卡片时不补发提醒。以下为保留的旧推送协议文档，不代表当前启用能力。远端 ActivityKit 推送尚未接入，App 挂起后卡片可保留最后已知状态。
+
 How an agent on your own server wakes a phone that is not running Hermit.
 
 ## Why this exists

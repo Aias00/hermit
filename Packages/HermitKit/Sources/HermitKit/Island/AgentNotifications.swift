@@ -1,36 +1,21 @@
 import Foundation
 import UserNotifications
 
-/// Vibe Island — the notification half.
-///
-/// Two `userInfo` keys and a delegate. That is deliberately all of it.
-///
-/// This file used to define interactive categories — Allow, Deny, Reply, Stop —
-/// and they are gone. Not because they were hard to deliver (they were, in three
-/// separate ways) but because the operation did not belong: each one sent a blind
-/// keystroke into a pane, so answering an agent's permission request meant
-/// approving something you had not read, from an app whose whole purpose is that
-/// you can read it. A notification's job here is to wake you, name the agent, say
-/// what it is asking, and take you to the pane. `AgentNotificationHandler` routes
-/// that tap on the keys below.
+/// Live Activities are the only task presentation. Keep legacy notification taps
+/// routable during upgrades, but never present ordinary banners or sounds.
 public enum AgentNotifications {
     /// `userInfo` keys identifying which pane a notification targets.
     public static let connectionKey = "connectionId"
     public static let paneKey = "paneId"
 
-    /// Install the tap handler as the notification-center delegate. Called from
-    /// `HermitApp.init()` — harmless for non-Pro users (no prompt; authorization
-    /// is requested separately, only when a session is actually tracked).
+    /// Ordinary APNs alerts are disabled independently of old persisted preferences.
+    public static let ordinaryNotificationsEnabled = false
+
     public static func configure(delegate: UNUserNotificationCenterDelegate) {
-        // Only the delegate. There are no categories any more: a category exists
-        // to carry ACTION BUTTONS, and Hermit's notifications no longer have
-        // any. Allow/Deny sent a blind Enter or Esc into a pane — approving a
-        // coding agent's permission request from a lock screen without reading
-        // what it asked, in an app whose entire value is that you CAN read it.
-        // The honest notification wakes you, says which agent wants what, and
-        // opens the pane when tapped; that tap routes on `userInfo`, never on a
-        // category identifier.
-        UNUserNotificationCenter.current().delegate = delegate
+        let center = UNUserNotificationCenter.current()
+        center.delegate = delegate
+        center.removeAllPendingNotificationRequests()
+        center.removeAllDeliveredNotifications()
     }
 }
 
@@ -85,24 +70,10 @@ public final class AgentNotificationHandler: NSObject, UNUserNotificationCenterD
             }
             return
         }
-        // Surface attention even while Hermit is foreground (the user may be on
-        // a different screen than the agent's pane) — EXCEPT when the user is
-        // looking at that exact pane: a banner + chime over the prompt you are
-        // already reading is unnecessary. A covered event leaves no second card.
         let content = notification.request.content
-        let target = target(of: content.userInfo)
         Task { @MainActor in
-            if content.userInfo[AgentTaskEvent.fallbackKey] as? Bool != true,
-               await AgentControlBridge.shared.presentTaskNotification?(content) == true {
-                completionHandler([])
-                return
-            }
-            if let (connectionId, paneId) = target,
-               AgentControlBridge.shared.isPaneVisible?(connectionId, paneId) == true {
-                completionHandler([])
-            } else {
-                completionHandler([.banner, .sound, .list])
-            }
+            _ = await AgentControlBridge.shared.presentTaskNotification?(content)
+            completionHandler([])
         }
     }
 

@@ -23,11 +23,11 @@ struct AgentActivityMonitorTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
-        settings.notificationsEnabled = true
+        settings.notificationsEnabled = false
         var requests: [UNNotificationRequest] = []
         var snapshots: [AgentWidgetState] = []
         let monitor = AgentActivityMonitor(settings: settings, publishesLiveActivity: false,
-            deliverNotification: { requests.append($0) }, authorizeNotifications: {},
+            deliverNotification: { requests.append($0) },
             persistWidgetState: { snapshots.append($0) }, reloadWidgetTimeline: {})
         var connection = ServerConnection(name: "Energy", host: "192.0.2.1", username: "test", authMethod: .password)
         connection.multiplexer = .herdr
@@ -63,7 +63,7 @@ struct AgentActivityMonitorTests {
         var snapshots: [AgentWidgetState] = []
         var reloads = 0
         let monitor = AgentActivityMonitor(settings: AppSettings(defaults: defaults), publishesLiveActivity: false,
-            authorizeNotifications: {}, persistWidgetState: { snapshots.append($0) },
+            deliverNotification: { _ in }, persistWidgetState: { snapshots.append($0) },
             reloadWidgetTimeline: { reloads += 1 })
         let now = Date(timeIntervalSince1970: 1_790_000_000)
         let agent = AgentActivityAttributes.Agent(id: "one", connectionId: UUID().uuidString,
@@ -92,11 +92,11 @@ struct AgentActivityMonitorTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
-        settings.notificationsEnabled = true
+        settings.notificationsEnabled = false
         settings.lockScreenDetailEnabled = false
         var requests: [UNNotificationRequest] = []
         let monitor = AgentActivityMonitor(settings: settings, publishesLiveActivity: false,
-            announceDelay: 0.04, deliverNotification: { requests.append($0) }, authorizeNotifications: {})
+            announceDelay: 0.04, deliverNotification: { requests.append($0) })
         var connection = ServerConnection(name: "Notification fixture", host: "192.0.2.1", username: "test", authMethod: .password)
         connection.multiplexer = .herdr
         let runner = HerdrControlClientTests.FakeRunner()
@@ -130,14 +130,18 @@ struct AgentActivityMonitorTests {
         await report("working")
         settings.notificationsEnabled = false
         await report("done")
-        #expect(requests.count == 2, "opting out suppresses later transitions")
+        #expect(requests.count == 3, "legacy notification preference must not suppress card updates")
+        await report("working")
+        settings.liveActivityEnabled = false
+        await report("done")
+        #expect(requests.count == 3, "disabling cards stops task delivery")
     }
 
     private func makeMonitor() -> (AgentActivityMonitor, UserDefaults, String) {
         let name = "test.agentmonitor.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         let settings = AppSettings(defaults: defaults)
-        return (AgentActivityMonitor(settings: settings), defaults, name)
+        return (AgentActivityMonitor(settings: settings, deliverNotification: { _ in }), defaults, name)
     }
 
     // MARK: - Announcing an attention episode

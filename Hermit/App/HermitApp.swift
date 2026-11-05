@@ -225,16 +225,13 @@ struct HermitApp: App {
                     shortcuts: shortcuts, settings: settings, keychain: keychainHolder.service))
                 if scenePhase == .active { Task { await CloudSyncService.shared.sync() } }
             }
-            .onChange(of: settings.liveActivityEnabled) { _, _ in
+            .onChange(of: settings.liveActivityEnabled) { _, enabled in
                 connectionActivity.setForeground(scenePhase == .active)
                 monitor.refreshScheduling()
-            }
-            .onChange(of: settings.notificationsEnabled) { _, enabled in
-                monitor.refreshScheduling()
-                PushService.shared.setNotificationsEnabled(enabled)
-                guard enabled else { return }
-                for session in hub.sessions.values {
-                    monitor.trackWhenReady(connection: session.connection, session: session)
+                if enabled {
+                    for session in hub.sessions.values {
+                        monitor.trackWhenReady(connection: session.connection, session: session)
+                    }
                 }
             }
             .onChange(of: settings.liveActivityShowHostNames) { _, _ in

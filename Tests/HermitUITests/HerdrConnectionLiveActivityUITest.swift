@@ -8,7 +8,7 @@ final class HerdrConnectionLiveActivityUITest: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
-    func testAttentionUsesActivityAndFallsBackWhenDisabled() async throws {
+    func testAttentionUsesActivityAndStaysSilentWhenDisabled() async throws {
         #if !targetEnvironment(simulator)
         throw XCTSkip("Uses a reset simulator and the private loopback HERDR lab")
         #else
@@ -36,9 +36,6 @@ final class HerdrConnectionLiveActivityUITest: XCTestCase {
         let activity = app.switches["settings-live-activity"]
         XCTAssertTrue(app.reveal(activity))
         if activity.value as? String == "0" { activity.tap() }
-        let notifications = app.switches["settings-agent-notifications"]
-        XCTAssertTrue(app.reveal(notifications))
-        if notifications.value as? String == "0" { notifications.tap() }
         try await Task.sleep(for: .seconds(1))
         allowActivityIfOffered(in: springboard)
         let done = app.navigationBars.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "完成"])).firstMatch
@@ -53,7 +50,7 @@ final class HerdrConnectionLiveActivityUITest: XCTestCase {
         try await reportTask("working", to: events)
         try await Task.sleep(for: .seconds(4))
         // Keep the session tracked but make its pane invisible: this is the
-        // case that should alert through ActivityKit instead of a second card.
+        // case that should silently update the existing activity.
         if app.buttons["terminal-back"].exists { app.buttons["terminal-back"].tap() }
         else { app.buttons["terminal-sidebar"].tap() }
         XCTAssertTrue(host.waitForExistence(timeout: 10))
@@ -91,8 +88,8 @@ final class HerdrConnectionLiveActivityUITest: XCTestCase {
         openNotificationCenter(springboard)
         XCTAssertTrue(card.waitForNonExistence(timeout: 10))
         let fallback = springboard.staticTexts["ui-lab needs you"]
-        XCTAssertTrue(fallback.waitForExistence(timeout: 15), "Disabling activities must retain ordinary notification delivery")
-        capture(springboard, name: "unified-task-notification-fallback")
+        XCTAssertFalse(fallback.exists, "Disabling activities must not produce an ordinary notification")
+        capture(springboard, name: "task-card-disabled-no-notification")
         app.activate()
         #endif
     }

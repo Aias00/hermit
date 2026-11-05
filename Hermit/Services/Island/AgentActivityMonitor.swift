@@ -12,9 +12,9 @@ import WidgetKit
 /// Vibe Island — iOS adaptation of github.com/Octane0411/open-vibe-island.
 ///
 /// Watches live tmux panes for coding-agent activity and mirrors them into a
-/// SINGLE aggregate Dynamic Island Live Activity + local notifications:
+/// SINGLE aggregate Dynamic Island Live Activity:
 ///   * pane output flowing (non-shell foreground) → `.working`
-///   * terminal bell (BEL)                         → `.attention` + notification
+///   * terminal bell (BEL)                         → `.attention`
 ///   * quiet for `idleAfter` after working         → `.done`
 ///   * `.done` for `doneLinger`                    → removed
 ///
@@ -232,14 +232,11 @@ final class AgentActivityMonitor {
     private let publishesLiveActivity: Bool
     private let announceDelay: TimeInterval
     @ObservationIgnored private let deliverNotification: (UNNotificationRequest) -> Void
-    @ObservationIgnored private let authorizeNotifications: () -> Void
 
     init(settings: AppSettings, publishesLiveActivity: Bool = true,
          announceDelay: TimeInterval? = nil,
-         deliverNotification: @escaping (UNNotificationRequest) -> Void = { UNUserNotificationCenter.current().add($0) },
-         authorizeNotifications: @escaping () -> Void = {
-             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
-         },
+         // App composition injects the activity-only router; never default to UN delivery.
+         deliverNotification: @escaping (UNNotificationRequest) -> Void,
          persistWidgetState: @escaping (AgentWidgetState) -> Void = { AgentWidgetStore.write($0) },
          reloadWidgetTimeline: @escaping () -> Void = {
              WidgetCenter.shared.reloadTimelines(ofKind: AgentWidgetStore.widgetKind)
@@ -248,7 +245,6 @@ final class AgentActivityMonitor {
         self.publishesLiveActivity = publishesLiveActivity
         self.announceDelay = announceDelay ?? Self.announceGrace
         self.deliverNotification = deliverNotification
-        self.authorizeNotifications = authorizeNotifications
         self.persistWidgetState = persistWidgetState
         self.reloadWidgetTimeline = reloadWidgetTimeline
         loadAnnounced()
@@ -277,7 +273,7 @@ final class AgentActivityMonitor {
     /// installed. herdr reports `agent_status` itself, so on herdr the guess
     /// would be a strictly worse second opinion competing with the truth.
     func track<C: MultiplexerControlling>(connection: ServerConnection, controller: C) {
-        guard settings.liveActivityEnabled || settings.notificationsEnabled else { return }
+        guard settings.liveActivityEnabled else { return }
 
         conns[connection.id] = ConnRef(connection: connection, controller: controller)
         if let tmux = controller as? TmuxSessionController {
@@ -294,7 +290,6 @@ final class AgentActivityMonitor {
             self?.applyAgentHooks(connectionId: connection.id)
         }
         startSweepTimerIfNeeded()
-        requestNotificationAuthorizationIfNeeded()
     }
 
     /// Track a connection once its multiplexer control plane exists.
@@ -310,7 +305,7 @@ final class AgentActivityMonitor {
     /// controller is known.
     func trackWhenReady(connection: ServerConnection, session: SessionHub.ActiveSession) {
         guard AppSettings.agentNotificationsAvailable else { return }
-        guard settings.liveActivityEnabled || settings.notificationsEnabled else { return }
+        guard settings.liveActivityEnabled else { return }
         // Subscribe to every controller this session will ever wire, not just
         // the first: a mid-session reconnect rebuilds the controller, and the
         // weak ref `track` stores went nil with the old one — hook polling
@@ -453,7 +448,7 @@ final class AgentActivityMonitor {
         // "iOS delivered something" stay separable (the reconnect bug was only
         // diagnosable because of this line).
         Log.island.info("announcing attention: pane \(paneId, privacy: .public) on \(location, privacy: .public)")
-        guard settings.notificationsEnabled else { return }
+        guard settings.liveActivityEnabled else { return }
         let conn = connectionId.uuidString
         // The entry carries the card's WHERE in card form (`place`, not the
         // island's `location`): the digest below is drawn from the standing
@@ -482,14 +477,10 @@ final class AgentActivityMonitor {
         }
         let content = UNMutableNotificationContent()
         let who = newest.agent?.isEmpty == false ? newest.agent! : "agent"
-        // The same words the notification service extension puts on the pushed
-        // copy of this card — one renderer, so the two never drift again. The
-        // edge is ELIGIBLE to break through Focus (see the entitlement notes in
-        // docs/PUSH.md — each Focus still decides for itself); updates are
-        // `.passive`: they change a count on a card, they wake no one.
+        // Reuse the task payload renderer, but route only to the existing activity.
         AgentNotificationCopy.attention(agent: who, standingCount: standing.count,
                                         detail: newest.title, place: newest.location ?? "",
-                                        edge: edge, sound: settings.attentionSoundEnabled,
+                                        edge: edge, sound: false,
                                         into: content, workspace: workspace(connectionId: connectionId, paneId: newest.pane),
                                         host: conns[connectionId]?.connection.displayName)
         content.userInfo = [
@@ -502,24 +493,16 @@ final class AgentActivityMonitor {
         deliverNotification(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
-    /// Post the "agent finished" notification. Hook-driven only — a precise
-    /// `Stop` stamp flipping a pane to `.done` is a real end-of-turn signal,
-    /// whereas the output heuristic's `.done` (4s of quiet) is too fuzzy to ping
-    /// on. `detail` is the prompt the turn answered (the hook's title on a
-    /// `done`), already gated by the Show detail switch by the caller; `duration`
-    /// is how long the closing episode ran — the card shows it, and at the
-    /// shared threshold (PushRemoteNotification.doneSoundThreshold) it decides
-    /// whether this finish is worth a sound: the user walked away from a build,
-    /// tell them it is over; a twenty-second answer is information, not an
-    /// interruption. A tap opens the pane.
+    /// Route explicit end-of-turn events to the activity. Quiet output alone
+    /// cannot declare a task complete.
     private func postDone(connectionId: UUID, paneId: String,
                           command: String, detail: String?,
                           duration: TimeInterval = 0, episode: Date = Date()) {
-        guard settings.notificationsEnabled else { return }
+        guard settings.liveActivityEnabled else { return }
         let content = UNMutableNotificationContent()
         AgentNotificationCopy.done(agent: displayCommand(command), detail: detail,
                                    place: place(connectionId: connectionId, paneId: paneId),
-                                   duration: Int(duration), sound: settings.attentionSoundEnabled,
+                                   duration: Int(duration), sound: false,
                                    threshold: PushRemoteNotification.doneSoundThreshold,
                                    into: content, workspace: workspace(connectionId: connectionId, paneId: paneId),
                                    host: conns[connectionId]?.connection.displayName)
@@ -593,7 +576,7 @@ final class AgentActivityMonitor {
 
     private func startSweepTimerIfNeeded() {
         guard sweepTimer == nil, foreground,
-              settings.liveActivityEnabled || settings.notificationsEnabled, !conns.isEmpty else { return }
+              settings.liveActivityEnabled, !conns.isEmpty else { return }
         let interval = AppEnergyPolicy.current.samplingInterval
         sweepTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.sweep() }
@@ -602,7 +585,7 @@ final class AgentActivityMonitor {
     }
 
     private func sweep() {
-        guard foreground, settings.liveActivityEnabled || settings.notificationsEnabled else { return }
+        guard foreground, settings.liveActivityEnabled else { return }
         let now = Date()
 
         // Phase B — drive a hook poll for every tracked controller on the same
@@ -1089,10 +1072,5 @@ final class AgentActivityMonitor {
         lastWidgetSnapshot = snapshot
         persistWidgetState(snapshot)
         reloadWidgetTimeline()
-    }
-
-    private func requestNotificationAuthorizationIfNeeded() {
-        guard AppSettings.agentNotificationsAvailable, settings.notificationsEnabled else { return }
-        authorizeNotifications()
     }
 }
