@@ -9,6 +9,21 @@ import MoshpitKit
 /// come from this renderer, so a pushed finish and a local one read alike.
 @Suite("Agent notification copy")
 struct AgentNotificationCopyTests {
+    @Test("Workspace notifications put the project first and avoid repeating its title and location")
+    func compactWorkspaceCopy() {
+        let content = UNMutableNotificationContent()
+        AgentNotificationCopy.done(agent: "Codex", detail: "分析工程 | project · Codex", place: "MacBook · project",
+            duration: 10, sound: false, threshold: 180, into: content, workspace: "project", host: "MacBook")
+        #expect(content.title == "✓ project finished")
+        #expect(content.subtitle == "MacBook · Codex")
+        #expect(content.body == "分析工程")
+        AgentNotificationCopy.attention(agent: "Codex", standingCount: 2, detail: nil, place: "MacBook · project",
+            edge: true, sound: false, into: content, workspace: "project", host: "MacBook")
+        #expect(content.title == "project +1 needs you")
+        #expect(content.body.isEmpty && content.sound == nil)
+        #expect(AgentNotificationCopy.taskDetail("分析工程 | project", workspace: "project", agent: "Codex") == "分析工程")
+        #expect(AgentNotificationCopy.taskDetail("分析工程 | another", workspace: "project", agent: "Codex") == "分析工程 | another")
+    }
 
     static let en = Locale(identifier: "en_US")
 

@@ -490,11 +490,15 @@ final class AgentActivityMonitor {
         AgentNotificationCopy.attention(agent: who, standingCount: standing.count,
                                         detail: newest.title, place: newest.location ?? "",
                                         edge: edge, sound: settings.attentionSoundEnabled,
-                                        into: content)
+                                        into: content, workspace: workspace(connectionId: connectionId, paneId: newest.pane),
+                                        host: conns[connectionId]?.connection.displayName)
         content.userInfo = [
             AgentNotifications.connectionKey: conn,
-            AgentNotifications.paneKey: newest.pane
+            AgentNotifications.paneKey: newest.pane,
+            PushRemoteNotification.stateKey: "attention",
+            AgentTaskEvent.timestampKey: Double(newest.since)
         ]
+        content.threadIdentifier = "hermit.tasks." + conn
         deliverNotification(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
@@ -510,18 +514,18 @@ final class AgentActivityMonitor {
     /// interruption. A tap opens the pane.
     private func postDone(connectionId: UUID, paneId: String,
                           command: String, detail: String?,
-                          duration: TimeInterval = 0) {
+                          duration: TimeInterval = 0, episode: Date = Date()) {
         guard settings.notificationsEnabled else { return }
         let content = UNMutableNotificationContent()
         AgentNotificationCopy.done(agent: displayCommand(command), detail: detail,
                                    place: place(connectionId: connectionId, paneId: paneId),
                                    duration: Int(duration), sound: settings.attentionSoundEnabled,
                                    threshold: PushRemoteNotification.doneSoundThreshold,
-                                   into: content)
-        content.userInfo = [
-            AgentNotifications.connectionKey: connectionId.uuidString,
-            AgentNotifications.paneKey: paneId
-        ]
+                                   into: content, workspace: workspace(connectionId: connectionId, paneId: paneId),
+                                   host: conns[connectionId]?.connection.displayName)
+        content.userInfo = AgentTaskEvent(connectionID: connectionId, paneID: paneId,
+            state: .done, occurredAt: episode).userInfo
+        content.threadIdentifier = "hermit.tasks." + connectionId.uuidString
         let request = UNNotificationRequest(
             identifier: "moshpit.done.\(connectionId.uuidString).\(paneId)",
             content: content, trigger: nil)
@@ -829,7 +833,7 @@ final class AgentActivityMonitor {
                 postDone(connectionId: connectionId, paneId: paneId,
                          command: cmd,
                          detail: settings.lockScreenDetailEnabled ? hook.title : nil,
-                         duration: duration)
+                         duration: duration, episode: since)
             }
         }
 
@@ -882,6 +886,13 @@ final class AgentActivityMonitor {
         else { return label }
         return AgentNotificationCopy.place(label: label,
                                            session: snapshot.sessionDisplayName(session))
+    }
+
+    private func workspace(connectionId: UUID, paneId: String) -> String? {
+        guard let snapshot = conns[connectionId]?.controller?.snapshot,
+              let pane = snapshot.panes[paneId], let window = snapshot.windows[pane.windowId],
+              let session = snapshot.sessions[window.sessionId] else { return nil }
+        return snapshot.sessionDisplayName(session)
     }
 
     /// Clean a foreground command for display (drop a leading login "-").

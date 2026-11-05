@@ -150,6 +150,12 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
         public var deepLink: String
         public var observedAt: Date?
 
+        /// Optional event receipt survives an app/extension handoff and prevents
+        /// the same episode alerting twice while the activity is alive.
+        public var eventID: String?
+        public var eventAt: Date?
+        public var eventPresentation: String?
+
         public func isStale(at date: Date, maximumAge: TimeInterval, fallback: Bool) -> Bool {
             guard let observedAt else { return fallback }
             return date >= observedAt.addingTimeInterval(maximumAge)

@@ -22,6 +22,7 @@ struct PushPrefsTests {
             let values = PushPrefs.read(suiteName: suite)
             #expect(values.showDetail)
             #expect(values.sound)
+            #expect(values.liveActivity)
         }
     }
 
@@ -32,6 +33,8 @@ struct PushPrefsTests {
             #expect(PushPrefs.read(suiteName: suite) == .init(showDetail: false, sound: true))
             PushPrefs.write(showDetail: true, sound: false, suiteName: suite)
             #expect(PushPrefs.read(suiteName: suite) == .init(showDetail: true, sound: false))
+            PushPrefs.write(showDetail: false, sound: false, liveActivity: false, suiteName: suite)
+            #expect(!PushPrefs.read(suiteName: suite).liveActivity)
         }
     }
 }

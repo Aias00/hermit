@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 /// Vibe Island — the process-wide hop from a lock-screen surface into the app.
 ///
@@ -32,6 +33,7 @@ public final class AgentControlBridge {
     /// foreground notification presentation can skip the banner + sound when
     /// the user is already looking at the prompt.
     public var isPaneVisible: ((UUID, String) -> Bool)?
+    public var presentTaskNotification: ((UNNotificationContent) async -> Bool)?
     public var cycler: (() -> Void)?
 
     /// Set by the app at launch. Called when a pairing self-test push arrives,

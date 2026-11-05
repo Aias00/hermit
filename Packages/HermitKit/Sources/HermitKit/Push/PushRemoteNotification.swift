@@ -161,7 +161,8 @@ public enum PushRemoteNotification {
             // "quieter than intended" is the recoverable direction.
             AgentNotificationCopy.done(agent: who, detail: detail, place: place,
                                        duration: status.dur ?? 0, sound: prefs.sound,
-                                       threshold: Self.doneSoundThreshold, into: content)
+                                       threshold: Self.doneSoundThreshold, into: content,
+                                       workspace: status.sess, host: label ?? status.host)
         } else {
             // No hook title — no jq on the host, a bell-only signal, or detail
             // hidden by the switch — leaves the body to the location alone,
@@ -169,7 +170,7 @@ public enum PushRemoteNotification {
             AgentNotificationCopy.attention(agent: who, standingCount: standingCount,
                                             detail: detail, place: place,
                                             edge: attentionEdge, sound: prefs.sound,
-                                            into: content)
+                                            into: content, workspace: status.sess, host: label ?? status.host)
         }
 
         var info = content.userInfo
@@ -177,12 +178,14 @@ public enum PushRemoteNotification {
         info[AgentNotifications.paneKey] = status.pane
         info[agentKey] = status.agent ?? ""
         info[stateKey] = status.state
+        info[AgentTaskEvent.timestampKey] = Double(status.ts)
         // The hook's title survives here even when the rendered body drops it
         // (Show detail off). A pairing self-test carries its nonce in exactly
         // this field, and matching it is the only way the phone can prove that
         // THIS push — not a stale one from an earlier attempt — arrived.
         info[detailKey] = rawDetail ?? ""
         content.userInfo = info
+        content.threadIdentifier = "hermit.tasks." + status.conn
 
         // No category, ever. A pushed notification carries no buttons because
         // Hermit's notifications carry none at all any more — see

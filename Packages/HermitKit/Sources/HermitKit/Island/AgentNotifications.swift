@@ -88,12 +88,18 @@ public final class AgentNotificationHandler: NSObject, UNUserNotificationCenterD
         // Surface attention even while Hermit is foreground (the user may be on
         // a different screen than the agent's pane) — EXCEPT when the user is
         // looking at that exact pane: a banner + chime over the prompt you are
-        // already reading is triple noise. Keep it in the list only.
-        let target = target(of: notification.request.content.userInfo)
+        // already reading is unnecessary. A covered event leaves no second card.
+        let content = notification.request.content
+        let target = target(of: content.userInfo)
         Task { @MainActor in
+            if content.userInfo[AgentTaskEvent.fallbackKey] as? Bool != true,
+               await AgentControlBridge.shared.presentTaskNotification?(content) == true {
+                completionHandler([])
+                return
+            }
             if let (connectionId, paneId) = target,
                AgentControlBridge.shared.isPaneVisible?(connectionId, paneId) == true {
-                completionHandler([.list])
+                completionHandler([])
             } else {
                 completionHandler([.banner, .sound, .list])
             }

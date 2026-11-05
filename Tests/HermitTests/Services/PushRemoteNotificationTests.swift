@@ -97,8 +97,8 @@ struct PushRemoteNotificationTests {
 
         PushRemoteNotification.apply(Self.status(), to: content)
 
-        #expect(content.title == "claude needs you")
-        #expect(content.body == "Bash: rm -rf build — m1-pro · work")
+        #expect(content.title == "work needs you")
+        #expect(content.body == "Bash: rm -rf build")
         // The two keys that make the existing Allow/Deny path work.
         #expect(content.userInfo[AgentNotifications.connectionKey] as? String
                 == "3F2504E0-4F89-11D3-9A0C-0305E82C3301")
@@ -116,8 +116,9 @@ struct PushRemoteNotificationTests {
         // strings catalog (gen_xcstrings.py writes it from the app's table), so
         // String(localized:) resolves in both processes. A short turn with no
         // prompt on record: no duration, no detail, just where.
-        #expect(content.title == "✓ claude finished")
-        #expect(content.body == "m1-pro · work")
+        #expect(content.title == "✓ work finished")
+        #expect(content.body.isEmpty)
+        #expect(content.subtitle == "m1-pro · claude")
         #expect(content.categoryIdentifier.isEmpty)
     }
 
@@ -132,9 +133,9 @@ struct PushRemoteNotificationTests {
         // exact spelling is Foundation's and follows the device language, so
         // only the shape is pinned here (the formatter itself is pinned in
         // AgentNotificationCopyTests with an explicit locale).
-        #expect(content.title.hasPrefix("✓ claude finished · "))
+        #expect(content.title.hasPrefix("✓ work finished · "))
         #expect(content.title.contains("12"))
-        #expect(content.body == "Upload the build with the new Xcode — m1-pro · work")
+        #expect(content.body == "Upload the build with the new Xcode")
     }
 
     @Test("Show detail off keeps the prompt out of a finished card too")
@@ -143,8 +144,9 @@ struct PushRemoteNotificationTests {
         PushRemoteNotification.apply(
             Self.status(state: "done", title: "Upload the build with the new Xcode"),
             to: content, prefs: .init(showDetail: false, sound: true))
-        #expect(content.title == "✓ claude finished")
-        #expect(content.body == "m1-pro · work")
+        #expect(content.title == "✓ work finished")
+        #expect(content.body.isEmpty)
+        #expect(content.subtitle == "m1-pro · claude")
     }
 
     @Test("the card names the connection the way the phone does, when it knows")
@@ -154,7 +156,8 @@ struct PushRemoteNotificationTests {
         // called the connection. The extension reads that off the pairing and
         // hands it in; a blank label falls back to the host.
         PushRemoteNotification.apply(Self.status(), to: content, label: "mac-mini")
-        #expect(content.body == "Bash: rm -rf build — mac-mini · work")
+        #expect(content.body == "Bash: rm -rf build")
+        #expect(content.subtitle == "mac-mini · claude")
         #expect(PushRemoteNotification.location(Self.status(), label: "  ") == "m1-pro · work")
     }
 
@@ -166,8 +169,9 @@ struct PushRemoteNotificationTests {
         // The setting's own subtitle is "off keeps it private" — for months the
         // local surfaces obeyed and a pushed notification printed the command
         // anyway. Who and where survive; what does not.
-        #expect(content.title == "claude needs you")
-        #expect(content.body == "m1-pro · work")
+        #expect(content.title == "work needs you")
+        #expect(content.body.isEmpty)
+        #expect(content.subtitle == "m1-pro · claude")
         // The unrendered copy in userInfo stays: the app acknowledges prompts
         // and matches self-test nonces through it, and it is never shown.
         #expect(content.userInfo[PushRemoteNotification.detailKey] as? String
@@ -227,8 +231,9 @@ struct PushRemoteNotificationTests {
         let content = UNMutableNotificationContent()
         content.title = "An agent needs you"
         PushRemoteNotification.apply(Self.status(title: "   "), to: content)
-        #expect(content.title == "claude needs you")
-        #expect(content.body == "m1-pro · work")
+        #expect(content.title == "work needs you")
+        #expect(content.body.isEmpty)
+        #expect(content.subtitle == "m1-pro · claude")
     }
 
     @Test("tmux's default numeric session name is not shown as a location")

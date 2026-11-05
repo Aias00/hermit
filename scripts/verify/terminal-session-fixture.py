@@ -8,6 +8,7 @@ The explicit __MOSHPIT_REJECT_DRAFT__ marker is rejected by a Unix-socket proxy;
 all other Herdr API requests are forwarded to the real isolated server.
 """
 import argparse, base64, getpass, hashlib, json, os
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import shlex, signal, socket, subprocess, sys, tempfile, threading, time
 
@@ -75,6 +76,7 @@ def serve(state_path):
     for sig in (signal.SIGINT, signal.SIGTERM): signal.signal(sig, lambda *_: stopped.set())
     log = open(root/'services.log','ab',buffering=0)
     proxy = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    events_server = None
     try:
         herdr = subprocess.Popen([HERDR,'--session','ui','server'],env=environment(root),cwd=root,
                                  stdin=subprocess.DEVNULL,stdout=log,stderr=log)
@@ -90,6 +92,32 @@ def serve(state_path):
         snap = cli(root,'api','snapshot')['result']['snapshot']
         workspace = snap['focused_workspace_id']
         cli(root,'tab','create','--workspace',workspace,'--cwd',str(root),'--label','second','--no-focus')
+        class TaskEvents(BaseHTTPRequestHandler):
+            sequence = 0
+            def log_message(self, *_): pass
+            def do_POST(self):
+                try:
+                    length = int(self.headers.get('Content-Length', '0'))
+                    if self.path != '/task' or not 0 < length <= 256:
+                        raise ValueError('invalid task path or body length '+str(length))
+                    phase = json.loads(self.rfile.read(length))['state']
+                    if phase not in ('working', 'blocked', 'idle'): raise ValueError()
+                    snapshot = cli(root, 'api', 'snapshot')['result']['snapshot']
+                    pane = snapshot['focused_pane_id']
+                    TaskEvents.sequence += 2
+                    cli(root, 'pane', 'report-agent', pane, '--source', 'notification-ui',
+                        '--agent', 'codex', '--state', phase, '--seq', str(TaskEvents.sequence))
+                    cli(root, 'pane', 'report-metadata', pane, '--source', 'notification-ui',
+                        '--title', 'Task notification integration test', '--seq', str(TaskEvents.sequence + 1))
+                    body = json.dumps({'pane': pane, 'state': phase}).encode()
+                    self.send_response(200); self.send_header('Content-Type', 'application/json')
+                    self.end_headers(); self.wfile.write(body)
+                except (ValueError, KeyError, RuntimeError) as failure:
+                    with open(root/'task-events.log', 'a') as event_log:
+                        event_log.write(type(failure).__name__+': '+str(failure)[:240]+'\n')
+                    self.send_error(400)
+        events_server = HTTPServer(('127.0.0.1', 0), TaskEvents)
+        threading.Thread(target=events_server.serve_forever, daemon=True).start()
         proxy.bind(str(root/'input.sock')); proxy.listen(); proxy.settimeout(.25)
         def handle(client):
             with client:
@@ -131,12 +159,14 @@ def serve(state_path):
             try:
                 with socket.create_connection(('127.0.0.1',state['port']),timeout=.25): break
             except OSError: time.sleep(.1)
-        state.update(status='ready',pid=os.getpid(),sshd_pid=sshd.pid,herdr_pid=herdr.pid,herdr_socket=actual_socket)
+        state.update(status='ready',pid=os.getpid(),sshd_pid=sshd.pid,herdr_pid=herdr.pid,herdr_socket=actual_socket,
+                     activity_events_url='http://127.0.0.1:'+str(events_server.server_port)+'/task')
         save(state_path,state)
         while not stopped.wait(.25):
             if any(p.poll() is not None for p in processes): raise RuntimeError('fixture service exited')
     finally:
         stopped.set();proxy.close()
+        if events_server is not None: events_server.shutdown(); events_server.server_close()
         try: cli(root,'server','stop')
         except Exception: pass
         if Path(TMUX).exists() and (root/'tmux.sock').exists():
@@ -242,6 +272,8 @@ def main():
     values={'MOSHPIT_SEED_USER':state['username'],'MOSHPIT_SEED_HOST':'127.0.0.1','MOSHPIT_SEED_PORT':str(state['port']),'MOSHPIT_SEED_TRUST_FP':state['fingerprint'],
             'MOSHPIT_SEED_KEY_B64':base64.b64encode((root/'client_key').read_bytes()).decode(),'MOSHPIT_SEED_HERDR_BIN':str(root/'herdr'),'MOSHPIT_SEED_TMUX_BIN':str(root/'tmux'),'MOSHPIT_SEED_MOSH_BIN':str(root/'mosh-server'),'MOSHPIT_SWITCH_FIXTURE_DIR':str(root)}
     env.pop('TEST_RUNNER_MOSHPIT_SEED_PASSWORD',None)
+    if state.get('activity_events_url'):
+        values['MOSHPIT_ACTIVITY_EVENTS_URL'] = state['activity_events_url']
     env.update({'TEST_RUNNER_'+k:v for k,v in values.items()})
     os.execvpe(command[0],command,env)
 

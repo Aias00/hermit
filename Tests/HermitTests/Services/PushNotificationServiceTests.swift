@@ -13,9 +13,8 @@ import MoshpitKit
 /// What it cannot cover is APNs delivery itself, and therefore the extension
 /// actually being launched while the screen is locked.
 ///
-/// `didReceive` answers synchronously in every path — there is no network in it —
-/// so the tests collect the delivered content from a plain closure. If it ever
-/// grows async work, these need a continuation instead.
+/// Decryption/rendering remains synchronous. ActivityKit alone is replaced by
+/// a completion seam here; its real UI is exercised in simulator UI tests.
 @Suite("Push notification service extension", .serialized, .enabled(if: AppGroupContainer.isAvailable, AppGroupContainer.skipReason))
 struct PushNotificationServiceTests {
 
@@ -70,7 +69,10 @@ struct PushNotificationServiceTests {
 
     private func deliver(_ request: UNNotificationRequest) -> UNNotificationContent? {
         var delivered: UNNotificationContent?
-        NotificationService().didReceive(request) { delivered = $0 }
+        let service = NotificationService()
+        service.readPreferences = { .default }
+        service.updateActivity = { _, complete in complete() }
+        service.didReceive(request) { delivered = $0 }
         return delivered
     }
 
@@ -78,8 +80,8 @@ struct PushNotificationServiceTests {
     func opensAndRewrites() throws {
         let delivered = try withPairing { deliver(try request()) }
         let content = try #require(delivered)
-        #expect(content.title == "claude needs you")
-        #expect(content.body == "Bash: rm -rf build — m1-pro · work")
+        #expect(content.title == "work needs you")
+        #expect(content.body == "Bash: rm -rf build")
         // The two keys the lock-screen Allow/Deny path reads. Without them a
         // pushed notification would look right and do nothing.
         #expect(content.userInfo[AgentNotifications.connectionKey] as? String == Self.conn)
@@ -92,7 +94,7 @@ struct PushNotificationServiceTests {
     func donePush() throws {
         let delivered = try withPairing { deliver(try request(state: "done", title: nil)) }
         let content = try #require(delivered)
-        #expect(content.title == "✓ claude finished")
+        #expect(content.title == "✓ work finished")
         #expect(content.categoryIdentifier.isEmpty)
     }
 
@@ -103,7 +105,7 @@ struct PushNotificationServiceTests {
         // card uses the latter, like the local card does.
         let delivered = try withPairing(label: "mac-mini") { deliver(try request()) }
         let content = try #require(delivered)
-        #expect(content.body == "Bash: rm -rf build — mac-mini · work")
+        #expect(content.body == "Bash: rm -rf build")
     }
 
     @Test("a push this device has no key for keeps the translated fallback")
@@ -147,7 +149,7 @@ struct PushNotificationServiceTests {
             ts: Int(Date().timeIntervalSince1970) - 86_400)
         PushRemoteNotification.apply(old, to: content)
 
-        #expect(content.title == "claude needs you")
+        #expect(content.title == "work needs you")
         #expect(content.body.contains("rm -rf build"), "the user should still learn it was asked")
         #expect(content.categoryIdentifier.isEmpty)
     }
@@ -233,7 +235,41 @@ struct PushNotificationServiceTests {
         PushPairingStore.write([])
         service.didReceive(try request()) { _ in count += 1 }
         service.serviceExtensionTimeWillExpire()
-        #expect(count == 2)
+        #expect(count == 1, "expiry must not deliver a second copy after completion")
+    }
+
+    @Test("An authenticated event updates its activity before delivery; expiry and late completion deliver once")
+    func activityUpdateAndTimeout() throws {
+        try withPairing {
+            let service = NotificationService()
+            service.readPreferences = { .default }
+            var event: AgentTaskEvent?
+            var complete: (() -> Void)?
+            var delivered: [UNNotificationContent] = []
+            service.updateActivity = { signal, callback in event = signal; complete = callback }
+            service.didReceive(try request(state: "done")) { delivered.append($0) }
+            #expect(event?.state == .done && event?.paneID == "%3")
+            #expect(delivered.isEmpty)
+            service.serviceExtensionTimeWillExpire()
+            complete?()
+            service.serviceExtensionTimeWillExpire()
+            #expect(delivered.count == 1)
+            #expect(delivered[0].title == "✓ work finished")
+        }
+    }
+}
+
+@Suite("Push single delivery")
+struct PushSingleDeliveryTests {
+    @Test("A non-encrypted fallback can complete only once even if the extension expires later")
+    func fallbackExpiryCannotDuplicate() {
+        let service = NotificationService()
+        let content = UNMutableNotificationContent()
+        content.title = "fallback"
+        var count = 0
+        service.didReceive(.init(identifier: "fallback-test", content: content, trigger: nil)) { _ in count += 1 }
+        service.serviceExtensionTimeWillExpire()
+        #expect(count == 1)
     }
 }
 
@@ -303,7 +339,10 @@ struct PushDiagnosticsTests {
 
     private func deliver(_ request: UNNotificationRequest) -> UNNotificationContent? {
         var delivered: UNNotificationContent?
-        NotificationService().didReceive(request) { delivered = $0 }
+        let service = NotificationService()
+        service.readPreferences = { .default }
+        service.updateActivity = { _, complete in complete() }
+        service.didReceive(request) { delivered = $0 }
         return delivered
     }
 

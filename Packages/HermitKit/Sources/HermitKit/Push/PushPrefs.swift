@@ -21,6 +21,7 @@ public enum PushPrefs {
     public static let suite = PushPairingStore.appGroup
     public static let detailKey = "moshpit.push.showDetail"
     public static let soundKey = "moshpit.push.sound"
+    public static let liveActivityKey = "hermit.push.liveActivity"
 
     public struct Values: Equatable {
         /// Render what the agent is running/asking (the hook title) in the
@@ -30,24 +31,27 @@ public enum PushPrefs {
         /// Whether an alert that has earned a sound (an attention edge, a long
         /// turn finishing) may actually play one.
         public var sound: Bool
+        public var liveActivity: Bool
 
         public static let `default` = Values(showDetail: true, sound: true)
 
-        public init(showDetail: Bool, sound: Bool) {
-            self.showDetail = showDetail; self.sound = sound
+        public init(showDetail: Bool, sound: Bool, liveActivity: Bool = true) {
+            self.showDetail = showDetail; self.sound = sound; self.liveActivity = liveActivity
         }
     }
 
     public static func read(suiteName: String = PushPrefs.suite) -> Values {
         guard let d = UserDefaults(suiteName: suiteName) else { return .default }
         return Values(showDetail: d.object(forKey: detailKey) as? Bool ?? true,
-                      sound: d.object(forKey: soundKey) as? Bool ?? true)
+                      sound: d.object(forKey: soundKey) as? Bool ?? true,
+                      liveActivity: d.object(forKey: liveActivityKey) as? Bool ?? true)
     }
 
-    public static func write(showDetail: Bool, sound: Bool,
+    public static func write(showDetail: Bool, sound: Bool, liveActivity: Bool = true,
                              suiteName: String = PushPrefs.suite) {
         guard let d = UserDefaults(suiteName: suiteName) else { return }
         d.set(showDetail, forKey: detailKey)
         d.set(sound, forKey: soundKey)
+        d.set(liveActivity, forKey: liveActivityKey)
     }
 }

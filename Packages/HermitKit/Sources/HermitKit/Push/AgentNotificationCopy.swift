@@ -89,12 +89,15 @@ public enum AgentNotificationCopy {
     /// whenever the user next looks.
     public static func done(agent: String, detail: String?, place: String,
                             duration: Int, sound: Bool, threshold: Int,
-                            into content: UNMutableNotificationContent) {
-        var title = String(localized: "✓ \(agent) finished",
+                            into content: UNMutableNotificationContent,
+                            workspace: String? = nil, host: String? = nil) {
+        let workspace = namedWorkspace(workspace)
+        let subject = workspace ?? agent
+        var title = String(localized: "✓ \(subject) finished",
                            comment: "Notification title: an agent's turn ended. %@ is the agent's name.")
         if let ran = self.duration(duration) { title += " · \(ran)" }
         content.title = title
-        content.body = body(detail: detail, place: place)
+        renderBody(detail: detail, place: place, workspace: workspace, host: host, agent: agent, into: content)
         let isLong = duration >= threshold
         content.sound = (isLong && sound) ? .default : nil
         content.interruptionLevel = isLong ? .active : .passive
@@ -108,11 +111,14 @@ public enum AgentNotificationCopy {
     /// silently at `.passive`.
     public static func attention(agent: String, standingCount: Int, detail: String?,
                                  place: String, edge: Bool, sound: Bool,
-                                 into content: UNMutableNotificationContent) {
-        let who = standingCount > 1 ? "\(agent) +\(standingCount - 1)" : agent
+                                 into content: UNMutableNotificationContent,
+                                 workspace: String? = nil, host: String? = nil) {
+        let workspace = namedWorkspace(workspace)
+        let subject = workspace ?? agent
+        let who = standingCount > 1 ? "\(subject) +\(standingCount - 1)" : subject
         content.title = String(localized: "\(who) needs you",
                                comment: "Notification title: an agent stopped for the user. %@ is the agent's name, possibly with a +N count.")
-        content.body = body(detail: detail, place: place)
+        renderBody(detail: detail, place: place, workspace: workspace, host: host, agent: agent, into: content)
         content.sound = (edge && sound) ? .default : nil
         content.interruptionLevel = edge ? .timeSensitive : .passive
     }
@@ -123,5 +129,34 @@ public enum AgentNotificationCopy {
     static func body(detail: String?, place: String) -> String {
         if let detail = self.detail(detail) { return "\(detail) — \(place)" }
         return place
+    }
+
+    private static func namedWorkspace(_ raw: String?) -> String? {
+        guard let value = detail(raw), !value.allSatisfy(\.isNumber) else { return nil }
+        return value
+    }
+
+    private static func renderBody(detail raw: String?, place: String, workspace: String?,
+                                   host: String?, agent: String, into content: UNMutableNotificationContent) {
+        guard let workspace else { content.body = body(detail: raw, place: place); return }
+        content.subtitle = [detail(host), detail(agent)].compactMap { $0 }.joined(separator: " · ")
+        content.body = taskDetail(raw, workspace: workspace, agent: agent) ?? ""
+    }
+
+    /// Remove only a known HERDR location suffix, before truncating the task.
+    /// Both notification bodies and activity rows already name the workspace.
+    public static func taskDetail(_ raw: String?, workspace: String?, agent: String?) -> String? {
+        var text = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let workspace = workspace?.trimmingCharacters(in: .whitespacesAndNewlines), !workspace.isEmpty {
+            let location = " | " + workspace
+            let suffixes = agent.map { [location + " · " + $0, location] } ?? [location]
+            for suffix in suffixes {
+                if let value = text, value.lowercased().hasSuffix(suffix.lowercased()) {
+                    text = String(value.dropLast(suffix.count))
+                    break
+                }
+            }
+        }
+        return detail(text)
     }
 }

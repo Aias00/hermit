@@ -28,14 +28,32 @@ import MoshpitKit
 /// sent it was paired to a different install, and the honest response is to show
 /// the generic line rather than a decryption complaint.
 final class NotificationService: UNNotificationServiceExtension {
+    private let deliveryLock = NSLock()
     private var contentHandler: ((UNNotificationContent) -> Void)?
     private var bestAttempt: UNMutableNotificationContent?
+    var readPreferences: () -> PushPrefs.Values = { PushPrefs.read() }
+    /// The test seam preserves actual decryption/rendering while replacing only
+    /// ActivityKit, which needs a live system-owned activity on a real device.
+    var updateActivity: (AgentTaskEvent, @escaping () -> Void) -> Void = { event, complete in
+        Task { @MainActor in
+            _ = await TaskActivityDelivery.present(event, notification: nil, alert: false, externalNotification: true)
+            complete()
+        }
+    }
+
+    private func finish(_ content: UNNotificationContent) {
+        deliveryLock.lock()
+        let handler = contentHandler
+        contentHandler = nil
+        deliveryLock.unlock()
+        handler?(content)
+    }
 
     override func didReceive(_ request: UNNotificationRequest,
                              withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
         self.contentHandler = contentHandler
         guard let content = request.content.mutableCopy() as? UNMutableNotificationContent else {
-            contentHandler(request.content)
+            finish(request.content)
             return
         }
         bestAttempt = content
@@ -47,13 +65,13 @@ final class NotificationService: UNNotificationServiceExtension {
         // The user's two extension-visible switches, mirrored into the App
         // Group by AppSettings. Read once per push; every path below —
         // decrypted or fallback — must honor them.
-        let prefs = PushPrefs.read()
+        let prefs = readPreferences()
         if !prefs.sound { content.sound = nil }
 
         guard let envelope = PushRemoteNotification.envelope(in: request.content.userInfo) else {
             Log.push.info("push carries no sealed envelope — delivering as received")
             PushDiagnostics.record("no sealed envelope — delivered as received")
-            contentHandler(content)
+            finish(content)
             return
         }
         let secrets = PushPairingStore.secretsNewestFirst()
@@ -76,7 +94,7 @@ final class NotificationService: UNNotificationServiceExtension {
             // agent is still waiting. Strip the actions and let the body tap
             // open the app, which is what the fallback text already asks for.
             content.categoryIdentifier = ""
-            contentHandler(content)
+            finish(content)
             return
         }
         Log.push.info("opened a \(status.state, privacy: .public) push from \(status.host, privacy: .public)")
@@ -108,15 +126,21 @@ final class NotificationService: UNNotificationServiceExtension {
             PushStanding.clear(conn: status.conn, pane: status.pane)
             PushRemoteNotification.apply(status, to: content, prefs: prefs, label: label)
         }
-        contentHandler(content)
+        bestAttempt = content
+        // Ordinary pushes keep their alert as a reliable background fallback.
+        // Update the matching row silently first so it cannot still say working
+        // while this notification says finished. An NSE cannot suppress the
+        // original alert or turn it into an ActivityKit push.
+        if prefs.liveActivity, status.agent != PushRemoteNotification.selfTestAgent,
+           let event = AgentTaskEvent(userInfo: content.userInfo) {
+            updateActivity(event) { [weak self] in self?.finish(content) }
+        } else { finish(content) }
     }
 
     override func serviceExtensionTimeWillExpire() {
         // The hardest failure for this process to account for, because from the
         // outside it looks identical to a push that simply showed the fallback.
         PushDiagnostics.record("ran out of time — delivered whatever was ready")
-        if let contentHandler, let bestAttempt {
-            contentHandler(bestAttempt)
-        }
+        if let bestAttempt { finish(bestAttempt) }
     }
 }

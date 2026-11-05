@@ -280,7 +280,7 @@ struct ConnectionLiveActivityTests {
         let contexts = (0..<13).map { index in
             ConnectionActivityContext(workspaceName: "private-workspace-\(index)", programName: "Codex",
                 taskState: index == 12 ? "attention" : "working", paneID: "w1:p\(index)",
-                taskDetail: "private-task-\(index)")
+                taskDetail: "private-task-\(index) | private-workspace-\(index) · Codex")
         }
         let entry = ConnectionActivityEntry(id: id, name: "private-host", state: .connected,
             working: 12, attention: 1, observedAt: now.addingTimeInterval(-100), tasks: contexts)

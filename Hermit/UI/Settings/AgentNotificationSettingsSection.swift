@@ -13,7 +13,7 @@ struct AgentNotificationSettingsSection: View {
 
     var body: some View {
         @Bindable var settings = settings
-        FormGroup(title: "NOTIFICATIONS", footer: "HERDR 任务等待输入或完成时提醒。连接中可使用本地通知；长期后台提醒需要远端推送。") {
+        FormGroup(title: "NOTIFICATIONS", footer: "任务状态优先更新锁屏实时活动，关键事件只提醒一次；实时活动不可用时使用普通通知。长期后台仍需远端推送，普通推送会保留通知兜底。") {
             ToggleRow(label: "Notifications", subtitle: "任务完成或需要你处理时提醒",
                       identifier: "settings-agent-notifications", isOn: $settings.notificationsEnabled)
             ToggleRow(label: "Alert sound", subtitle: "Play a sound when the agent needs you",

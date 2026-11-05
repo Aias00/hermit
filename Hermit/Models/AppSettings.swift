@@ -80,7 +80,8 @@ final class AppSettings {
     private func mirrorPushPrefs() {
         PushPrefs.write(
             showDetail: defaults.object(forKey: "moshpit.settings.lockScreenDetail") as? Bool ?? true,
-            sound: defaults.object(forKey: "moshpit.settings.attentionSound") as? Bool ?? true)
+            sound: defaults.object(forKey: "moshpit.settings.attentionSound") as? Bool ?? true,
+            liveActivity: defaults.object(forKey: "moshpit.settings.liveActivity") as? Bool ?? true)
     }
 
     // MARK: Generic accessors
@@ -248,7 +249,10 @@ final class AppSettings {
 
     var liveActivityEnabled: Bool {
         get { access(keyPath: \.liveActivityEnabled); return get("moshpit.settings.liveActivity", true) }
-        set { withMutation(keyPath: \.liveActivityEnabled) { defaults.set(newValue, forKey: "moshpit.settings.liveActivity") } }
+        set {
+            withMutation(keyPath: \.liveActivityEnabled) { defaults.set(newValue, forKey: "moshpit.settings.liveActivity") }
+            mirrorPushPrefs()
+        }
     }
 
     /// Show meaningful host/workspace aliases by default. An explicitly saved

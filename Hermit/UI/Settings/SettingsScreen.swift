@@ -649,6 +649,8 @@ struct NotificationInfoView: View {
                     "连接期间使用本地通知。长期后台或 App 退出后，需要远端持续监听任务状态并通过推送服务投递；只有带推送权限且已完成配对的安装版本支持这条链路。")
                 row("moon.zzz.fill", Ink.meta, "Quiet by design",
                     "A question must stand for 30 seconds before any phone hears about it — answered at your desk means never announced. All waiting agents share one summary card; only the first rings. A finished turn shows the prompt it answered and only chimes if it ran three minutes or more. Parked agents stay silent.")
+                row("rectangle.stack", Ink.accent, "一张任务状态卡",
+                    "匹配到锁屏实时活动时，直接更新对应任务，避免再添加本地通知。实时活动关闭、被划掉或未包含该任务时，普通通知继续提醒。后台普通推送保留通知兜底，并尝试同步已有卡片。")
             }
             .listStyle(.insetGrouped)
             .moshpitForm()

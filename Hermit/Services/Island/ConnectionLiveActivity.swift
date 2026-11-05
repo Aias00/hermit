@@ -52,7 +52,9 @@ enum ConnectionActivitySnapshot {
                     workspaceName: showHostNames ? boundedText(context.workspaceName, bytes: 80) : nil,
                     hostName: showHostNames && entry.id != headline.id ? boundedText(entry.name, bytes: 80) : nil,
                     programName: context.programName,
-                    detail: showTaskDetails && state != .idle ? boundedText(context.taskDetail, bytes: 180) : nil,
+                    detail: showTaskDetails && state != .idle ? boundedText(
+                        AgentNotificationCopy.taskDetail(context.taskDetail, workspace: context.workspaceName,
+                                                         agent: context.programName), bytes: 180) : nil,
                     state: state, deepLink: AgentDeepLink.string(connectionId: entry.id, paneId: pane),
                     observedAt: entry.observedAt)
             }
@@ -167,7 +169,7 @@ final class SystemConnectionActivityBackend: ConnectionActivityBackend {
         }
         let content = ActivityContent(state: state, staleDate: state.staleDate)
         if let activity {
-            await activity.update(content)
+            await TaskActivityDelivery.update(activity, snapshot: state)
         } else if canStart && UIApplication.shared.applicationState == .active {
             do {
                 activity = try Activity.request(attributes: ConnectionActivityAttributes(),

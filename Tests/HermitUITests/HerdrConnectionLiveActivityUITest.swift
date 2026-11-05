@@ -8,6 +8,105 @@ final class HerdrConnectionLiveActivityUITest: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
+    func testAttentionUsesActivityAndFallsBackWhenDisabled() async throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Uses a reset simulator and the private loopback HERDR lab")
+        #else
+        let env = ProcessInfo.processInfo.environment
+        guard let key = env["MOSHPIT_SEED_KEY_B64"], !key.isEmpty,
+              let address = env["MOSHPIT_ACTIVITY_EVENTS_URL"], let events = URL(string: address),
+              events.host == "127.0.0.1" else { throw XCTSkip("Requires the isolated task-events fixture") }
+        let app = XCUIApplication()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let alias = "Task Notice Lab"
+        app.launchEnvironment["MOSHPIT_SEED_KEY_B64"] = key
+        app.launchArguments = ["-MOSHPIT_RESET", "-MOSHPIT_AUTOCARE_OFF", "1",
+            "-MOSHPIT_SEED_USER", try XCTUnwrap(env["MOSHPIT_SEED_USER"]),
+            "-MOSHPIT_SEED_HOST", "127.0.0.1",
+            "-MOSHPIT_SEED_PORT", try XCTUnwrap(env["MOSHPIT_SEED_PORT"]),
+            "-MOSHPIT_SEED_TRUST_FP", try XCTUnwrap(env["MOSHPIT_SEED_TRUST_FP"]),
+            "-MOSHPIT_SEED_HERDR_BIN", try XCTUnwrap(env["MOSHPIT_SEED_HERDR_BIN"]),
+            "-MOSHPIT_SEED_NAME", alias, "-MOSHPIT_SEED_MUX", "herdr", "-MOSHPIT_SEED_HOME", "1",
+            "-MOSHPIT_SEED_QUIET", "1", "-MOSHPIT_ANNOUNCE_GRACE", "0.1", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.terminate()
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-settings"].waitForExistence(timeout: 20))
+        app.buttons["home-settings"].tap()
+        let activity = app.switches["settings-live-activity"]
+        XCTAssertTrue(app.reveal(activity))
+        if activity.value as? String == "0" { activity.tap() }
+        let notifications = app.switches["settings-agent-notifications"]
+        XCTAssertTrue(app.reveal(notifications))
+        if notifications.value as? String == "0" { notifications.tap() }
+        try await Task.sleep(for: .seconds(1))
+        allowActivityIfOffered(in: springboard)
+        let done = app.navigationBars.buttons.matching(NSPredicate(format: "label IN %@", ["Done", "完成"])).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        done.tap()
+        let host = app.buttons["connection-card-" + alias]
+        XCTAssertTrue(host.waitForExistence(timeout: 15))
+        host.tap()
+        XCTAssertTrue(app.staticTexts["terminal-host-title"].waitForExistence(timeout: 20))
+        let ready = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: app.buttons["conversation-sidebar"])
+        await fulfillment(of: [ready], timeout: 25)
+        try await reportTask("working", to: events)
+        try await Task.sleep(for: .seconds(4))
+        // Keep the session tracked but make its pane invisible: this is the
+        // case that should alert through ActivityKit instead of a second card.
+        if app.buttons["terminal-back"].exists { app.buttons["terminal-back"].tap() }
+        else { app.buttons["terminal-sidebar"].tap() }
+        XCTAssertTrue(host.waitForExistence(timeout: 10))
+        try await reportTask("blocked", to: events)
+        try await Task.sleep(for: .seconds(3))
+        XCUIDevice.shared.press(.home)
+        openNotificationCenter(springboard)
+        let card = activityCard(in: springboard)
+        XCTAssertTrue(card.waitForExistence(timeout: 15))
+        allowActivityIfOffered(in: springboard)
+        let completed = expectation(for: NSPredicate { _, _ in
+            let text = self.labels(in: card)
+            return text.contains("ui-lab") && ["Waiting for you", "等待你的操作", "等待你的操作"].contains(where: text.contains)
+        }, evaluatedWith: card)
+        await fulfillment(of: [completed], timeout: 15)
+        XCTAssertFalse(springboard.staticTexts["ui-lab needs you"].exists,
+                       "An activity-covered prompt must not leave an ordinary notification too")
+        capture(springboard, name: "unified-task-attention-one-card")
+
+        app.activate()
+        XCTAssertTrue(app.buttons["home-settings"].waitForExistence(timeout: 10))
+        app.buttons["home-settings"].tap()
+        XCTAssertTrue(app.reveal(activity))
+        if activity.value as? String == "1" { activity.tap() }
+        done.tap()
+        try await reportTask("working", to: events)
+        // With the persistent event stream, the safety snapshot can be 45s
+        // apart. This installed HERDR does not emit an invalidation for every
+        // report-agent update, so wait past that real cadence for each phase.
+        // Otherwise both reports can correctly look like the same episode.
+        try await Task.sleep(for: .seconds(50))
+        try await reportTask("blocked", to: events)
+        try await Task.sleep(for: .seconds(50))
+        XCUIDevice.shared.press(.home)
+        openNotificationCenter(springboard)
+        XCTAssertTrue(card.waitForNonExistence(timeout: 10))
+        let fallback = springboard.staticTexts["ui-lab needs you"]
+        XCTAssertTrue(fallback.waitForExistence(timeout: 15), "Disabling activities must retain ordinary notification delivery")
+        capture(springboard, name: "unified-task-notification-fallback")
+        app.activate()
+        #endif
+    }
+
+    private func reportTask(_ state: String, to endpoint: URL) async throws {
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["state": state])
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (_, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+    }
+
+    @MainActor
     func testRealHerdrActivityShowsWorkspaceAndReturnsToSameShell() async throws {
         #if !targetEnvironment(simulator)
         throw XCTSkip("This fixture resets saved hosts; use a dedicated simulator only")

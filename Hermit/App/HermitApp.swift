@@ -17,6 +17,7 @@ struct HermitApp: App {
     @State private var keychainHolder: KeychainServiceHolder
     @State private var router: DeepLinkRouter
     @State private var notificationHandler: AgentNotificationHandler
+    @State private var taskNotificationRouter: AgentTaskNotificationRouter
     /// Remote-push tokens are delivered to a UIApplicationDelegate and nowhere
     /// else — SwiftUI has no equivalent hook, so the app keeps a minimal one
     /// whose only job is forwarding them to PushService.
@@ -45,7 +46,9 @@ struct HermitApp: App {
         let store = ConnectionStore(readiness: .system)
         let hub = SessionHub(metrics: metrics)
         // ConnectionActivityMonitor already owns the Lock Screen activity.
-        let monitor = AgentActivityMonitor(settings: settings, publishesLiveActivity: false)
+        let taskNotificationRouter = AgentTaskNotificationRouter(settings: settings)
+        let monitor = AgentActivityMonitor(settings: settings, publishesLiveActivity: false,
+            deliverNotification: { taskNotificationRouter.submit($0) })
         let router = DeepLinkRouter()
         let notificationHandler = AgentNotificationHandler()
         _metrics = State(initialValue: metrics)
@@ -56,6 +59,7 @@ struct HermitApp: App {
         _connectionActivity = State(initialValue: ConnectionLiveActivity(settings: settings, hub: hub))
         _router = State(initialValue: router)
         _notificationHandler = State(initialValue: notificationHandler)
+        _taskNotificationRouter = State(initialValue: taskNotificationRouter)
         _connectionHolder = State(initialValue: ConnectionStoreHolder(store: store))
         _keychainHolder = State(initialValue: KeychainServiceHolder(service: KeychainService()))
 
@@ -77,6 +81,9 @@ struct HermitApp: App {
         // -MOSHPIT_RESET above arrived at, for the same reason.
         Self.wireSystemEntryPoints(hub: hub, monitor: monitor, router: router,
                                    notificationHandler: notificationHandler)
+        AgentControlBridge.shared.presentTaskNotification = { [weak taskNotificationRouter] content in
+            await taskNotificationRouter?.consume(content) ?? false
+        }
         Chrome.installAppearance()
     }
 
@@ -110,6 +117,9 @@ struct HermitApp: App {
         AgentControlBridge.shared.isPaneVisible = { connectionId, paneId in
             guard let session = hub.visibleSession,
                   session.connection.id == connectionId else { return false }
+            if let control = session.herdrControl {
+                return control.snapshot.activePaneId == paneId
+            }
             if let control = session.tmuxControl {
                 return control.snapshot.activePaneId == paneId
             }
