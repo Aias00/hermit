@@ -435,6 +435,15 @@ final class TerminalReliabilityUITest: XCTestCase {
         retry.tap()
         XCTAssertTrue(retry.waitForExistence(timeout: 20))
         captureScreenshot(app, name: "file-upload-queue-phone-or-mini")
+        let singleRetry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "file-upload-retry-")).firstMatch
+        XCTAssertTrue(FormInteraction.tap(singleRetry, in: app))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: singleRetry)
+        waitForExpectations(timeout: 10)
+        let failedRow = app.cells.containing(.staticText, identifier: "upload-qa-folder").firstMatch
+        let remove = failedRow.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "file-upload-remove-")).firstMatch
+        XCTAssertTrue(FormInteraction.tap(remove, in: app))
+        XCTAssertTrue(app.staticTexts["upload-qa-folder"].waitForNonExistence(timeout: 5))
+        captureScreenshot(app, name: "file-upload-individual-retry-and-remove")
         app.buttons["完成"].tap()
         XCTAssertEqual(composer(app).value as? String, original, "retry must not insert duplicate successful paths")
         // The remote SFTP starting directory is the fixture root, never a user host.
@@ -1277,6 +1286,37 @@ final class TerminalReliabilityUITest: XCTestCase {
         XCTAssertEqual(delivered, expected, "the plane sends the complete shared draft and one Return")
         app.typeText("next draft")
         XCTAssertEqual(field.value as? String, "next draft", "sending keeps focus in the draft")
+    }
+
+    @MainActor
+    func testVoiceAdditionCanBeUndoneWithoutSendingOrChangingOriginalDraft() async throws {
+        let receipt = try voiceInputReceiptURL()
+        let app = try openTerminal(multiplexer: "none", seedVoice: true)
+        let field = composer(app)
+        field.tap()
+        field.typeText("keep original")
+        try await resetInputReceipt(receipt)
+        let voice = app.buttons["语音输入"]
+        waitForKeyboardToolbar(voice, in: app, keyboardVisible: true)
+        voice.tap()
+        let insert = app.buttons["dictation-insert"]
+        XCTAssertTrue(insert.waitForExistence(timeout: 5))
+        insert.tap()
+        let staged = expectation(for: NSPredicate { _, _ in
+            field.value as? String == "keep original simulated voice"
+        }, evaluatedWith: field)
+        await fulfillment(of: [staged], timeout: 5)
+        let undo = app.buttons["composer-undo-addition"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        captureScreenshot(app, name: "composer-addition-undo-available")
+        undo.tap()
+        let restored = expectation(for: NSPredicate { _, _ in field.value as? String == "keep original" }, evaluatedWith: field)
+        await fulfillment(of: [restored], timeout: 5)
+        XCTAssertFalse(undo.exists)
+        let bytes = try await receivedInput(receipt)
+        XCTAssertTrue(bytes.isEmpty, "Undo is local and must never retract or send remote input")
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        captureScreenshot(app, name: "composer-addition-undone-locally")
     }
 
     @MainActor

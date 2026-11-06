@@ -63,6 +63,64 @@ struct FileUploadQueueTests {
         #expect(queue.items.isEmpty)
     }
 
+    @Test("Cancelling or removing one in-flight file lets the next file finish; late results are ignored")
+    func individualCancellationAndRemoval() async throws {
+        for remove in [false, true] {
+            let queue = FileUploadQueue()
+            let gate = UploadGate()
+            var paths: [String] = []
+            queue.enqueue([URL(fileURLWithPath: "/slow.txt"), URL(fileURLWithPath: "/next.txt")])
+            let slowID = queue.items[0].id
+            queue.start(upload: { url, _, progress in
+                if url.lastPathComponent == "slow.txt" { await gate.wait(progress) }
+                return "/remote/" + url.lastPathComponent
+            }, publish: { paths.append($0) })
+            for _ in 0..<200 {
+                if await gate.entered { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            #expect(await gate.entered)
+            if remove { queue.remove(itemID: slowID) } else { queue.cancel(itemID: slowID) }
+            try await finished(queue)
+            #expect(paths == ["/remote/next.txt"])
+            #expect(queue.completedCount == 1)
+            if remove { #expect(queue.items.count == 1) }
+            else { #expect(queue.items.first?.state == .cancelled) }
+            await gate.release()
+            for _ in 0..<25 { await Task.yield() }
+            #expect(paths == ["/remote/next.txt"])
+        }
+    }
+
+    @Test("A queued file can be removed during an upload and individual retry leaves other failures untouched")
+    func targetedRetryAndQueuedRemoval() async throws {
+        let queue = FileUploadQueue()
+        let gate = UploadGate()
+        queue.enqueue([URL(fileURLWithPath: "/active.txt"), URL(fileURLWithPath: "/removed.txt"), URL(fileURLWithPath: "/last.txt")])
+        let removedID = queue.items[1].id
+        var paths: [String] = []
+        queue.start(upload: { url, _, progress in
+            if url.lastPathComponent == "active.txt" { await gate.wait(progress) }
+            throw Failure.rejected
+        }, publish: { paths.append($0) })
+        for _ in 0..<200 {
+            if await gate.entered { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        queue.remove(itemID: removedID)
+        await gate.release()
+        try await finished(queue)
+        #expect(queue.items.count == 2 && queue.completedCount == 0)
+        let retryID = queue.items[1].id
+        queue.start(retry: true, itemID: retryID, upload: { url, _, _ in "/remote/" + url.lastPathComponent },
+                    publish: { paths.append($0) })
+        try await finished(queue)
+        #expect(paths == ["/remote/last.txt"])
+        #expect(queue.items[0].state.canRetry)
+        queue.remove(itemID: retryID)
+        #expect(paths == ["/remote/last.txt"], "removing history must not modify the draft or delete remote files")
+    }
+
     @Test("Upload completion stays with the captured connection draft when another draft is selected")
     func completionOwnership() async throws {
         let first = TerminalComposerDraft()
@@ -101,6 +159,10 @@ struct FileUploadQueueTests {
         let small = root.appendingPathComponent("small")
         try Data("valid".utf8).write(to: small)
         #expect(try await FileUploadQueue.readFile(small) == Data("valid".utf8))
+        let queue = FileUploadQueue()
+        queue.enqueue([small, root])
+        #expect(queue.items[0].source.byteCount == 5)
+        #expect(queue.items[1].source.byteCount == nil)
     }
 
     private func finished(_ queue: FileUploadQueue) async throws {

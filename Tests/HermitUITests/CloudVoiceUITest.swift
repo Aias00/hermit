@@ -266,6 +266,50 @@ final class CloudVoiceUITest: XCTestCase {
     }
 
     @MainActor
+    func testAccuracyUsesOriginalRecognitionAndReferenceChangesInvalidateScores() throws {
+        let app = launch(preview: true)
+        openSettings(app)
+        openRecognition(app)
+        selectEngine("apple", in: app)
+        tap(element("voice-test-link", in: app), in: app)
+        tap(app.buttons["voice-test-start"], in: app)
+        tap(app.buttons["dictation-stop"], in: app)
+        let editor = app.textViews["dictation-review-editor"]
+        waitUntil("Scripted recording must finish") { editor.value as? String == "simulated voice" }
+        tap(element("voice-test-accuracy-controls", in: app), in: app)
+        let reference = app.textViews["voice-test-reference"]
+        XCTAssertTrue(reference.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(reveal(reference, in: app))
+        XCTAssertTrue(FormInteraction.focus(reference, in: app))
+        reference.typeText("simulated voice")
+        tap(app.buttons["voice-test-score"], in: app)
+        let result = element("voice-test-accuracy-result", in: app)
+        XCTAssertTrue(reveal(result, in: app))
+        waitUntil("Identical reference should have zero character errors") {
+            result.label.contains("0.0%")
+        }
+        capture(app, name: "voice-accuracy-ground-truth")
+        XCTAssertTrue(reveal(editor, in: app))
+        XCTAssertTrue(FormInteraction.focus(editor, in: app))
+        editor.typeText(" edited")
+        tap(app.buttons["voice-test-score"], in: app)
+        XCTAssertTrue(reveal(result, in: app))
+        waitUntil("Manual review edits must not inflate recognition scores") {
+            result.label.contains("0.0%")
+        }
+        XCTAssertTrue(reveal(reference, in: app))
+        XCTAssertTrue(FormInteraction.focus(reference, in: app))
+        reference.typeText(" extra")
+        XCTAssertFalse(result.exists, "Old scores must not survive a changed reference")
+        tap(app.buttons["voice-test-score"], in: app)
+        XCTAssertTrue(reveal(result, in: app))
+        waitUntil("Additional reference text should be reported as omissions") {
+            app.staticTexts["错字 0 · 漏字 5 · 多字 0"].exists
+        }
+        capture(app, name: "voice-accuracy-trailing-omission")
+    }
+
+    @MainActor
     private func launch(reset: Bool = true, preview: Bool = false, language: String = "en") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-MOSHPIT_AUTOCARE_OFF", "-AppleLanguages", "(\(language))",

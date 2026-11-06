@@ -475,18 +475,32 @@ actor SSHSession {
         _ data: Data,
         named filename: String,
         progress: (@Sendable (Double) -> Void)? = nil) async throws -> String {
+        let scope = SSHChildChannelScope()
+        defer { scope.cancel() }
+        return try await CancellableTransfer.run(onCancel: { scope.cancel() }) {
+            try await self.performDraftUpload(data, named: filename, progress: progress, scope: scope)
+        }
+    }
+
+    private func performDraftUpload(_ data: Data, named filename: String,
+                                    progress: (@Sendable (Double) -> Void)?,
+                                    scope: SSHChildChannelScope) async throws -> String {
+        try Task.checkCancellation()
+        try scope.checkCancellation()
         guard !closed else { throw SSHError.sessionClosed }
         if !sftpKnownUnavailable {
             do {
-                return try await sftpUpload(data, named: filename, progress: progress)
+                return try await sftpUpload(data, named: filename, progress: progress, scope: scope)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                // Fall through to the exec path; its error wins if it also
-                // fails, since it is the one still standing.
+                // Cancellation must never start an exec fallback.
+                try Task.checkCancellation()
+                try scope.checkCancellation()
+                // Fall through to the exec path; its error wins if it also fails.
             }
         }
-        let path = try await execUpload(data, named: filename, progress: progress)
+        let path = try await execUpload(data, named: filename, progress: progress, scope: scope)
         sftpKnownUnavailable = true
         return path
     }
@@ -494,7 +508,8 @@ actor SSHSession {
     private func sftpUpload(
         _ data: Data,
         named filename: String,
-        progress: (@Sendable (Double) -> Void)?) async throws -> String {
+        progress: (@Sendable (Double) -> Void)?,
+        scope: SSHChildChannelScope) async throws -> String {
         // SFTPFileAttributes' public init doesn't take permissions — set the
         // field after construction.
         @Sendable func attributes(permissions: UInt32) -> SFTPFileAttributes {
@@ -507,7 +522,7 @@ actor SSHSession {
             // therefore no SFTP — throw into the exec/base64 fallback, which
             // is exactly the path such a session wants exercised.
             guard let sftpClient else { throw SSHError.sessionClosed }
-            let sftp = try await sftpClient.openSFTP()
+            let sftp = try await sftpClient.openSFTP(cancellationScope: scope)
             return try await SSHResourceScope.withCleanup(operation: {
                 let home = try await sftp.getRealPath(atPath: ".")
                 let appDir = home + "/.moshpit"
@@ -550,32 +565,42 @@ actor SSHSession {
     private func execUpload(
         _ data: Data,
         named filename: String,
-        progress: (@Sendable (Double) -> Void)?) async throws -> String {
-        let homeData = try await executeCommand("printf %s \"$HOME\"")
+        progress: (@Sendable (Double) -> Void)?,
+        scope: SSHChildChannelScope) async throws -> String {
+        let homeData = try await draftUploadCommand("printf %s \"$HOME\"", scope: scope)
         guard let home = String(data: homeData, encoding: .utf8),
               home.hasPrefix("/") else {
             throw SSHError.underlying(ExecUploadError.homeUnresolvable)
         }
         let plan = ExecUploadCommands.plan(home: home, filename: filename)
 
-        _ = try await executeCommand(plan.begin)
+        _ = try await draftUploadCommand(plan.begin, scope: scope)
         var offset = 0
         while offset < data.count {
             try Task.checkCancellation()
             let end = min(offset + ExecUploadCommands.chunkBytes, data.count)
             let chunk = data[offset..<end].base64EncodedString()
-            _ = try await executeCommand(plan.append(chunk))
+            _ = try await draftUploadCommand(plan.append(chunk), scope: scope)
             offset = end
             // Cap below 1.0 — the decode round trip is still ahead.
             progress?(0.95 * Double(offset) / Double(data.count))
         }
-        let reply = try await executeCommand(plan.finish)
+        let reply = try await draftUploadCommand(plan.finish, scope: scope)
         guard String(data: reply, encoding: .utf8)?
             .contains(ExecUploadCommands.successMarker) == true else {
             throw SSHError.underlying(ExecUploadError.decodeFailed)
         }
         progress?(1)
         return plan.finalPath
+    }
+
+    private func draftUploadCommand(_ command: String, scope: SSHChildChannelScope) async throws -> Data {
+        try scope.checkCancellation()
+        do { return try await transport.run(command, cancellationScope: scope) }
+        catch {
+            try scope.checkCancellation()
+            throw SSHError.underlying(error)
+        }
     }
 
     enum ExecUploadError: Error {

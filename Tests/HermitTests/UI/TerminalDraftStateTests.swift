@@ -30,6 +30,46 @@ struct TerminalDraftStateTests {
         #expect(store.select(.pane(multiplexer: "tmux", id: "w1:p1")) !== a)
     }
 
+    @Test("Undo removes only the latest addition and restores its owning pane selection")
+    func undoAdditionOwnership() {
+        let store = TerminalComposerDraftStore()
+        let a = store.select(first)
+        a.text = "手写 😀 text"
+        a.selection = NSRange(location: 3, length: 2)
+        a.append(" 语音追加", kind: .voice)
+        #expect(a.canUndoAddition && a.additionKind == .voice)
+        a.append(" /uploads/file", kind: .attachment)
+        let b = store.select(second)
+        b.text = "另一个窗格"
+        #expect(!b.canUndoAddition)
+        a.undoAddition()
+        #expect(a.text == "手写 😀 text 语音追加")
+        #expect(a.selection == NSRange(location: 3, length: 2))
+        #expect(!a.canUndoAddition)
+        #expect(b.text == "另一个窗格")
+    }
+
+    @Test("Manual editing or submission revokes addition undo; caret at the end is restored")
+    func undoCannotOverwriteEditsOrSentInput() async throws {
+        let a = TerminalComposerDraftStore().select(first)
+        a.text = "原文"
+        a.append(" appended", kind: .voice)
+        #expect(a.selection.location == (a.text as NSString).length)
+        a.undoAddition()
+        #expect(a.text == "原文" && a.selection.location == 2)
+        a.append(" /file", kind: .attachment)
+        a.text += " 手动修改"
+        #expect(!a.canUndoAddition)
+        a.undoAddition()
+        #expect(a.text == "原文 /file 手动修改")
+        a.append(" 新语音", kind: .voice)
+        let attempt = try #require(a.beginSubmission(to: first, label: "A"))
+        #expect(!a.canUndoAddition)
+        await a.complete(attempt) { _, _ in throw SSHError.sessionClosed }
+        a.undoAddition()
+        #expect(a.requiresSendReview && a.text.hasSuffix("新语音"))
+    }
+
     @Test("A submission captures text and target before async work and its ticket is single use")
     func immutableAttempt() async throws {
         let store = TerminalComposerDraftStore()

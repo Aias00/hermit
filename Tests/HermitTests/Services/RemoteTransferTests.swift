@@ -113,6 +113,41 @@ struct RemoteTransferTests {
         #expect(await calls.value >= 2, "the completed cancellation must release the batch slot")
     }
 
+    @Test("Draft exec uploads still complete on hosts without SFTP, with a fresh scope for each file")
+    func draftUploadWithoutSFTP() async throws {
+        let transport = DraftUploadTransport()
+        let session = SSHSession(connection: ServerConnection(), transport: transport)
+        for name in ["first.txt", "second.txt"] {
+            let path = try await session.uploadToUploadsDirectory(Data([1, 2, 3]), named: name)
+            #expect(path == ExecUploadCommands.plan(home: "/home/test", filename: name).finalPath)
+        }
+        #expect(await transport.commands.count == 8)
+        #expect(await session.isConnected)
+        await session.close()
+    }
+
+    @Test("Cancelling a draft upload returns before a withheld reply without closing the SSH parent")
+    func cancelledDraftUploadStopsFallback() async throws {
+        let gate = Gate()
+        let transport = UploadTransport(gate: gate)
+        let session = SSHSession(connection: ServerConnection(), transport: transport)
+        let work = Task { try await session.uploadToUploadsDirectory(Data([1, 2, 3]), named: "cancelled.txt") }
+        await gate.waitUntilEntered()
+        work.cancel()
+        let outcome = await withTimeoutValue(2) {
+            do { _ = try await work.value; return false }
+            catch is CancellationError { return true }
+            catch { return false }
+        }
+        #expect(outcome == true)
+        #expect(await transport.shutdownCount == 0)
+        await gate.release()
+        for _ in 0..<30 { await Task.yield() }
+        #expect(await transport.commands.count == 1, "a cancelled home query cannot advance to begin or write")
+        #expect(await session.isConnected)
+        await session.close()
+    }
+
     @Test("Cancelling an exec upload cleans only its scratch files and never starts its finish command")
     func cancelledExecUploadCleansScratch() async throws {
         let root = try directory()
@@ -198,6 +233,21 @@ struct RemoteTransferTests {
     private actor Counter {
         private(set) var value = 0
         func increment() { value += 1 }
+    }
+
+    private actor DraftUploadTransport: SSHClientTransport {
+        private(set) var commands: [String] = []
+        func run(_ command: String) async throws -> Data {
+            commands.append(command)
+            if command == "printf %s \"$HOME\"" { return Data("/home/test".utf8) }
+            if command.contains(ExecUploadCommands.successMarker) { return Data(ExecUploadCommands.successMarker.utf8) }
+            return Data()
+        }
+        func openPTY(rows: Int, cols: Int, onOutput: @escaping @Sendable (Data) -> Void,
+                     onEnd: @escaping @Sendable () -> Void) async throws -> any SSHPTYWriter {
+            throw SSHError.ptyNotReady
+        }
+        func shutdown() async {}
     }
 
     private actor UploadTransport: SSHClientTransport {

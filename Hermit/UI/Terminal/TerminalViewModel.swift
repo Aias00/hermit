@@ -37,10 +37,43 @@ final class TerminalComposerDraft {
                     selection = NSRange(location: (text as NSString).length, length: 0)
                 }
                 editRevision &+= 1
+                if !updatingAddition { recentAddition = nil }
                 if delivery == .submitted { delivery = .idle }
             }
         }
     }
+    enum AdditionKind { case voice, attachment }
+    private struct Addition {
+        let kind: AdditionKind
+        let textBefore: String
+        let selectionBefore: NSRange
+    }
+    private var recentAddition: Addition?
+    @ObservationIgnored private var updatingAddition = false
+
+    var canUndoAddition: Bool { recentAddition != nil && !isSending && !requiresSendReview }
+    var additionKind: AdditionKind? { canUndoAddition ? recentAddition?.kind : nil }
+
+    /// Only a local, unchanged addition can be undone. Typing or sending revokes
+    /// the snapshot so undo cannot overwrite later edits or retract remote input.
+    func append(_ suffix: String, kind: AdditionKind) {
+        guard !suffix.isEmpty else { return }
+        let before = Addition(kind: kind, textBefore: text, selectionBefore: selection)
+        updatingAddition = true
+        text += suffix
+        updatingAddition = false
+        recentAddition = before
+    }
+
+    func undoAddition() {
+        guard canUndoAddition, let addition = recentAddition else { return }
+        recentAddition = nil
+        updatingAddition = true
+        text = addition.textBefore
+        selection = addition.selectionBefore
+        updatingAddition = false
+    }
+
     var selection = NSRange(location: 0, length: 0)
     var isSending = false
     var errorMessage: String?
@@ -72,6 +105,7 @@ final class TerminalComposerDraft {
             errorMessage = TerminalDraftSendError.targetChanged.localizedDescription
             return nil
         }
+        recentAddition = nil
         let attempt = Attempt(id: UUID(), text: text, target: target, revision: editRevision)
         activeAttempt = attempt.id
         sentRevision = attempt.revision

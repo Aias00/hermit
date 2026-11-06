@@ -880,8 +880,8 @@ struct TerminalScreen: View {
         }
         .appSheet(isPresented: $showsFileUploads) {
             let owner = uploadDetailsDraft ?? composerDraft
-            FileUploadQueueView(queue: owner.uploads, canRetry: launchIsConnected) {
-                startFileUploads(retry: true, draft: owner)
+            FileUploadQueueView(queue: owner.uploads, canRetry: launchIsConnected) { itemID in
+                startFileUploads(retry: true, itemID: itemID, draft: owner)
             }
         }
         .fileImporter(isPresented: $filePickerPresented, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
@@ -2572,6 +2572,19 @@ struct TerminalScreen: View {
                     }
                 }.padding(12).background(.white.opacity(0.07))
             }
+            if composerDraft.canUndoAddition {
+                HStack {
+                    Text(composerDraft.additionKind == .voice ? "语音已加入草稿" : "附件路径已加入草稿")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("撤销追加") {
+                        composerEditor.finishComposition()
+                        composerDraft.undoAddition()
+                    }
+                    .font(.system(size: 13)).frame(minWidth: 70, minHeight: 44)
+                    .accessibilityIdentifier("composer-undo-addition")
+                }.padding(.horizontal, 14)
+            }
             if composerDraft.requiresSendReview || composerSendError != nil || remoteInputError != nil { composerFeedback }
             composerTargetBar
             inputDestinationHint
@@ -2700,8 +2713,8 @@ struct TerminalScreen: View {
     /// long-press menu) — no re-upload, the file is already on the server.
     private func insertUploadedImage(_ entry: ImageUploadLog.Entry) {
         disarmStickyCtrlIfNeeded()
-        composerText += ImageAttachmentPipeline.insertText(
-            forRemotePaths: [entry.remotePath], style: activePaneInsertStyle)
+        composerDraft.append(ImageAttachmentPipeline.insertText(
+            forRemotePaths: [entry.remotePath], style: activePaneInsertStyle), kind: .attachment)
         activateDraftKeyboard()
         Haptics.tap()
     }
@@ -2726,7 +2739,7 @@ struct TerminalScreen: View {
     private func finishImageAttachment(submit: Bool = false) {
         guard let controller = imageAttachment,
               let text = controller.insertText(style: activePaneInsertStyle) else { return }
-        composerText += text
+        composerDraft.append(text, kind: .attachment)
         imageAttachment = nil
         // Upload completion only changes draft data. Keep the user's current
         // keyboard visibility and explicit terminal-input mode.
@@ -2742,16 +2755,16 @@ struct TerminalScreen: View {
         startFileUploads(draft: owner)
     }
 
-    private func startFileUploads(retry: Bool = false, draft: TerminalComposerDraft? = nil) {
+    private func startFileUploads(retry: Bool = false, itemID: UUID? = nil, draft: TerminalComposerDraft? = nil) {
         guard let owner = active, owner.connection.id == connection.id, owner.viewModel.connState == .live else { return }
         // Capture the owning draft. A later navigation/reconnect must never
         // append a completed remote path to another host's composer.
         let draft = draft ?? composerDraft
         let batch = FileUploadBatch { try await owner.acquireFileTransferSSH() }
-        draft.uploads.start(retry: retry, upload: { url, name, progress in
+        draft.uploads.start(retry: retry, itemID: itemID, upload: { url, name, progress in
             try await batch.upload(url, named: name, progress: progress)
         }, publish: { [weak draft] path in
-            draft?.text += ImageAttachmentPipeline.insertText(forRemotePaths: [path], style: .barePath)
+            draft?.append(ImageAttachmentPipeline.insertText(forRemotePaths: [path], style: .barePath), kind: .attachment)
         })
     }
 
@@ -2843,7 +2856,10 @@ struct TerminalScreen: View {
             // Consuming the controller releases the recording. The reviewed
             // text is the user's choice, including any edits made in the panel.
             if text != nil || dictation.phase == .idle {
-                owner.text = DictationTranscript.join(owner.text, reviewedText)
+                let joined = DictationTranscript.join(owner.text, reviewedText)
+                if joined.utf8.starts(with: owner.text.utf8) {
+                    owner.append(String(decoding: joined.utf8.dropFirst(owner.text.utf8.count), as: UTF8.self), kind: .voice)
+                }
                 if owner === composerDraft { activateDraftKeyboard() }
                 Haptics.success()
             }

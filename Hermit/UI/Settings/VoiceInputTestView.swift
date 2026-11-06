@@ -17,6 +17,16 @@ struct VoiceInputTestView: View {
     @State private var operationGeneration: UInt64 = 0
     @State private var hasReviewEdits = false
     @State private var attempts: [TestAttempt] = []
+    @State private var referenceText = ""
+    @State private var keyTerms = ""
+    @State private var ignorePunctuation = true
+    @State private var accuracyResults: [UUID: RecognitionAccuracy.Result] = [:]
+    @State private var accuracyTask: Task<Void, Never>?
+    @State private var accuracyGeneration: UInt64 = 0
+    @State private var accuracyMessage: String?
+    @State private var showsAccuracyControls = false
+    @FocusState private var accuracyField: AccuracyField?
+    private enum AccuracyField { case reference, terms }
 
     private struct TestAttempt: Identifiable {
         let metrics: DictationMetrics
@@ -129,8 +139,12 @@ struct VoiceInputTestView: View {
                 .accessibilityIdentifier("voice-test-timing")
             }
 
-            if attempts.count > 1 {
+            if !attempts.isEmpty {
+                accuracyControls
                 FormGroup(title: "COMPARISON RESULTS") {
+                    Text("原始识别结果")
+                        .font(.footnote).foregroundStyle(Ink.meta)
+                        .accessibilityIdentifier("voice-test-comparisons")
                     ForEach(attempts) { attempt in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(attempt.metrics.engineLabel)
@@ -139,16 +153,20 @@ struct VoiceInputTestView: View {
                                  ? String(localized: "Recording replay") : String(localized: "Live recording"))
                                 .font(.footnote).foregroundStyle(Ink.meta)
                             Text(attempt.text).textSelection(.enabled)
+                            if let result = accuracyResults[attempt.id] {
+                                accuracySummary(result)
+                            }
                             timingRow(attempt.metrics.isRetry ? "Replay processing" : "After stopping",
                                       seconds: attempt.metrics.finalizationSeconds)
                         }
                     }
                     Text("Live results measure waiting after Stop; replay results measure processing saved audio.")
                         .font(.footnote).foregroundStyle(Ink.meta)
+                    Text("准确率对照使用原始识别结果，手动修改的文字不参与评分。")
+                        .font(.footnote).foregroundStyle(Ink.meta)
                     Text("Results stay on this screen and are cleared when you start a new recording.")
                         .font(.footnote).foregroundStyle(Ink.meta)
                 }
-                .accessibilityIdentifier("voice-test-comparisons")
             }
 
 
@@ -157,11 +175,17 @@ struct VoiceInputTestView: View {
         .navigationTitle("Recording test")
         .navigationBarTitleDisplayMode(.inline)
         .preferredColorScheme(.dark)
-        .onDisappear { cancelRecording() }
+        .onDisappear { cancelRecording(); invalidateAccuracy() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { cancelRecording() }
+            if phase == .background {
+                cancelRecording()
+                if accuracyTask != nil { invalidateAccuracy() }
+            }
         }
         .onChange(of: controller.metrics) { _, _ in recordCompletedAttempt() }
+        .onChange(of: referenceText) { _, _ in invalidateAccuracy() }
+        .onChange(of: keyTerms) { _, _ in invalidateAccuracy() }
+        .onChange(of: ignorePunctuation) { _, _ in invalidateAccuracy() }
     }
 
     private static func makeController() -> VoiceDictationController {
@@ -175,10 +199,12 @@ struct VoiceInputTestView: View {
 
     private func startRecording() {
         guard !isShowingSession, operationTask == nil else { return }
+        accuracyField = nil
         controller.cancel()
         sessionRequest = settings.dictationRequest
         savedResult = ""
         attempts = []
+        invalidateAccuracy()
         hasReviewEdits = false
         didCopy = false
         isShowingSession = true
@@ -204,6 +230,97 @@ struct VoiceInputTestView: View {
         request.whisperModelId = model
         request.contextualStrings = settings.voiceContextualStrings
         retryRecording(request)
+    }
+
+    private var accuracyControls: some View {
+        FormGroup(title: "准确率对照", footer: "仅对原始识别文字评分，不计手动编辑；内容只保留在当前测试页。") {
+            DisclosureGroup(isExpanded: $showsAccuracyControls) {
+                TextEditor(text: $referenceText)
+                    .focused($accuracyField, equals: .reference)
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    .frame(minHeight: 90, maxHeight: 140)
+                    .accessibilityLabel("标准原文")
+                    .accessibilityIdentifier("voice-test-reference")
+                Text("标准原文和识别结果各限 2,000 个字符。")
+                    .font(.footnote).foregroundStyle(Ink.meta)
+                TextField("技术词／命令／参数，每行一个", text: $keyTerms, axis: .vertical)
+                    .focused($accuracyField, equals: .terms)
+                    .lineLimit(2...4).autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .accessibilityIdentifier("voice-test-keywords")
+                Toggle("忽略标点与空白", isOn: $ignorePunctuation)
+                    .accessibilityIdentifier("voice-test-ignore-punctuation")
+                Text("字符错误率越低越好，不是模型置信度。对比命令或参数时请关闭忽略；技术词区分大小写，只统计原文中出现的前 32 项。")
+                    .font(.footnote).foregroundStyle(Ink.meta)
+                Button(accuracyTask == nil ? "计算准确率对照" : "正在对比…", action: compareAccuracy)
+                    .disabled(accuracyTask != nil || referenceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attempts.isEmpty)
+                    .accessibilityIdentifier("voice-test-score")
+                if let accuracyMessage {
+                    Text(accuracyMessage).font(.footnote).foregroundStyle(Ink.warn)
+                        .accessibilityIdentifier("voice-test-score-message")
+                }
+            } label: {
+                Text("填写标准原文并计算")
+                    .accessibilityIdentifier("voice-test-accuracy-controls")
+            }
+        }
+    }
+
+    private func invalidateAccuracy() {
+        accuracyGeneration &+= 1
+        accuracyTask?.cancel(); accuracyTask = nil
+        accuracyResults = [:]; accuracyMessage = nil
+    }
+
+    private func compareAccuracy() {
+        guard accuracyTask == nil, !attempts.isEmpty else { return }
+        accuracyField = nil
+        accuracyGeneration &+= 1
+        let generation = accuracyGeneration
+        let reference = referenceText, terms = keyTerms, ignore = ignorePunctuation
+        let samples = attempts.map { ($0.id, $0.text) }
+        accuracyMessage = nil
+        accuracyTask = Task { @MainActor in
+            let worker = Task.detached(priority: .userInitiated) {
+                var results: [UUID: RecognitionAccuracy.Result] = [:]
+                for (id, text) in samples {
+                    guard !Task.isCancelled else { break }
+                    if let result = RecognitionAccuracy.compare(reference: reference, recognized: text,
+                                                                terms: terms, ignorePunctuation: ignore) {
+                        results[id] = result
+                    }
+                }
+                return results
+            }
+            let results = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: { worker.cancel() }
+            guard !Task.isCancelled, generation == accuracyGeneration else { return }
+            accuracyResults = results
+            if results.count != samples.count {
+                accuracyMessage = "部分结果无法对比：请检查原文是否含有效文字，且原文和识别结果均不超过 2,000 个字符。"
+            }
+            accuracyTask = nil
+        }
+    }
+
+    private func accuracySummary(_ result: RecognitionAccuracy.Result) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("字符错误率：" + result.errorRate.formatted(.percent.precision(.fractionLength(1))))
+                .fontWeight(.semibold)
+                .accessibilityIdentifier("voice-test-accuracy-result")
+            Text("错字 \(result.substitutions) · 漏字 \(result.deletions) · 多字 \(result.insertions)")
+            Text("末尾缺字（对齐估计）：\(result.trailingOmissions)")
+            if result.numberCount > 0 {
+                Text("数字片段保留：\(result.retainedNumberCount)/\(result.numberCount)")
+            }
+            if !result.retainedTerms.isEmpty || !result.missingTerms.isEmpty {
+                Text("技术词保留：\(result.retainedTerms.count)/\(result.retainedTerms.count + result.missingTerms.count)")
+                if !result.missingTerms.isEmpty { Text("未保留：" + result.missingTerms.joined(separator: "、")) }
+            }
+        }
+        .font(.footnote).foregroundStyle(Ink.secondary)
+        .accessibilityElement(children: .contain)
     }
 
     private func timingRow(_ title: LocalizedStringKey, seconds: TimeInterval?) -> some View {
@@ -243,6 +360,7 @@ struct VoiceInputTestView: View {
         guard isShowingSession, controller.phase == .ready, let metrics = controller.metrics,
               metrics.outcome == .completed, !controller.transcript.isEmpty,
               !attempts.contains(where: { $0.id == metrics.id }) else { return }
+        invalidateAccuracy()
         attempts.append(TestAttempt(metrics: metrics, text: controller.transcript))
         if attempts.count > 8 { attempts.removeFirst() }
     }

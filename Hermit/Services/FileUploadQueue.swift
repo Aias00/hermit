@@ -16,7 +16,13 @@ final class FileUploadQueue {
     final class Source: @unchecked Sendable {
         let url: URL
         private let scoped: Bool
-        init(_ url: URL) { self.url = url; scoped = url.startAccessingSecurityScopedResource() }
+        let byteCount: Int64?
+        init(_ url: URL) {
+            self.url = url
+            scoped = url.startAccessingSecurityScopedResource()
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            byteCount = values?.isRegularFile == true ? values?.fileSize.map(Int64.init) : nil
+        }
         deinit { if scoped { url.stopAccessingSecurityScopedResource() } }
     }
 
@@ -33,6 +39,8 @@ final class FileUploadQueue {
     private(set) var isRunning = false
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var generation = UUID()
+    @ObservationIgnored private var activeUpload: Task<String, Error>?
+    @ObservationIgnored private var activeItemID: UUID?
 
     var completedCount: Int { items.filter { if case .uploaded = $0.state { return true }; return false }.count }
     var hasRetryableItems: Bool { items.contains { $0.state.canRetry } }
@@ -41,53 +49,85 @@ final class FileUploadQueue {
         items += urls.map { Item(source: Source($0), remoteName: UUID().uuidString + "-" + $0.lastPathComponent) }
     }
 
-    func start(retry: Bool = false, upload: @escaping Upload,
+    func start(retry: Bool = false, itemID: UUID? = nil, upload: @escaping Upload,
                publish: @escaping @MainActor (String) -> Void) {
         guard !isRunning else { return }
         if retry {
-            for index in items.indices where items[index].state.canRetry { items[index].state = .queued }
+            for index in items.indices where items[index].state.canRetry && (itemID == nil || items[index].id == itemID) {
+                items[index].state = .queued
+            }
         }
-        guard items.contains(where: { $0.state == .queued }) else { return }
+        guard items.contains(where: { $0.state == .queued && (itemID == nil || $0.id == itemID) }) else { return }
         generation = UUID()
         let run = generation
         isRunning = true
         task = Task { @MainActor [weak self] in
             guard let self else { return }
             defer {
-                if generation == run { isRunning = false; task = nil }
+                if generation == run {
+                    isRunning = false; task = nil; activeUpload = nil; activeItemID = nil
+                }
             }
-            for index in items.indices {
+            // Look up stable IDs after every await. Removing one row must never
+            // let late progress update its new neighbour or stop the batch.
+            while let item = items.first(where: { $0.state == .queued && (itemID == nil || $0.id == itemID) }) {
                 guard generation == run, !Task.isCancelled else { return }
-                guard items[index].state == .queued else { continue }
-                let item = items[index]
+                guard let index = items.firstIndex(where: { $0.id == item.id }) else { continue }
                 items[index].state = .uploading(0)
-                do {
-                    let path = try await CancellableTransfer.run {
+                let work = Task {
+                    try await CancellableTransfer.run {
                         try await upload(item.source.url, item.remoteName) { [weak self] value in
                             Task { @MainActor [weak self] in
-                                guard let self, generation == run, isRunning,
-                                      items.indices.contains(index), items[index].id == item.id,
+                                guard let self, generation == run, isRunning, activeItemID == item.id,
+                                      let index = items.firstIndex(where: { $0.id == item.id }),
                                       case .uploading(let previous) = items[index].state, value.isFinite else { return }
                                 items[index].state = .uploading(max(previous, min(1, max(0, value))))
                             }
                         }
                     }
+                }
+                activeItemID = item.id
+                activeUpload = work
+                do {
+                    let path = try await work.value
                     guard generation == run, !Task.isCancelled else { return }
-                    items[index].state = .uploaded(path)
-                    publish(path)
+                    if let index = items.firstIndex(where: { $0.id == item.id }),
+                       case .uploading = items[index].state {
+                        items[index].state = .uploaded(path)
+                        publish(path)
+                    }
                 } catch {
                     guard generation == run, !Task.isCancelled else { return }
-                    items[index].state = .failed(error.localizedDescription)
-                    // A bad file must not prevent the rest of the batch uploading.
+                    if let index = items.firstIndex(where: { $0.id == item.id }),
+                       case .uploading = items[index].state {
+                        items[index].state = .failed(error.localizedDescription)
+                    }
                 }
+                activeUpload = nil; activeItemID = nil
             }
         }
     }
 
+    func cancel(itemID: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        switch items[index].state {
+        case .queued, .uploading:
+            items[index].state = .cancelled
+            if activeItemID == itemID { activeUpload?.cancel() }
+        default: break
+        }
+    }
+
+    /// Removing a record never deletes a remote file or edits already added text.
+    func remove(itemID: UUID) {
+        cancel(itemID: itemID)
+        items.removeAll { $0.id == itemID }
+    }
+
     func cancel() {
         generation = UUID() // reject late completion/progress before cancelling awaits
-        task?.cancel()
-        task = nil
+        activeUpload?.cancel(); activeUpload = nil; activeItemID = nil
+        task?.cancel(); task = nil
         isRunning = false
         for index in items.indices {
             switch items[index].state {
