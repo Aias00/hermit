@@ -450,3 +450,37 @@ cases in `TerminalReliabilityUITest` on an owned iPhone and iPad mini simulator.
 `scripts/verify/remote-web-fixture.py` supplies synthetic HTTP/POST/SSE/WebSocket
 responses. The terminal fixture's explicit `--web-preview-port` option allows
 forwarding only to that owned loopback port; its default still disables forwarding.
+
+
+## Atlas memory and preview continuity
+
+The Metal atlas backports the memory approach of upstream SwiftTerm PR #816:
+CPU uploads allocate only a glyph-sized scratch buffer and growth reads old
+texture pixels into a temporary buffer. No full atlas CPU shadow remains. The
+color texture starts at 256 instead of 1024; the grayscale texture retains its
+existing size and both retain the 2048 cap. Glyph metrics, color classification
+and bitmap row orientation remain local. Unlike the newer upstream renderer,
+this fork has no padded glyph allocations and samples linearly. Texture creation
+and reset therefore still clear unused pixels using at most 64 temporary rows,
+preventing stale edge samples without retaining a full-size CPU copy.
+`GlyphAtlasTests` covers growth, orientation, grayscale alpha and reset edges;
+`TerminalMetalColorTests` checks rendered ANSI, Chinese and Emoji output.
+
+Web previews store up to 12 recent addresses per host (128 across all hosts) and
+64 explicit favorites in local preferences. Only validated HTTP loopback addresses
+and paths are stored; query strings, fragments and browser cookies are omitted.
+History records only a completed load by the currently owned browser. The star
+adds/removes a favorite; the clock menu reopens favorites and recent addresses.
+Clearing recents preserves favorites. Host scope is the saved connection UUID.
+
+Markdown readers retain a hashed block anchor and relative offset for up to 256
+identities. Remote files use connection UUID plus remote path, independent of the
+local cache filename or remote mtime; terminal readers use connection and pane.
+No source text, search query or raw file path is persisted in this store. Scroll
+capture is delayed until scrolling settles; disk writes happen on closing or
+leaving the foreground. An active-reader lease rejects callbacks from an older
+reader. Unchanged block anchors also preserve position across append/theme/width
+changes; an unrelated replacement document starts at the top. The native bridge
+restores only after the latest render completes. `PreviewPreferencesTests`,
+`MarkdownPreviewTests` and the phone/mini reading and favorite UI cases cover
+persistence, isolation and cleanup.

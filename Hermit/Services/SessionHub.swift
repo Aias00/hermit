@@ -361,7 +361,7 @@ final class SessionHub {
         }
         private func makeWebPreview(_ url: URL?) -> RemoteWebPreviewModel {
             let generation = webPreviewGeneration
-            let model = RemoteWebPreviewModel(host: connection.displayName, url: url) { [weak self] in
+            let model = RemoteWebPreviewModel(host: connection.displayName, url: url, scope: connection.id.uuidString) { [weak self] in
                 guard let self, self.webPreviewGeneration == generation else { throw SSHError.sessionClosed }
                 let ssh = try await self.acquireFileTransferSSH()
                 guard self.webPreviewGeneration == generation else { throw SSHError.sessionClosed }

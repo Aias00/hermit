@@ -1,8 +1,9 @@
 (() => {
  'use strict';
  const content = document.getElementById('content');
- const sources = new WeakMap(), actions = new WeakSet();
+ const sources = new WeakMap(), actions = new WeakSet(), signatures = new WeakMap();
  let expansionID = 0;
+ let renderPosition = null, latestPosition = null, scrollTimer = null;
  let outline = [], query = '', marks = [], selected = -1, limited = false;
  let expanded = null, restoreFocus = null, preservedIndex = null;
  const send = value => window.webkit?.messageHandlers?.hermitMarkdown?.postMessage(value);
@@ -12,6 +13,48 @@
   const node = document.createElement('button'); node.type = 'button';
   node.textContent = title; node.dataset.readerAction = action; actions.add(node); return node;
  };
+ function signature(node) {
+  if (signatures.has(node)) return signatures.get(node);
+  let text = sources.get(node);
+  if (typeof text !== 'string') {
+   const clone = node.cloneNode(true);
+   clone.querySelectorAll('.reader-tools').forEach(n=>n.remove());
+   text = clone.textContent;
+  }
+  text = node.tagName + ':' + text;
+  let hash = 2166136261;
+  for (let i=0;i<text.length;i++) hash = Math.imul(hash ^ text.charCodeAt(i),16777619);
+  const value=(hash>>>0).toString(16); signatures.set(node,value); return value;
+ }
+ function position() {
+  const blocks=content.children;
+  if (!blocks.length) return null;
+  let index=Math.min(latestPosition?.index ?? 0,blocks.length-1);
+  while(index>0 && blocks[index-1].getBoundingClientRect().bottom>0) index--;
+  while(index<blocks.length-1 && blocks[index].getBoundingClientRect().bottom<=0) index++;
+  const node=blocks[index], rect=node.getBoundingClientRect();
+  return {block:signature(node),index,
+   offset:Math.max(0,Math.min(1,-rect.top/Math.max(1,rect.height))),
+   ratio:Math.max(0,Math.min(1,scrollY/Math.max(1,document.documentElement.scrollHeight-innerHeight)))};
+ }
+ function restore(value) {
+  if (!value || !Number.isInteger(value.index) || value.index<0 || typeof value.block!=='string' || !Number.isFinite(value.offset) || value.offset<0 || value.offset>1) return false;
+  const blocks=[...content.children];
+  let node=blocks[value.index];
+  if (!node || signature(node)!==value.block) node=blocks.find(n=>signature(n)===value.block);
+  if (!node) return false;
+  const rect=node.getBoundingClientRect();
+  window.scrollTo({top:Math.max(0,scrollY+rect.top+rect.height*value.offset),behavior:'instant'});
+  latestPosition=position(); return true;
+ }
+ window.addEventListener('scroll',()=>{
+  if(scrollTimer!==null) return;
+  scrollTimer=setTimeout(()=>{ scrollTimer=null; latestPosition=position(); },100);
+ },{passive:true});
+ window.addEventListener('resize',()=>{
+  clearTimeout(scrollTimer); scrollTimer=null;
+  if(latestPosition) restore(latestPosition);
+ });
  function clearMarks() {
   for (const mark of marks) mark.replaceWith(document.createTextNode(mark.textContent));
   content.normalize(); marks = []; selected = -1; limited = false;
@@ -119,7 +162,9 @@
    const tools = document.createElement('div'); tools.className = 'reader-tools';
    tools.append(button('全屏表格','expand-table')); wrap.prepend(tools);
   });
-  query = ''; search(oldQuery, 0, false); select(oldIndex >= 0 ? oldIndex : 0, false); report();
+  query = ''; search(oldQuery, 0, false); select(oldIndex >= 0 ? oldIndex : 0, false);
+  if (renderPosition && !restore(renderPosition)) window.scrollTo(0,0);
+  renderPosition=null; latestPosition=position(); report();
  }
  content.addEventListener('click', event => {
   const trigger = event.target.closest('button[data-reader-action]'); if (!trigger || !actions.has(trigger)) return;
@@ -132,9 +177,9 @@
   }
  });
  window.hermitMarkdownReader = {
-  state, search, refresh,
+  state, search, refresh, position, restore,
   remember(root) { root.querySelectorAll('pre > code').forEach(code => sources.set(code.parentElement,code.textContent)); },
-  prepare() { closeExpanded(); if (preservedIndex === null) preservedIndex = selected; clearMarks(); },
+  prepare() { if (!renderPosition) renderPosition=position(); closeExpanded(); if (preservedIndex === null) preservedIndex = selected; clearMarks(); },
   jump(id) {
    if (!outline.some(row => row.id === id)) return false;
    document.getElementById(id)?.scrollIntoView({block:'start',behavior:'instant'}); return true;

@@ -36,7 +36,7 @@ The command above uses an ephemeral server identity unless a default saved
 identity already exists. To keep an address across server restarts, configure
 and protect a named saved server key with Tailcat's `genkey`/`--key` options and
 fix the relay region. See the pinned upstream
-[key management instructions](https://github.com/tailscale/tailcat/blob/52fbad323e9d352f1febb623e0975368e9a8cbdd/README.md#key-management).
+[key management instructions](https://github.com/tailscale/tailcat/blob/e00cdde6ff787f801361ff85ed085775c775d4c5/README.md#key-management).
 Use the same app client public key in `--allow` after restarting the server.
 
 ## Application boundaries
@@ -70,9 +70,11 @@ Use the same app client public key in `--allow` after restarting the server.
 ## Build
 
 The native source is pinned to upstream commit
-`52fbad323e9d352f1febb623e0975368e9a8cbdd`, including its C API. That API is newer
+`e00cdde6ff787f801361ff85ed085775c775d4c5`, including its C API. That API is newer
 than upstream's v0.7.0 release; the app does not fetch an unpinned main branch.
-Build on Apple Silicon with Go 1.27.3 and Xcode:
+This pin brings the Tailscale netstack shutdown fix in the embedded 1.105.0 pre-release.
+The C ABI and explicit-enrollment policy are unchanged. Build on Apple Silicon
+with Go 1.27.3 and Xcode:
 
 ```sh
 scripts/build-tailcat.sh

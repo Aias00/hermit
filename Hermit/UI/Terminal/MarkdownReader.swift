@@ -13,6 +13,7 @@ final class MarkdownReaderController {
     private(set) var index = 0
     private(set) var limited = false
     var copied = false
+    var restored = false
     @ObservationIgnored weak var coordinator: MarkdownPreview.Coordinator?
 
     func update(_ state: [String: Any]) {
@@ -38,6 +39,8 @@ final class MarkdownReaderController {
 /// Tools belong to the reader, never to the terminal's input responder.
 struct MarkdownReader: View {
     let text: String
+    var readingIdentity: String? = nil
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.remoteWebPreviewFactory) private var webFactory
     @State private var webPreview: RemoteWebPreviewModel?
     @State private var unavailable = false
@@ -80,6 +83,10 @@ struct MarkdownReader: View {
                     .presentationDetents([.medium, .large])
                 }
                 Spacer()
+                if reader.restored && !reader.copied {
+                    Text("已恢复阅读位置").font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("markdown-position-restored")
+                }
                 if reader.copied {
                     Text("代码已复制").font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("markdown-code-copied")
@@ -106,8 +113,9 @@ struct MarkdownReader: View {
                 searchFocused = false
                 if let model = webFactory?(url) { webPreview = model }
                 else { unavailable = true }
-            })
+            }, readingIdentity: readingIdentity)
         }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { reader.coordinator?.capturePosition(flush: true) } }
         .appSheet(item: $webPreview) { model in RemoteWebPreview(model: model) }
         .alert("需要远端主机", isPresented: $unavailable) {
             Button("好", role: .cancel) {}

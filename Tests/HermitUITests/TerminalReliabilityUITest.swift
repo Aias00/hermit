@@ -338,6 +338,11 @@ final class TerminalReliabilityUITest: XCTestCase {
         }
         XCTAssertTrue(web.staticTexts["资源已加载"].exists)
         XCTAssertTrue(web.staticTexts["synthetic-post"].exists)
+        let favorite = app.buttons["remote-web-favorite"]
+        XCTAssertTrue(favorite.waitForExistence(timeout: 5))
+        favorite.tap()
+        expectation(for: NSPredicate(format: "label == '取消收藏预览地址'"), evaluatedWith: favorite)
+        waitForExpectations(timeout: 5)
         captureScreenshot(app, name: "herdr-remote-web-preview")
         web.links["测试远端重定向"].tap()
         XCTAssertTrue(web.staticTexts["重定向成功"].waitForExistence(timeout: 8))
@@ -350,6 +355,53 @@ final class TerminalReliabilityUITest: XCTestCase {
         XCTAssertEqual(field.value as? String, "web preview keeps draft")
         XCTAssertTrue(app.buttons["conversation-send"].isEnabled)
         captureScreenshot(app, name: "herdr-web-preview-restores-draft")
+        app.buttons["conversation-menu"].tap()
+        app.buttons["网页预览"].tap()
+        let history = app.descendants(matching: .any).matching(identifier: "remote-web-history").firstMatch
+        XCTAssertTrue(history.waitForExistence(timeout: 8)); history.tap()
+        let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "localhost:" + port)).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 5)); saved.tap()
+        XCTAssertTrue(app.webViews.firstMatch.staticTexts["WebSocket 已连接"].waitForExistence(timeout: 15))
+        XCTAssertEqual(app.buttons["remote-web-favorite"].label, "取消收藏预览地址")
+        captureScreenshot(app, name: "herdr-preview-favorite-reopened")
+        app.buttons["完成"].tap()
+        XCTAssertEqual(field.value as? String, "web preview keeps draft")
+
+    }
+
+    @MainActor
+    func testMarkdownFileRestoresReadingPositionAfterClosing() throws {
+        let root = try XCTUnwrap(ProcessInfo.processInfo.environment["MOSHPIT_SWITCH_FIXTURE_DIR"])
+        guard root.hasPrefix("/private/tmp/moshpit-ui-lab-") || root.hasPrefix("/tmp/moshpit-ui-lab-") else { throw XCTSkip("requires owned fixture") }
+        let path = URL(fileURLWithPath: root).appendingPathComponent("00-reading.md")
+        let source = (0..<100).map { "## 阅读章节 \($0)\n\n" + String(repeating: "这一段用于验证阅读位置保留。 ", count: 14) }.joined(separator: "\n\n")
+        try source.write(to: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: path) }
+        let app = try openTerminal(explicitNavigation: true)
+        let field = composer(app)
+        field.tap(); field.typeText("reading keeps draft")
+        app.buttons["conversation-files"].tap()
+        let file = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "00-reading.md")).firstMatch
+        XCTAssertTrue(file.waitForExistence(timeout: 15)); file.tap()
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.staticTexts["阅读章节 0"].waitForExistence(timeout: 15))
+        for _ in 0..<4 { web.swipeUp() }
+        XCTAssertFalse(web.staticTexts["阅读章节 0"].isHittable)
+        captureScreenshot(app, name: "markdown-reading-before-close")
+        let done = app.navigationBars["00-reading.md"].buttons.matching(NSPredicate(format: "label IN %@", ["完成", "Done"])).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5)); done.tap()
+        XCTAssertTrue(file.waitForExistence(timeout: 8)); file.tap()
+        XCTAssertTrue(app.staticTexts["markdown-position-restored"].waitForExistence(timeout: 15))
+        XCTAssertFalse(web.staticTexts["阅读章节 0"].isHittable)
+        captureScreenshot(app, name: "markdown-reading-restored")
+        done.tap()
+        // The file browser is a draggable sheet, without a Done button.
+        let browserBar = app.navigationBars[URL(fileURLWithPath: root).lastPathComponent]
+        let start = browserBar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertTrue(browserBar.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "reading keeps draft")
     }
 
     @MainActor

@@ -47,7 +47,6 @@ final class GlyphAtlas {
     private let maxSize: Int
     private(set) var size: Int
     private(set) var texture: MTLTexture
-    private var data: [UInt8]
     private var nextX = 0
     private var nextY = 0
     private var rowHeight = 0
@@ -64,7 +63,6 @@ final class GlyphAtlas {
             return nil
         }
         self.texture = texture
-        self.data = Array(repeating: UInt8(0), count: self.size * self.size * bytesPerPixel)
     }
 
     func ensureRegion(width: Int, height: Int) -> AtlasRegion? {
@@ -95,30 +93,30 @@ final class GlyphAtlas {
     }
 
     func write(region: AtlasRegion, pixels: [UInt8], width: Int, height: Int) {
-        guard width == region.width, height == region.height else {
-            return
-        }
-        let atlasStride = size * bytesPerPixel
-        let srcStride = width * 4
-        for row in 0..<height {
-            let srcRow = height - 1 - row
-            let srcOffset = srcRow * srcStride
-            let dstOffset = ((region.y + row) * atlasStride) + (region.x * bytesPerPixel)
-            switch format {
-            case .bgra:
-                data[dstOffset..<dstOffset + srcStride] = pixels[srcOffset..<srcOffset + srcStride]
-            case .grayscale:
-                for col in 0..<width {
-                    let srcIndex = srcOffset + (col * 4)
-                    data[dstOffset + col] = pixels[srcIndex + 3]
+        guard width == region.width, height == region.height, width > 0, height > 0,
+              region.x >= 0, region.y >= 0, width <= size, height <= size,
+              region.x <= size - width, region.y <= size - height,
+              pixels.count >= width * height * 4 else { return }
+        // Keep only a glyph-sized upload buffer. A full CPU shadow doubled
+        // the atlas memory for every terminal, even while nothing changed.
+        let stride = width * bytesPerPixel
+        let upload = [UInt8](unsafeUninitializedCapacity: stride * height) { buffer, initialized in
+            pixels.withUnsafeBufferPointer { source in
+                for row in 0..<height {
+                    let sourceRow = source.baseAddress! + (height - 1 - row) * width * 4
+                    let destination = buffer.baseAddress! + row * stride
+                    switch format {
+                    case .bgra: destination.update(from: sourceRow, count: stride)
+                    case .grayscale:
+                        for col in 0..<width { destination[col] = sourceRow[col * 4 + 3] }
+                    }
                 }
             }
+            initialized = stride * height
         }
-        let regionMTL = MTLRegionMake2D(region.x, region.y, region.width, region.height)
-        let offset = (region.y * atlasStride) + (region.x * bytesPerPixel)
-        data.withUnsafeBytes { raw in
-            let base = raw.baseAddress!.advanced(by: offset)
-            texture.replace(region: regionMTL, mipmapLevel: 0, withBytes: base, bytesPerRow: atlasStride)
+        upload.withUnsafeBytes { raw in
+            texture.replace(region: MTLRegionMake2D(region.x, region.y, width, height),
+                            mipmapLevel: 0, withBytes: raw.baseAddress!, bytesPerRow: stride)
         }
     }
 
@@ -157,37 +155,31 @@ final class GlyphAtlas {
         guard let newTexture = GlyphAtlas.makeTexture(device: device, size: newSize, format: format) else {
             return
         }
-        let newData = Array(repeating: UInt8(0), count: newSize * newSize * bytesPerPixel)
-        var updatedData = newData
-        let oldStride = size * bytesPerPixel
-        let newStride = newSize * bytesPerPixel
-        for row in 0..<size {
-            let srcOffset = row * oldStride
-            let dstOffset = row * newStride
-            updatedData[dstOffset..<dstOffset + oldStride] = data[srcOffset..<srcOffset + oldStride]
+        // Existing cache entries retain their coordinates after growth. The
+        // readback buffer exists only for this copy, as in upstream PR #816.
+        let oldRegion = MTLRegionMake2D(0, 0, size, size)
+        let stride = size * bytesPerPixel
+        let oldTexture = texture
+        let pixels = [UInt8](unsafeUninitializedCapacity: stride * size) { buffer, initialized in
+            oldTexture.getBytes(buffer.baseAddress!, bytesPerRow: stride, from: oldRegion, mipmapLevel: 0)
+            initialized = stride * size
+        }
+        pixels.withUnsafeBytes { raw in
+            newTexture.replace(region: oldRegion, mipmapLevel: 0,
+                               withBytes: raw.baseAddress!, bytesPerRow: stride)
         }
         size = newSize
-        data = updatedData
         texture = newTexture
-        data.withUnsafeBytes { raw in
-            texture.replace(region: MTLRegionMake2D(0, 0, size, size),
-                            mipmapLevel: 0,
-                            withBytes: raw.baseAddress!,
-                            bytesPerRow: size * bytesPerPixel)
-        }
     }
 
     private func reset() {
+        // This fork uses linear sampling without upstream's padded glyphs.
+        // Keep unused texels transparent so old neighbors cannot bleed into
+        // a new glyph. The scratch block is transient, never atlas-sized.
+        Self.clear(texture: texture, bytesPerPixel: bytesPerPixel)
         nextX = 0
         nextY = 0
         rowHeight = 0
-        data = Array(repeating: UInt8(0), count: size * size * bytesPerPixel)
-        data.withUnsafeBytes { raw in
-            texture.replace(region: MTLRegionMake2D(0, 0, size, size),
-                            mipmapLevel: 0,
-                            withBytes: raw.baseAddress!,
-                            bytesPerRow: size * bytesPerPixel)
-        }
     }
 
     private static func makeTexture(device: MTLDevice, size: Int, format: GlyphAtlasFormat) -> MTLTexture? {
@@ -197,7 +189,20 @@ final class GlyphAtlas {
                                                                    mipmapped: false)
         descriptor.usage = [.shaderRead]
         descriptor.storageMode = .shared
-        return device.makeTexture(descriptor: descriptor)
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        clear(texture: texture, bytesPerPixel: format.bytesPerPixel)
+        return texture
+    }
+
+    private static func clear(texture: MTLTexture, bytesPerPixel: Int) {
+        let rows = min(64, texture.height), stride = texture.width * bytesPerPixel
+        let zeros = [UInt8](repeating: 0, count: stride * rows)
+        zeros.withUnsafeBytes { bytes in
+            for y in Swift.stride(from: 0, to: texture.height, by: rows) {
+                texture.replace(region: MTLRegionMake2D(0, y, texture.width, min(rows, texture.height-y)),
+                                mipmapLevel: 0, withBytes: bytes.baseAddress!, bytesPerRow: stride)
+            }
+        }
     }
 }
 #endif

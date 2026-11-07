@@ -166,6 +166,7 @@ struct TerminalScreen: View {
         let refresh: () -> TerminalOutputSnapshot?
         let revision: () -> UInt64?
         let preview: Bool
+        let readingIdentity: String
     }
 
     private func openOutputReader(preview: Bool = false) {
@@ -198,7 +199,7 @@ struct TerminalScreen: View {
                 // was above the tail. Remote scroll owners remain untouched.
                 if !screenOnly { coordinator.returnToLatestLocalOutput() }
                 return TerminalOutputSnapshot.capture(coordinator, screenOnly: screenOnly)
-            }, revision: { [weak coordinator] in stillOwnsSource() ? coordinator?.outputRevision : nil }, preview: preview)
+            }, revision: { [weak coordinator] in stillOwnsSource() ? coordinator?.outputRevision : nil }, preview: preview, readingIdentity: "terminal:\(connection.id):\(pane ?? "plain")")
         presentSheet { outputReader = context }
         Log.input.notice("output reader: presentation requested")
     }
@@ -884,7 +885,7 @@ struct TerminalScreen: View {
         }
         .appSheet(item: $outputReader) { context in
             TerminalOutputReader(title: context.title, refresh: context.refresh,
-                                 currentRevision: context.revision, snapshot: context.snapshot, showsPreview: context.preview)
+                                 currentRevision: context.revision, snapshot: context.snapshot, showsPreview: context.preview, readingIdentity: context.readingIdentity)
                 .environment(\.remoteWebPreviewFactory, active?.webPreviewFactory)
         }
         .appSheet(isPresented: $showsFileUploads) {
@@ -942,7 +943,8 @@ struct TerminalScreen: View {
         .onChange(of: active?.remotePreview?.phase) { _, phase in
             switch phase {
             case .ready(let url)?:
-                if let document = MarkdownFileDocument.load(url) {
+                let identity = active?.remotePreview.map { "remote:\($0.files.scope):\($0.path)" }
+                if let document = MarkdownFileDocument.load(url, identity: identity) {
                     presentSheet { markdownDocument = document }
                 } else { presentSheet { quickLookURL = url } }
             case .folder(let entry)?:

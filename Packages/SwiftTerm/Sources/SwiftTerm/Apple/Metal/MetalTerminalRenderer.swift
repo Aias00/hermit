@@ -227,7 +227,7 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
         }
         self.commandQueue = commandQueue
         guard let grayscaleAtlas = GlyphAtlas(device: device, format: .grayscale),
-              let colorAtlas = GlyphAtlas(device: device, format: .bgra) else {
+              let colorAtlas = GlyphAtlas(device: device, size: 256, format: .bgra) else {
             throw MetalError.atlasUnavailable
         }
         self.grayscaleAtlas = grayscaleAtlas

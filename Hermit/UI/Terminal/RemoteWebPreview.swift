@@ -6,6 +6,9 @@ final class RemoteWebPreviewModel: Identifiable {
     let id = UUID()
     let host: String
     let opensOnPresentation: Bool
+    let scope: String?
+    let preferences: PreviewPreferences
+    var preferenceMessage: String?
     var address: String
     private(set) var original: RemoteWebAddress?
     private(set) var localURL: URL?
@@ -18,9 +21,22 @@ final class RemoteWebPreviewModel: Identifiable {
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored weak var browser: WKWebView?
 
-    init(host: String, url: URL? = nil, acquire: @escaping () async throws -> SSHSession) {
-        self.host = host; opensOnPresentation = url != nil
+    init(host: String, url: URL? = nil, scope: String? = nil, preferences: PreviewPreferences? = nil, acquire: @escaping () async throws -> SSHSession) {
+        self.host = host; self.scope = scope; self.preferences = preferences ?? .shared
+        opensOnPresentation = url != nil
         address = url?.absoluteString ?? "http://localhost:3000"; self.acquire = acquire
+    }
+    var favorites: [PreviewPreferences.WebEntry] { scope.map { preferences.favorites(scope: $0) } ?? [] }
+    var recent: [PreviewPreferences.WebEntry] { scope.map { preferences.recent(scope: $0) } ?? [] }
+    var isFavorite: Bool { scope.map { preferences.isFavorite(scope: $0, address: address) } ?? false }
+    func toggleFavorite() {
+        guard let scope else { return }
+        if !preferences.toggleFavorite(scope: scope, address: address) { preferenceMessage = "收藏已满，请先取消一个收藏。" }
+    }
+    func loaded(_ webView: WKWebView) {
+        guard browser === webView, let scope, let original, let localURL,
+              webView.url?.host == localURL.host, webView.url?.port == localURL.port else { return }
+        preferences.record(scope: scope, address: original.url.absoluteString)
     }
     func start() {
         stop(); suspended = false; error = nil
@@ -89,6 +105,28 @@ struct RemoteWebPreview: View {
                             .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                             .focused($editing).submitLabel(.go).onSubmit { connect() }
                             .accessibilityIdentifier("remote-web-address")
+                        if model.scope != nil {
+                            Button { model.toggleFavorite() } label: {
+                                Image(systemName: model.isFavorite ? "star.fill" : "star").frame(width: 44, height: 44)
+                            }
+                            .accessibilityLabel(model.isFavorite ? "取消收藏预览地址" : "收藏预览地址")
+                            .accessibilityIdentifier("remote-web-favorite")
+                            .disabled(PreviewPreferences.savedAddress(model.address) == nil)
+                            Menu {
+                                if !model.favorites.isEmpty {
+                                    Section("收藏") { ForEach(model.favorites) { entry in historyButton(entry) } }
+                                }
+                                if !model.recent.isEmpty {
+                                    Section("最近访问") { ForEach(model.recent) { entry in historyButton(entry) } }
+                                    Button("清空最近访问", role: .destructive) {
+                                        if let scope = model.scope { model.preferences.clearRecent(scope: scope) }
+                                    }
+                                }
+                                Text("仅保存本主机的地址和路径；查询参数不保存。")
+                            } label: { Image(systemName: "clock.arrow.circlepath").frame(width: 44, height: 44) }
+                            .accessibilityLabel("收藏与最近预览").accessibilityIdentifier("remote-web-history")
+                            .disabled(model.favorites.isEmpty && model.recent.isEmpty)
+                        }
                         Button { connect() } label: {
                             Image(systemName: model.localURL == nil ? "arrow.right" : "arrow.clockwise")
                                 .frame(width: 44, height: 44)
@@ -120,6 +158,14 @@ struct RemoteWebPreview: View {
         .task { if model.opensOnPresentation, model.original == nil, !model.suspended { connect() } }
         .onChange(of: scenePhase) { _, phase in if phase == .background { model.suspend() } }
         .onDisappear { model.stop() }
+        .alert("预览收藏", isPresented: Binding(get: { model.preferenceMessage != nil }, set: { if !$0 { model.preferenceMessage = nil } })) {
+            Button("好", role: .cancel) { model.preferenceMessage = nil }
+        } message: { Text(model.preferenceMessage ?? "") }
+    }
+    private func historyButton(_ entry: PreviewPreferences.WebEntry) -> some View {
+        Button { model.address = entry.address; connect() } label: {
+            Label(entry.address, systemImage: entry.favorite ? "star.fill" : "clock")
+        }
     }
     private func connect() { editing = false; model.start() }
 }
@@ -160,6 +206,7 @@ private struct RemoteWebBrowser: UIViewRepresentable {
                 if action.navigationType == .linkActivated, ["http", "https"].contains(url.scheme ?? "") { UIApplication.shared.open(url) }
             }
         }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { model?.loaded(webView) }
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed(error) }
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(error) }
         private func failed(_ error: Error) {

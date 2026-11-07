@@ -1533,7 +1533,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ========================================================================
-github.com/tailscale/tailcat 52fbad323e9d352f1febb623e0975368e9a8cbdd
+github.com/tailscale/tailcat e00cdde6ff787f801361ff85ed085775c775d4c5
 
 --- LICENSE ---
 
@@ -1603,7 +1603,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ========================================================================
-github.com/tailscale/wireguard-go v0.0.0-20260924224943-0a83b87f7908
+github.com/tailscale/wireguard-go v0.0.0-20260928213353-e61b6b78110b
 
 --- LICENSE ---
 
@@ -2087,7 +2087,7 @@ shall terminate as of the date such litigation is filed.
 
 
 ========================================================================
-golang.org/x/net v0.59.0
+golang.org/x/net v0.60.0
 
 --- LICENSE ---
 
@@ -2719,7 +2719,7 @@ Some files carry the "BSD" license, noted at the top of each file:
    POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
-tailscale.com v1.103.0-pre.0.20260929142145-a0e471a35b8f
+tailscale.com v1.105.0-pre.0.20261013225543-fb79793d99f5
 
 --- LICENSE ---
 

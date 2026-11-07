@@ -153,7 +153,7 @@
   },
   {
     "module": "github.com/tailscale/tailcat",
-    "version": "52fbad323e9d352f1febb623e0975368e9a8cbdd",
+    "version": "e00cdde6ff787f801361ff85ed085775c775d4c5",
     "notices": [
       "LICENSE"
     ]
@@ -167,7 +167,7 @@
   },
   {
     "module": "github.com/tailscale/wireguard-go",
-    "version": "v0.0.0-20260924224943-0a83b87f7908",
+    "version": "v0.0.0-20260928213353-e61b6b78110b",
     "notices": [
       "LICENSE"
     ]
@@ -220,7 +220,7 @@
   },
   {
     "module": "golang.org/x/net",
-    "version": "v0.59.0",
+    "version": "v0.60.0",
     "notices": [
       "LICENSE",
       "PATENTS"
@@ -276,7 +276,7 @@
   },
   {
     "module": "tailscale.com",
-    "version": "v1.103.0-pre.0.20260929142145-a0e471a35b8f",
+    "version": "v1.105.0-pre.0.20261013225543-fb79793d99f5",
     "notices": [
       "LICENSE",
       "PATENTS"

@@ -102,6 +102,7 @@ struct TerminalOutputReader: View {
     let currentRevision: () -> UInt64?
     @State var snapshot: TerminalOutputSnapshot
     @State var showsPreview = false
+    var readingIdentity: String? = nil
     @State private var search = TerminalOutputSearch()
     @State private var copied = false
     @Environment(\.dismiss) private var dismiss
@@ -162,7 +163,7 @@ struct TerminalOutputReader: View {
                 }.padding(16)
                 Divider()
                 if showsPreview, !snapshot.text.isEmpty {
-                    MarkdownReader(text: snapshot.text)
+                    MarkdownReader(text: snapshot.text, readingIdentity: readingIdentity)
                 } else if search.text.isEmpty {
                     ContentUnavailableView("No output yet", systemImage: "text.alignleft")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

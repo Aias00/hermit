@@ -4,14 +4,15 @@ import WebKit
 struct MarkdownFileDocument: Identifiable {
     let url: URL
     let text: String
+    var readingIdentity: String? = nil
     var id: URL { url }
 
-    static func load(_ url: URL) -> Self? {
+    static func load(_ url: URL, identity: String? = nil) -> Self? {
         guard url.isFileURL, ["md", "markdown", "mdown"].contains(url.pathExtension.lowercased()),
               let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
               size <= 1_000_000,
               let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        return Self(url: url, text: text)
+        return Self(url: url, text: text, readingIdentity: identity ?? "file:" + url.standardizedFileURL.path)
     }
 }
 
@@ -30,7 +31,7 @@ struct MarkdownFilePreview: View {
                     Text("预览仅包含文档前 200,000 个字符；原文可查看全部内容。")
                         .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
                 }
-                if preview { MarkdownReader(text: document.text) }
+                if preview { MarkdownReader(text: document.text, readingIdentity: document.readingIdentity) }
                 else {
                     ScrollView([.horizontal, .vertical]) {
                         Text(verbatim: document.text).font(.system(.body, design: .monospaced))
@@ -94,12 +95,14 @@ struct MarkdownPreview: UIViewRepresentable {
     let text: String
     var reader: MarkdownReaderController? = nil
     var openRemoteWeb: ((URL) -> Void)? = nil
+    var readingIdentity: String? = nil
+    var preferences: PreviewPreferences? = nil
     @Environment(\.colorScheme) private var colorScheme
     static var resourceURL: URL? {
         Bundle.main.url(forResource: "Markdown", withExtension: "bundle")?.appendingPathComponent("index.html")
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: text, darkMode: colorScheme == .dark, reader: reader, openRemoteWeb: openRemoteWeb) }
+    func makeCoordinator() -> Coordinator { Coordinator(text: text, darkMode: colorScheme == .dark, reader: reader, openRemoteWeb: openRemoteWeb, readingIdentity: readingIdentity, preferences: preferences) }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -108,6 +111,7 @@ struct MarkdownPreview: UIViewRepresentable {
         let view = WKWebView(frame: .zero, configuration: config)
         context.coordinator.webView = view
         reader?.coordinator = context.coordinator
+        context.coordinator.observeScroll(view)
         view.isOpaque = false
         view.backgroundColor = .clear
         view.scrollView.backgroundColor = .clear
@@ -131,6 +135,7 @@ struct MarkdownPreview: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
+        coordinator.finishReading()
         coordinator.reader?.coordinator = nil
         view.configuration.userContentController.removeScriptMessageHandler(forName: "hermitMarkdown")
         view.stopLoading()
@@ -141,11 +146,64 @@ struct MarkdownPreview: UIViewRepresentable {
         weak var webView: WKWebView?
         weak var reader: MarkdownReaderController?
         var openRemoteWeb: ((URL) -> Void)?
+        let readingIdentity: String?
+        let preferences: PreviewPreferences
+        let lease: UUID?
+        var readingReady = false
+        private var rendering = false
+        private var renderGeneration = UUID()
+        private var scrollObservation: NSKeyValueObservation?
+        private var captureTask: Task<Void, Never>?
         var text: String
         var darkMode: Bool
         var loaded = false
-        init(text: String, darkMode: Bool, reader: MarkdownReaderController?, openRemoteWeb: ((URL) -> Void)?) {
+        init(text: String, darkMode: Bool, reader: MarkdownReaderController?, openRemoteWeb: ((URL) -> Void)?, readingIdentity: String?, preferences: PreviewPreferences?) {
             self.text = text; self.darkMode = darkMode; self.reader = reader; self.openRemoteWeb = openRemoteWeb
+            self.readingIdentity = readingIdentity
+            let preferences = preferences ?? PreviewPreferences.shared
+            self.preferences = preferences
+            lease = readingIdentity.map { preferences.beginReading($0) }
+        }
+        func observeScroll(_ view: WKWebView) {
+            guard readingIdentity != nil else { return }
+            scrollObservation = view.scrollView.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.scheduleCapture() }
+            }
+        }
+        private func scheduleCapture() {
+            guard readingReady, !rendering else { return }
+            captureTask?.cancel()
+            captureTask = Task { [weak self] in
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                self?.capturePosition(flush: false)
+            }
+        }
+        func capturePosition(flush: Bool) {
+            guard readingReady, !rendering, let identity = readingIdentity, let lease, let webView else { return }
+            let preferences = preferences
+            webView.callAsyncJavaScript("return window.hermitMarkdownReader.position()", arguments: [:], in: nil, in: .page) { result in
+                if case .success(let value) = result, let body = value as? [String: Any],
+                   let position = PreviewPreferences.ReadingPosition(message: body) {
+                    preferences.recordReading(position, identity: identity, lease: lease)
+                }
+                if flush { preferences.flushReading() }
+            }
+        }
+        func finishReading() {
+            captureTask?.cancel(); captureTask = nil
+            scrollObservation?.invalidate(); scrollObservation = nil
+            capturePosition(flush: true)
+            preferences.flushReading()
+        }
+        private func restoreReading() {
+            guard !readingReady else { return }
+            if let identity = readingIdentity, let saved = preferences.readingPosition(identity), let webView {
+                webView.callAsyncJavaScript("return window.hermitMarkdownReader.restore(position)", arguments: ["position": saved.arguments], in: nil, in: .page) { [weak self] result in
+                    guard let self else { return }
+                    if case .success(let restored) = result { reader?.restored = restored as? Bool == true }
+                    readingReady = true
+                }
+            } else { readingReady = true }
         }
         func command(_ code: String, arguments: [String: Any] = [:]) {
             guard loaded, let webView else { return }
@@ -165,8 +223,16 @@ struct MarkdownPreview: UIViewRepresentable {
             render(webView)
         }
         func render(_ webView: WKWebView) {
+            renderGeneration = UUID()
+            let generation = renderGeneration
+            rendering = true
             webView.callAsyncJavaScript("return await window.renderMarkdown(source,darkMode)",
-                arguments: ["source": MarkdownPreviewSource.prepare(text), "darkMode": darkMode], in: nil, in: .page) { [weak self] _ in self?.reader?.search() }
+                arguments: ["source": MarkdownPreviewSource.prepare(text), "darkMode": darkMode], in: nil, in: .page) { [weak self] result in
+                    guard let self, renderGeneration == generation else { return }
+                    rendering = false
+                    guard case .success(let value) = result, let state = value as? [String: Any], state["cancelled"] as? Bool != true else { return }
+                    restoreReading(); reader?.search()
+                }
         }
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

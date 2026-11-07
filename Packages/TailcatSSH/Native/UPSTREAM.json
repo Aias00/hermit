@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/tailscale/tailcat",
-  "revision": "52fbad323e9d352f1febb623e0975368e9a8cbdd",
-  "committed_at": "2026-10-07T20:18:07Z",
-  "source_archive": "https://codeload.github.com/tailscale/tailcat/tar.gz/52fbad323e9d352f1febb623e0975368e9a8cbdd",
-  "source_archive_sha256": "7b936da24a60e1619a5f8ee4859c8e5cdaadca0231e66edb9a7ff6f1214c8943",
+  "revision": "e00cdde6ff787f801361ff85ed085775c775d4c5",
+  "committed_at": "2026-11-05T15:10:22Z",
+  "source_archive": "https://codeload.github.com/tailscale/tailcat/tar.gz/e00cdde6ff787f801361ff85ed085775c775d4c5",
+  "source_archive_sha256": "96d152f1d51a63c9f68ecb56debb22e0c8f7035330bf1092534e95b3d7300098",
   "license": "BSD-3-Clause",
   "abi_version": 1,
   "go_toolchain": "go1.27.3",
@@ -14,7 +14,7 @@
     "OverlayDependencies/tsnet/moshpit_peer_dial.go: userspace-only peer TCP dial, no system-network fallback",
     "stage-overlay.py: opt-in tsnet explicit enrollment; ignore ambient CLI auth keys and forced-login environment"
   ],
-  "embedded_tailscale_revision": "v1.103.0-pre.0.20260929142145-a0e471a35b8f",
+  "embedded_tailscale_revision": "v1.105.0-pre.0.20261013225543-fb79793d99f5",
   "tailscale_abi_version": 1,
   "build_tags": "Native/build-tags.txt"
 }

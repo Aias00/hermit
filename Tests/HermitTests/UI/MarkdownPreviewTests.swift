@@ -204,4 +204,25 @@ struct MarkdownPreviewTests {
         #expect(messages.copies == ["  printf '中文'\n"])
     }
 
+    @Test("Reading anchors survive appended text and width changes without applying to unrelated content")
+    func semanticReadingPosition() async throws {
+        let web = try await renderer()
+        defer { web.stopLoading() }
+        let source = (0..<150).map { "## Section \($0)\n\nParagraph \($0) " + String(repeating: "readable text 中文 ", count: 12) }.joined(separator: "\n\n")
+        _ = try await render(source, in: web)
+        let result = try #require(try await execute("document.querySelectorAll('#content h2')[60].scrollIntoView(); await new Promise(r=>setTimeout(r,40)); return window.hermitMarkdownReader.position()", arguments: [:], in: web) as? [String: Any])
+        let saved = try #require(PreviewPreferences.ReadingPosition(message: result))
+        #expect(saved.index >= 100 && saved.ratio > 0.1)
+        _ = try await render(source + "\n\nAdditional tail", in: web)
+        let appended = try #require(try await web.evaluateJavaScript("window.hermitMarkdownReader.position()") as? [String: Any])
+        #expect(appended["block"] as? String == saved.block)
+        web.frame.size.width = 700
+        let restored = try await execute("await new Promise(r=>setTimeout(r,40)); return window.hermitMarkdownReader.restore(position)", arguments: ["position": saved.arguments], in: web)
+        #expect(restored as? Bool == true)
+        let wide = try #require(try await web.evaluateJavaScript("window.hermitMarkdownReader.position()") as? [String: Any])
+        #expect(wide["block"] as? String == saved.block)
+        _ = try await render("# A completely different document", in: web)
+        #expect(try await execute("return window.hermitMarkdownReader.restore(position)", arguments: ["position": saved.arguments], in: web) as? Bool == false)
+    }
+
 }

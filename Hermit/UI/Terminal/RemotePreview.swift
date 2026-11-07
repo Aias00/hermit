@@ -481,7 +481,7 @@ final class RemoteFolderModel {
 
     func open(_ entry: RemoteFileEntry) async {
         if let url = local[entry.path] {
-            presentCopy(url)
+            presentCopy(url, entry: entry)
             return
         }
         if entry.kind == .video {
@@ -495,11 +495,11 @@ final class RemoteFolderModel {
                 return
             }
         }
-        if let url = await localCopy(of: entry) { presentCopy(url) }
+        if let url = await localCopy(of: entry) { presentCopy(url, entry: entry) }
     }
 
-    private func presentCopy(_ url: URL) {
-        if let document = MarkdownFileDocument.load(url) { markdownDocument = document }
+    private func presentCopy(_ url: URL, entry: RemoteFileEntry) {
+        if let document = MarkdownFileDocument.load(url, identity: "remote:\(files.scope):\(entry.path)") { markdownDocument = document }
         else { previewURL = url }
     }
 

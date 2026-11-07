@@ -6,8 +6,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE="$ROOT/Packages/TailcatSSH"
 WORK="$ROOT/build/tailcat"
-REVISION=52fbad323e9d352f1febb623e0975368e9a8cbdd
-SOURCE_SHA256=7b936da24a60e1619a5f8ee4859c8e5cdaadca0231e66edb9a7ff6f1214c8943
+REVISION=e00cdde6ff787f801361ff85ed085775c775d4c5
+SOURCE_SHA256=96d152f1d51a63c9f68ecb56debb22e0c8f7035330bf1092534e95b3d7300098
 GO_VERSION=go1.27.3
 SOURCE="$WORK/combined-source/tailcat-$REVISION"
 ARCHIVE="$WORK/native-source/tailcat-$REVISION.tar.gz"
