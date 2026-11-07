@@ -265,7 +265,9 @@ final class TerminalReliabilityUITest: XCTestCase {
             throw XCTSkip("requires an isolated HERDR fixture")
         }
         let app = try openTerminal(explicitNavigation: true)
-        let source = "# 预览验证\n\n**任务状态**\n\n| 项目 | 状态 |\n| --- | --- |\n| HERDR | 正常 |\n\n```mermaid\nflowchart TD\nA[用户输入] --> B[任务处理]\nB --> C[完成通知]\n```\n"
+        // HERDR exposes a screen snapshot. Keep this fixture within the
+        // keyboard-visible rows; a clipped heading is not a reader failure.
+        let source = "# 预览验证\n<pre><code>echo reader-copy</code></pre>\n| 项目 | 状态 |\n| --- | --- |\n| HERDR | 正常 |\n```mermaid\nflowchart LR; A[用户输入] --> B[任务处理]\n```\n"
         let encoded = Data(source.utf8).base64EncodedString()
         submit("printf '\\033[2J\\033[H'; printf '%s' '" + encoded + "' | base64 -D", in: app)
         let field = composer(app)
@@ -276,11 +278,78 @@ final class TerminalReliabilityUITest: XCTestCase {
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 10))
         XCTAssertTrue(web.staticTexts["预览验证"].waitForExistence(timeout: 15))
-        captureScreenshot(app, name: "herdr-markdown-mermaid-preview")
+        XCTAssertTrue(app.buttons["markdown-outline"].waitForExistence(timeout: 5))
+        app.buttons["markdown-outline"].tap()
+        app.buttons["预览验证"].tap()
+        app.buttons["markdown-search-toggle"].tap()
+        let query = app.textFields["markdown-query"]
+        query.tap(); query.typeText("reader-copy")
+        let count = app.staticTexts["markdown-match-count"]
+        expectation(for: NSPredicate(format: "label == '1/1'"), evaluatedWith: count)
+        waitForExpectations(timeout: 8)
+        app.buttons["markdown-search-toggle"].tap()
+        web.buttons["复制代码"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["markdown-code-copied"].waitForExistence(timeout: 5))
+        captureScreenshot(app, name: "herdr-markdown-reader-tools")
+        let expand = web.buttons["放大图表"]
+        web.swipeUp()
+        XCTAssertTrue(expand.waitForExistence(timeout: 5)); expand.tap()
+        XCTAssertTrue(web.buttons["重置"].waitForExistence(timeout: 5))
+        web.buttons["放大"].tap()
+        captureScreenshot(app, name: "herdr-markdown-expanded-diagram")
+        web.buttons["关闭"].tap()
+        let table = web.buttons["全屏表格"].firstMatch
+        for _ in 0..<5 where !table.isHittable { web.swipeDown() }
+        table.tap()
+        XCTAssertTrue(web.buttons["重置"].waitForExistence(timeout: 5))
+        captureScreenshot(app, name: "herdr-markdown-expanded-table")
+        web.buttons["关闭"].tap()
         app.buttons["原文 / 搜索"].tap()
         XCTAssertTrue(app.textFields["terminal-output-query"].waitForExistence(timeout: 5))
         app.buttons["完成"].tap()
         XCTAssertEqual(field.value as? String, "preview keeps draft")
+    }
+
+    @MainActor
+    func testRemoteWebPreviewKeepsDraftLoadsAssetsAndStopsOnBackground() throws {
+        let port = try XCTUnwrap(ProcessInfo.processInfo.environment["MOSHPIT_WEB_PREVIEW_PORT"])
+        let app = try openTerminal(explicitNavigation: true)
+        let field = composer(app)
+        field.tap(); field.typeText("web preview keeps draft")
+        app.buttons["conversation-menu"].tap()
+        app.buttons["网页预览"].tap()
+        let address = app.textFields["remote-web-address"]
+        XCTAssertTrue(address.waitForExistence(timeout: 8))
+        address.tap()
+        address.press(forDuration: 1.2)
+        if app.menuItems["全选"].exists { app.menuItems["全选"].tap() }
+        else if app.menuItems["Select All"].exists { app.menuItems["Select All"].tap() }
+        else {
+            // Address starts at end when focused. Select all via hardware
+            // shortcut is stable on both the phone and iPad simulator.
+            address.typeKey("a", modifierFlags: .command)
+        }
+        address.typeText("http://localhost:" + port)
+        app.buttons["remote-web-open"].tap()
+        let web = app.webViews.firstMatch
+        if !web.staticTexts["WebSocket 已连接"].waitForExistence(timeout: 20) {
+            captureScreenshot(app, name: "web-preview-load-failure"); print(app.debugDescription)
+            XCTFail("Real SSH forwarded page must load its JavaScript, POST and WebSocket")
+        }
+        XCTAssertTrue(web.staticTexts["资源已加载"].exists)
+        XCTAssertTrue(web.staticTexts["synthetic-post"].exists)
+        captureScreenshot(app, name: "herdr-remote-web-preview")
+        web.links["测试远端重定向"].tap()
+        XCTAssertTrue(web.staticTexts["重定向成功"].waitForExistence(timeout: 8))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.staticTexts["预览已暂停"].waitForExistence(timeout: 10))
+        app.buttons["remote-web-open"].tap()
+        XCTAssertTrue(web.staticTexts["WebSocket 已连接"].waitForExistence(timeout: 15))
+        app.buttons["完成"].tap()
+        XCTAssertEqual(field.value as? String, "web preview keeps draft")
+        XCTAssertTrue(app.buttons["conversation-send"].isEnabled)
+        captureScreenshot(app, name: "herdr-web-preview-restores-draft")
     }
 
     @MainActor

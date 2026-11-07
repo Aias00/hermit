@@ -304,6 +304,8 @@ targets:
       properties:
         CFBundleName: Hermit
         CFBundleDisplayName: Hermit
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         NSBonjourServices:
           - _ssh._tcp
         UIAppFonts:

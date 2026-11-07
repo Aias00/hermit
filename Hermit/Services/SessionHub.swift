@@ -324,9 +324,13 @@ final class SessionHub {
         /// the flow moves on to dialling a fresh one — the false-dead cost
         /// is one redundant dial, far cheaper than a failed upload.
         func acquireFileTransferSSH() async throws -> SSHSession {
+            try Task.checkCancellation()
             if let ssh = fileTransferSSH, await answersQuickly(ssh) { return ssh }
             if let cached = onDemandTransferSSH, await answersQuickly(cached) { return cached }
+            try Task.checkCancellation()
             let fresh = try await sidecarConnect(connection)
+            do { try Task.checkCancellation() }
+            catch { await fresh.close(); throw error }
             onDemandTransferSSH = fresh
             return fresh
         }
@@ -348,6 +352,29 @@ final class SessionHub {
         /// What a tapped host path opened (download, QuickLook, folder) —
         /// presented by the terminal screen, cleared when it's dismissed.
         var remotePreview: RemotePreviewModel?
+        var webPreview: RemoteWebPreviewModel?
+        private struct WebPreviewReference { weak var value: RemoteWebPreviewModel? }
+        @ObservationIgnored private var webPreviews: [WebPreviewReference] = []
+        @ObservationIgnored private var webPreviewGeneration = UUID()
+        var webPreviewFactory: @MainActor (URL?) -> RemoteWebPreviewModel? {
+            { [weak self] url in self?.makeWebPreview(url) }
+        }
+        private func makeWebPreview(_ url: URL?) -> RemoteWebPreviewModel {
+            let generation = webPreviewGeneration
+            let model = RemoteWebPreviewModel(host: connection.displayName, url: url) { [weak self] in
+                guard let self, self.webPreviewGeneration == generation else { throw SSHError.sessionClosed }
+                let ssh = try await self.acquireFileTransferSSH()
+                guard self.webPreviewGeneration == generation else { throw SSHError.sessionClosed }
+                return ssh
+            }
+            webPreviews.removeAll { $0.value == nil }
+            webPreviews.append(WebPreviewReference(value: model))
+            return model
+        }
+        func openWebPreview(_ url: URL? = nil) {
+            webPreview?.stop()
+            webPreview = makeWebPreview(url)
+        }
 
         /// The working directory the plain terminal's shell last reported
         /// over OSC 7, for shells that do (most don't; tmux and herdr panes
@@ -485,6 +512,7 @@ final class SessionHub {
         private func controlPlaneWired(_ control: any MultiplexerControlling) {
             if let tmux = control as? TmuxSessionController, tmux === tmuxController {
                 tmux.onOpenRemotePath = { [weak self] path in self?.openRemotePath(path) }
+                tmux.onOpenRemoteWebURL = { [weak self] url in self?.openWebPreview(url) }
                 tmux.pathLinksFactory = { [weak self, weak tmux] paneId in
                     RemotePathLinks(workingDirectory: { await tmux?.panePath(paneId) }) { [weak self] cwd, batch in
                         await self?.probeRemotePaths(cwd: cwd, batch: batch)
@@ -837,6 +865,9 @@ final class SessionHub {
             self.connection = connection
             self.viewModel = TerminalViewModel(connection: connection, dial: dial)
             coordinator.pathLinks = makePathLinks { [weak self] in await self?.plainWorkingDirectory() }
+            coordinator.onOpenRemoteWebURL = { [weak self] url in
+                Task { @MainActor [weak self] in self?.openWebPreview(url) }
+            }
             coordinator.onOpenRemotePath = { [weak self] path in
                 Task { @MainActor [weak self] in self?.openRemotePath(path) }
             }
@@ -3179,6 +3210,10 @@ final class SessionHub {
         /// window on attach and settles the rest on the real disconnect.
         func stop(forReconnect: Bool = false, preservingComposerDrafts: Bool = false) async {
             if !forReconnect && !preservingComposerDrafts { composerDrafts.cancelTransfers() }
+            webPreviewGeneration = UUID()
+            for reference in webPreviews { reference.value?.suspend() }
+            webPreviews.removeAll()
+            webPreview = nil
             retryScheduledAt = nil
             resetPlainSSHObservation()
             herdrFrameRecoveryTask?.cancel()

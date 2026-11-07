@@ -722,6 +722,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// A tapped host-path link — one `pathLinks` confirmed, or Claude
         /// Code's own OSC-8 `file://` link. Receives the absolute host path.
         var onOpenRemotePath: ((String) -> Void)?
+        var onOpenRemoteWebURL: ((URL) -> Void)?
 
         /// Called when the remote rings the terminal bell (BEL). The Vibe
         /// Island agent monitor uses this as a "needs attention" signal.
@@ -1824,7 +1825,12 @@ struct SwiftTerminalView: UIViewRepresentable {
             // The observability seam the touch-matrix S-layer asserts on: the
             // EXACT address handed to the system, so a harness can prove a
             // wrapped link opened whole without scraping Safari.
-            Log.input.info("link open \(url.absoluteString, privacy: .public)")
+            if RemoteWebAddress.isLoopback(url), ["http", "https"].contains(scheme) {
+                let open = onOpenRemoteWebURL
+                Task { @MainActor in open?(url) }
+                return
+            }
+            Log.input.info("link open \(url.absoluteString, privacy: .private)")
             Task { @MainActor in
                 UIApplication.shared.open(url)
             }

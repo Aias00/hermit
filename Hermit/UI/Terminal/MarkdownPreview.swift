@@ -30,7 +30,7 @@ struct MarkdownFilePreview: View {
                     Text("预览仅包含文档前 200,000 个字符；原文可查看全部内容。")
                         .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
                 }
-                if preview { MarkdownPreview(text: document.text) }
+                if preview { MarkdownReader(text: document.text) }
                 else {
                     ScrollView([.horizontal, .vertical]) {
                         Text(verbatim: document.text).font(.system(.body, design: .monospaced))
@@ -92,17 +92,22 @@ enum MarkdownPreviewSource {
 
 struct MarkdownPreview: UIViewRepresentable {
     let text: String
+    var reader: MarkdownReaderController? = nil
+    var openRemoteWeb: ((URL) -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     static var resourceURL: URL? {
         Bundle.main.url(forResource: "Markdown", withExtension: "bundle")?.appendingPathComponent("index.html")
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: text, darkMode: colorScheme == .dark) }
+    func makeCoordinator() -> Coordinator { Coordinator(text: text, darkMode: colorScheme == .dark, reader: reader, openRemoteWeb: openRemoteWeb) }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
+        config.userContentController.add(context.coordinator, name: "hermitMarkdown")
         let view = WKWebView(frame: .zero, configuration: config)
+        context.coordinator.webView = view
+        reader?.coordinator = context.coordinator
         view.isOpaque = false
         view.backgroundColor = .clear
         view.scrollView.backgroundColor = .clear
@@ -126,28 +131,49 @@ struct MarkdownPreview: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
+        coordinator.reader?.coordinator = nil
+        view.configuration.userContentController.removeScriptMessageHandler(forName: "hermitMarkdown")
         view.stopLoading()
         view.navigationDelegate = nil
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    @MainActor final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        weak var webView: WKWebView?
+        weak var reader: MarkdownReaderController?
+        var openRemoteWeb: ((URL) -> Void)?
         var text: String
         var darkMode: Bool
         var loaded = false
-        init(text: String, darkMode: Bool) { self.text = text; self.darkMode = darkMode }
+        init(text: String, darkMode: Bool, reader: MarkdownReaderController?, openRemoteWeb: ((URL) -> Void)?) {
+            self.text = text; self.darkMode = darkMode; self.reader = reader; self.openRemoteWeb = openRemoteWeb
+        }
+        func command(_ code: String, arguments: [String: Any] = [:]) {
+            guard loaded, let webView else { return }
+            webView.callAsyncJavaScript(code, arguments: arguments, in: nil, in: .page) { _ in }
+        }
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.frameInfo.isMainFrame, message.frameInfo.request.url?.standardizedFileURL == MarkdownPreview.resourceURL?.standardizedFileURL,
+                  let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
+            if type == "copy", let text = body["text"] as? String, text.utf8.count <= 1_000_000 {
+                UIPasteboard.general.string = text
+                reader?.copied = true
+                UIAccessibility.post(notification: .announcement, argument: "代码已复制")
+            } else if type == "state" { reader?.update(body) }
+        }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             loaded = true
             render(webView)
         }
         func render(_ webView: WKWebView) {
             webView.callAsyncJavaScript("return await window.renderMarkdown(source,darkMode)",
-                arguments: ["source": MarkdownPreviewSource.prepare(text), "darkMode": darkMode], in: nil, in: .page) { _ in }
+                arguments: ["source": MarkdownPreviewSource.prepare(text), "darkMode": darkMode], in: nil, in: .page) { [weak self] _ in self?.reader?.search() }
         }
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if action.navigationType == .linkActivated {
                 if let url = action.request.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-                    UIApplication.shared.open(url)
+                    if RemoteWebAddress.isLoopback(url) { openRemoteWeb?(url) }
+                    else { UIApplication.shared.open(url) }
                 }
                 decisionHandler(.cancel)
             } else {

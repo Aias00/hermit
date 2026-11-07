@@ -308,8 +308,8 @@ actor SSHSession {
     nonisolated let dataStream: AsyncStream<Data>
 
     private let transport: any SSHClientTransport
-    /// The concrete Citadel client, kept ONLY for the SFTP subsystem — SFTP
-    /// is deliberately outside the ``SSHClientTransport`` seam. A session
+    /// The concrete Citadel client, kept for SFTP and direct-tcpip previews — these
+    /// are deliberately outside the ``SSHClientTransport`` seam. A session
     /// built over an injected transport (tests) has none, and uploads then
     /// exercise the exec/base64 fallback, which the fake CAN run.
     private let sftpClient: SSHClient?
@@ -367,6 +367,13 @@ actor SSHSession {
     /// only fires on an *unexpected* drop, never on intentional teardown.
     func setOnUnexpectedClose(_ handler: @escaping @Sendable () -> Void) {
         onUnexpectedClose = handler
+    }
+
+    /// Opens only preview-owned direct-tcpip children; no PTY or remote
+    /// command is touched, and closing the preview preserves this session.
+    func startWebPreview(port: Int) async throws -> RemoteWebTunnel {
+        guard !closed, let client = sftpClient, client.isConnected else { throw RemoteWebPreviewError.unavailable }
+        return try await RemoteWebTunnel.start(client: client, port: port)
     }
 
     // MARK: - PTY

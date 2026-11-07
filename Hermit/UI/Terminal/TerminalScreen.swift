@@ -426,7 +426,7 @@ struct TerminalScreen: View {
     private var anySheetOpen: Bool {
         showWindowsSheet || showSessionsSheet || showPaneSheet || showCamera
             || quickLookURL != nil || markdownDocument != nil || remoteFolder != nil || remoteVideoOpen
-            || photoPickerPresented || filePickerPresented || showsFileUploads || outputReader != nil || showTerminalActions
+            || photoPickerPresented || filePickerPresented || showsFileUploads || outputReader != nil || active?.webPreview != nil || showTerminalActions
     }
 
     /// Whether the pane behind a modal is pinned to the size it already has.
@@ -623,7 +623,8 @@ struct TerminalScreen: View {
                 VStack {
                     Spacer()
                     Button {
-                        UIApplication.shared.open(url)
+                        if RemoteWebAddress.isLoopback(url) { presentSheet { active?.openWebPreview(url) } }
+                        else { UIApplication.shared.open(url) }
                         copiedURL = nil
                     } label: {
                         HStack(spacing: 6) {
@@ -687,6 +688,9 @@ struct TerminalScreen: View {
                     }
                 }
             }
+        }
+        .onChange(of: active?.webPreview?.id) { _, id in
+            if id != nil, focusBeforeSheet == nil { presentSheet {} }
         }
         .onChange(of: anySheetOpen) { _, open in
             if open { disarmStickyCtrlIfNeeded() }
@@ -874,9 +878,14 @@ struct TerminalScreen: View {
                     onReconnect: { reconnect() })
             }
         }
+        .environment(\.remoteWebPreviewFactory, active?.webPreviewFactory)
+        .appSheet(item: Binding(get: { active?.webPreview }, set: { if $0 == nil { active?.webPreview?.stop(); active?.webPreview = nil } })) { model in
+            RemoteWebPreview(model: model)
+        }
         .appSheet(item: $outputReader) { context in
             TerminalOutputReader(title: context.title, refresh: context.refresh,
                                  currentRevision: context.revision, snapshot: context.snapshot, showsPreview: context.preview)
+                .environment(\.remoteWebPreviewFactory, active?.webPreviewFactory)
         }
         .appSheet(isPresented: $showsFileUploads) {
             let owner = uploadDetailsDraft ?? composerDraft
@@ -921,12 +930,14 @@ struct TerminalScreen: View {
         .quickLookPreview($quickLookURL)
         .appSheet(item: $markdownDocument, onDismiss: { dismissRemotePreview() }) { document in
             MarkdownFilePreview(document: document)
+                .environment(\.remoteWebPreviewFactory, active?.webPreviewFactory)
         }
         .onChange(of: quickLookURL) { _, url in
             if url == nil { dismissRemotePreview() }
         }
         .appSheet(item: $remoteFolder, onDismiss: { dismissRemotePreview() }) { target in
             RemoteFolderSheet(folder: target.folder, files: target.files)
+                .environment(\.remoteWebPreviewFactory, active?.webPreviewFactory)
         }
         .onChange(of: active?.remotePreview?.phase) { _, phase in
             switch phase {
@@ -1162,6 +1173,9 @@ struct TerminalScreen: View {
                 }
                 terminalAction("Markdown 预览", icon: "doc.richtext", enabled: typingCoordinator?.terminalView != nil) {
                     openOutputReader(preview: true)
+                }
+                terminalAction("网页预览", icon: "globe", enabled: launchIsConnected) {
+                    presentSheet { active?.openWebPreview() }
                 }
                 terminalAction("选择会话", icon: "rectangle.stack", enabled: tmuxSnapshot != nil) {
                     presentSheet { showSessionsSheet = true }

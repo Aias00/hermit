@@ -395,7 +395,7 @@ revision `ae8562f895de06ccb86fdb1cbb65fd99c8976e12`; the manifest excludes the
 upstream example application and its CLI-only dependency. `UPSTREAM.json` records
 the source pin. Runtime package dependencies keep the previously resolved versions.
 
-The local patch adds an optional `SSHChildChannelScope` to SFTP and exec entry
+The local patch adds an optional `SSHChildChannelScope` to SFTP, exec and direct-tcpip entry
 points. Registering and cancelling a scope is thread-safe. Only child channels
 opened by the operation are registered. Requests check the scope on their event
 loop immediately before submission, including each SFTP write chunk and exec
@@ -407,3 +407,46 @@ Regression coverage: `SSHChildChannelScopeTests`, `CancellableTransferTests`,
 `RemoteFolderCancellationTests`, `RemoteTransferTests`, and opt-in real loopback
 `SSHUploadIntegrationTests`. When upgrading Citadel, replay this patch and verify
 that cancelling an upload preserves the already-open PTY and preview file handle.
+
+
+## Hermit Markdown reader and remote HTTP preview
+
+The terminal action menu exposes **Markdown 预览** and **网页预览**. Markdown
+files opened from the remote file browser use the same offline reader. The reader
+adds heading navigation (h1–h3, up to 200 headings), literal Unicode search (up to
+1,000 highlighted matches), code copy, and enlarged Mermaid/table views. Search
+and tool labels never become part of copied code. Expanded SVG IDs and their CSS,
+marker and ARIA references are remapped together. Rendering retains the existing
+200,000-character and eight-diagram bounds, sanitized HTML and offline CSP.
+
+Web preview uses the selected host's existing authenticated SSH channel, or the
+same scoped sidecar acquisition as file previews, with SSH `direct-tcpip`. It needs
+no remote web bridge or AI-specific protocol. Enter `http://localhost:3000/path`
+or `localhost:5173`; terminal and Markdown loopback links route here too. Printed
+`0.0.0.0` and IPv6 wildcard/loopback addresses normalize to the host's IPv4
+loopback. The service must therefore listen on IPv4. Other destination hosts,
+credentials in URLs and HTTPS are rejected. TLS validation is never bypassed.
+
+The phone listener binds only to `127.0.0.1` on an ephemeral port. It is a temporary
+local forward, not a published tunnel. It permits at most 16 accepted connections,
+uses manual reads and flushed-write backpressure, and times out channel setup
+after 15 seconds. HTTP bodies, SSE and WebSocket upgrades stream without whole-body
+buffering. Relative assets and WebSockets based on `location.host` work; hard-coded
+absolute asset/HMR addresses using other ports are outside this forwarding scope.
+Same-service top-level loopback redirects are mapped to the phone listener.
+External tapped web links open in the system browser. Cookies/history use an
+ephemeral WKWebView store. SSH servers must allow local TCP forwarding.
+
+Dismissal, backgrounding, session stop or reconnect cancels only preview-owned
+listeners and child channels. Returning from background requires an explicit
+reopen. Nested previews from Markdown share the originating session's invalidation
+generation, so a stale reader cannot dial a different host. Previews do not request
+a PTY, resize a pane or send terminal input. The normal terminal sheet geometry
+and keyboard restoration applies.
+
+Verification uses `MarkdownPreviewTests`, `RemoteWebPreviewTests`,
+`RemoteWebPreviewIntegrationTests`, `SSHChildChannelScopeTests` and the reader/web
+cases in `TerminalReliabilityUITest` on an owned iPhone and iPad mini simulator.
+`scripts/verify/remote-web-fixture.py` supplies synthetic HTTP/POST/SSE/WebSocket
+responses. The terminal fixture's explicit `--web-preview-port` option allows
+forwarding only to that owned loopback port; its default still disables forwarding.

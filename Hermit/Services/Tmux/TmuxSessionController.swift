@@ -98,6 +98,7 @@ final class TmuxSessionController: MultiplexerControlling {
     /// A tapped host-path link in any pane.
     @ObservationIgnored
     var onOpenRemotePath: ((String) -> Void)?
+    @ObservationIgnored var onOpenRemoteWebURL: ((URL) -> Void)?
 
     /// Coordinator of the pane currently on screen — the target for one-shot
     /// input modifiers (sticky Ctrl) and other "whatever the user is typing
@@ -4202,6 +4203,7 @@ final class TmuxSessionController: MultiplexerControlling {
         }
         coordinator.pathLinks = pathLinksFactory?(paneId)
         coordinator.onOpenRemotePath = { [weak self] path in self?.onOpenRemotePath?(path) }
+        coordinator.onOpenRemoteWebURL = { [weak self] url in self?.onOpenRemoteWebURL?(url) }
         terminal.terminalDelegate = coordinator
         coordinator.attach(to: terminal)
 

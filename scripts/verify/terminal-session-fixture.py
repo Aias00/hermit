@@ -186,7 +186,7 @@ def serve(state_path):
                 except subprocess.TimeoutExpired: p.kill();p.wait()
         state['status']='stopped';save(state_path,state);log.close()
 
-def start(state_path, root):
+def start(state_path, root, web_preview_port=None):
     if state_path.exists() or root.exists(): raise RuntimeError('Use an unused state and lab path; existing data preserved')
     root.mkdir(mode=0o700)
     root=root.resolve()
@@ -217,11 +217,15 @@ def start(state_path, root):
     fp='SHA256:'+base64.b64encode(hashlib.sha256(base64.b64decode(public[1])).digest()).decode().rstrip('=')
     config=['AddressFamily inet','ListenAddress 127.0.0.1',f'Port {port}',f'HostKey {root}/host_key',f'PidFile {root}/sshd.pid',f'AuthorizedKeysFile {auth_root}/authorized_keys',
             'StrictModes yes',f'AllowUsers {getpass.getuser()}','AuthenticationMethods publickey','PubkeyAuthentication yes','PasswordAuthentication no','KbdInteractiveAuthentication no','UsePAM no','PermitRootLogin no',
-            'AllowAgentForwarding no','AllowTcpForwarding no','X11Forwarding no','PermitTunnel no','UseDNS no','PrintMotd no','PrintLastLog no','LogLevel ERROR','Subsystem sftp fixture-sftp',
+            'AllowAgentForwarding no', 'AllowTcpForwarding local' if web_preview_port else 'AllowTcpForwarding no','X11Forwarding no','PermitTunnel no','UseDNS no','PrintMotd no','PrintLastLog no','LogLevel ERROR','Subsystem sftp fixture-sftp',
             f'ForceCommand {sys.executable} {SCRIPT} _ssh --root {root}']
+    if web_preview_port:
+        if not 1 <= web_preview_port <= 65535: raise ValueError('Invalid test origin port')
+        config.append(f'PermitOpen 127.0.0.1:{web_preview_port}')
     write(root/'sshd_config','\n'.join(config)+'\n')
     write(root/'known_hosts',f'[127.0.0.1]:{port} {public[0]} {public[1]}\n')
     state=dict(kind='moshpit-session-fixture-v1',status='starting',fixture_dir=str(root),auth_dir=str(auth_root),port=port,username=getpass.getuser(),fingerprint=fp)
+    state['web_preview_port'] = web_preview_port
     save(state_path,state)
     with open(root/'supervisor.log','ab',buffering=0) as log:
         process=subprocess.Popen([sys.executable,SCRIPT,'_serve','--state',str(state_path)],stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
@@ -236,6 +240,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['start','stop','run','_serve','_ssh','_herdr','tmux-start'])
     parser.add_argument('--state',type=Path)
+    parser.add_argument('--web-preview-port', type=int, help='Opt-in direct-tcpip to this owned loopback test origin only')
     parser.add_argument('--root',type=Path,default=Path('/tmp/moshpit-ui-lab'))
     args,command=parser.parse_known_args()
     if command and command[0]=='--':command.pop(0)
@@ -243,7 +248,7 @@ def main():
     if args.command=='_ssh':return ssh_command(args.root)
     if not args.state:parser.error('--state required')
     state_path=args.state.resolve()
-    if args.command=='start':return start(state_path,args.root)
+    if args.command=='start':return start(state_path,args.root,args.web_preview_port)
     if args.command=='_serve':return serve(state_path)
     state=json.loads(state_path.read_text());root=Path(state['fixture_dir'])
     if state.get('kind')!='moshpit-session-fixture-v1':raise RuntimeError('Not this fixture')
@@ -274,6 +279,7 @@ def main():
     env.pop('TEST_RUNNER_MOSHPIT_SEED_PASSWORD',None)
     if state.get('activity_events_url'):
         values['MOSHPIT_ACTIVITY_EVENTS_URL'] = state['activity_events_url']
+    if state.get('web_preview_port'): values['MOSHPIT_WEB_PREVIEW_PORT'] = str(state['web_preview_port'])
     env.update({'TEST_RUNNER_'+k:v for k,v in values.items()})
     os.execvpe(command[0],command,env)
 

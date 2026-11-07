@@ -4,10 +4,17 @@ import WebKit
 
 @Suite("Offline Markdown preview") @MainActor
 struct MarkdownPreviewTests {
-    private func renderer() async throws -> WKWebView {
+    private final class Messages: NSObject, WKScriptMessageHandler {
+        var copies: [String] = []
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if let body = message.body as? [String: Any], body["type"] as? String == "copy", let text = body["text"] as? String { copies.append(text) }
+        }
+    }
+    private func renderer(messages: Messages? = nil) async throws -> WKWebView {
         let url = try #require(MarkdownPreview.resourceURL)
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        if let messages { configuration.userContentController.add(messages, name: "hermitMarkdown") }
         let web = WKWebView(frame: .init(x: 0, y: 0, width: 390, height: 800), configuration: configuration)
         web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         for _ in 0..<250 {
@@ -140,4 +147,61 @@ struct MarkdownPreviewTests {
         #expect(safe as? Bool == true)
         web.stopLoading()
     }
+    @Test("Reader searches literal Unicode text, navigates matches and refreshes safely")
+    func renderedSearchAndOutline() async throws {
+        let web = try await renderer()
+        defer { web.stopLoading() }
+        let source = "# 中文目录\n\nAlpha **alpha** [a+b] 中文\n\n## 下一节\n\n```sh\nprintf 'alpha'\n```"
+        _ = try await render(source, in: web)
+        let result = try #require(try await execute("return window.hermitMarkdownReader.search(query)", arguments: ["query": "alpha"], in: web) as? [String: Any])
+        #expect(result["count"] as? Int == 3)
+        #expect(result["index"] as? Int == 1)
+        let next = try #require(try await execute("return window.hermitMarkdownReader.search(query,-1)", arguments: ["query": "alpha"], in: web) as? [String: Any])
+        #expect(next["index"] as? Int == 3)
+        _ = try await render(source + "\n\nALPHA", in: web)
+        #expect(try await web.evaluateJavaScript("window.hermitMarkdownReader.state().count") as? Int == 4)
+        #expect(try await web.evaluateJavaScript("window.hermitMarkdownReader.state().index") as? Int == 3)
+        let literal = try #require(try await execute("return window.hermitMarkdownReader.search(query)", arguments: ["query": "[a+b]"], in: web) as? [String: Any])
+        #expect(literal["count"] as? Int == 1)
+        let outline = try #require(literal["outline"] as? [[String: Any]])
+        #expect(outline.count == 2)
+        #expect(outline.first?["title"] as? String == "中文目录")
+        #expect(try await web.evaluateJavaScript("window.hermitMarkdownReader.jump('hermit-heading-1')") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("window.hermitMarkdownReader.jump('arbitrary')") as? Bool == false)
+        _ = try await render("replacement", in: web)
+        #expect(try await web.evaluateJavaScript("window.hermitMarkdownReader.state().count === 0 && window.hermitMarkdownReader.state().outline.length === 0 && !document.querySelector('.reader-dialog')") as? Bool == true)
+    }
+
+    @Test("Reader caps large searches and preserves copy sources and unique diagram references")
+    func readerToolsAndExpandedGraph() async throws {
+        let web = try await renderer()
+        defer { web.stopLoading() }
+        _ = try await render("# Tools\n\n" + String(repeating: "needle ", count: 1100), in: web)
+        let state = try #require(try await execute("return window.hermitMarkdownReader.search(query)", arguments: ["query": "needle"], in: web) as? [String: Any])
+        #expect(state["count"] as? Int == 1000)
+        #expect(state["limited"] as? Bool == true)
+        _ = try await render("```mermaid\nflowchart TD\nA --> B\n```\n\n| Key | Value |\n| --- | --- |\n| one | two |", in: web)
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('[data-reader-action=copy-code]').length") as? Int == 1)
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-reader-action=expand-diagram]').click();true")
+        #expect(try await web.evaluateJavaScript("document.querySelector('dialog').open") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("(()=>{const svg=document.querySelector('dialog svg');const ids=[...document.querySelectorAll('[id]')].map(n=>n.id);return ids.length===new Set(ids).size && [...svg.querySelectorAll('style')].some(n=>n.textContent.includes('#'+svg.id)) && [...svg.querySelectorAll('[marker-end]')].every(n=>document.getElementById(n.getAttribute('marker-end').match(/#([^)'\"]+)/)[1]))})()") as? Bool == true)
+        _ = try await web.evaluateJavaScript("document.querySelector('[data-reader-action=zoom-in]').click();document.querySelector('[data-reader-action=close]').click();document.querySelector('[data-reader-action=expand-table]').click();true")
+        #expect(try await web.evaluateJavaScript("document.querySelector('dialog table').textContent.includes('two')") as? Bool == true)
+        _ = try await render("fresh document", in: web)
+        #expect(try await web.evaluateJavaScript("!document.querySelector('dialog') && document.querySelectorAll('#content button').length===0") as? Bool == true)
+    }
+
+    @Test("Content cannot forge native reader actions")
+    func readerSanitization() async throws {
+        let messages = Messages()
+        let web = try await renderer(messages: messages)
+        defer { web.stopLoading() }
+        _ = try await render("<button data-reader-action='expand-diagram'>spoof</button><textarea>bad</textarea><a href='file:///etc/passwd'>file</a>\n\n```sh\n  printf '中文'\n\n```", in: web)
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('#content button').length === 1 && !document.querySelector('#content textarea') && !document.querySelector('#content a[href]')") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("document.querySelector('#content pre code').textContent") as? String == "  printf '中文'\n")
+        _ = try await web.evaluateJavaScript("window.hermitMarkdownReader.search('printf');document.querySelector('[data-reader-action=copy-code]').click();true")
+        for _ in 0..<20 where messages.copies.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(messages.copies == ["  printf '中文'\n"])
+    }
+
 }

@@ -38,7 +38,7 @@
   const stage = document.createElement('main');
   stage.innerHTML = DOMPurify.sanitize(html, {
    USE_PROFILES:{html:true},
-   FORBID_TAGS:['script','style','iframe','object','embed','img','video','audio','form'],
+   FORBID_TAGS:['script','style','iframe','object','embed','img','video','audio','form','button','select','textarea'],
    FORBID_ATTR:['style','src','srcset','id']
   });
   stage.querySelectorAll('a').forEach(a => {
@@ -48,6 +48,7 @@
    const wrap = document.createElement('div'); wrap.className = 'table-scroll';
    table.replaceWith(wrap); wrap.append(table);
   });
+  window.hermitMarkdownReader?.remember(stage);
   // A queue per key preserves duplicate paragraphs without aliasing nodes.
   const available = new Map();
   for (const block of blocks) {
@@ -73,6 +74,7 @@
   if (source === appliedSource && currentTheme === appliedTheme) {
    return counts({unchanged:true, reusedBlocks:blocks.length, renderedDiagrams:0});
   }
+  window.hermitMarkdownReader?.prepare();
   const built = build(source, currentTheme);
   // Keep unchanged nodes in place: selection and diagram scroll offsets
   // survive updates to another paragraph.
@@ -145,6 +147,7 @@
   }
   if (run !== generation) return {cancelled:true};
   appliedSource = source; appliedTheme = currentTheme;
+  window.hermitMarkdownReader?.refresh();
   return counts({reusedBlocks:built.reused, renderedDiagrams:rendered, reusedDiagrams});
  }
 

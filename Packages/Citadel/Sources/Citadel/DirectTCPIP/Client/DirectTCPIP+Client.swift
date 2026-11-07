@@ -1,3 +1,4 @@
+import Foundation
 import NIO
 import NIOSSH
 
@@ -38,9 +39,12 @@ extension SSHClient {
     /// Creates a new direct TCP/IP channel. This channel type is used to open a TCP/IP connection to a remote host, through the remote SSH server.
     public func createDirectTCPIPChannel(
         using settings: SSHChannelType.DirectTCPIP,
+        cancellationScope: SSHChildChannelScope? = nil,
         initialize: @escaping (Channel) -> EventLoopFuture<Void>
     ) async throws -> Channel {
+        try cancellationScope?.checkCancellation()
         return try await eventLoop.flatSubmit { [eventLoop, sshHandler = self.session.sshHandler] in
+            do { try cancellationScope?.checkCancellation() } catch { return eventLoop.makeFailedFuture(error) }
             let createdChannel = eventLoop.makePromise(of: Channel.self)
             sshHandler.value.createChannel(
                 createdChannel,
@@ -50,6 +54,9 @@ extension SSHClient {
                     return channel.eventLoop.makeFailedFuture(SSHClientError.channelCreationFailed)
                 }
                 
+                guard cancellationScope?.register(channel) != false else {
+                    return channel.eventLoop.makeFailedFuture(CancellationError())
+                }
                 do {
                     try channel.pipeline.syncOperations.addHandler(DataToBufferCodec())
                 } catch {

@@ -162,7 +162,7 @@ struct TerminalOutputReader: View {
                 }.padding(16)
                 Divider()
                 if showsPreview, !snapshot.text.isEmpty {
-                    MarkdownPreview(text: snapshot.text)
+                    MarkdownReader(text: snapshot.text)
                 } else if search.text.isEmpty {
                     ContentUnavailableView("No output yet", systemImage: "text.alignleft")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
