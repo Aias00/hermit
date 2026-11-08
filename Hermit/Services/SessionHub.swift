@@ -863,27 +863,34 @@ final class SessionHub {
         /// (see its doc comment).
         @ObservationIgnored private var attachTimeoutTask: Task<Void, Never>?
 
+        @discardableResult
+        func openPaneMenu(for resource: HerdrMenuResource? = nil, from view: UIView, at point: CGPoint) -> Bool {
+            guard !isStopping, viewModel.connState == .live, let control = herdrControl,
+                  let target = control.paneMenuTarget(for: resource) else { return false }
+            // List rows may name a nonselected resource. A terminal pointer
+            // instead needs the currently painted pane to match its target.
+            if resource == nil, herdrFrameSSH != nil {
+                guard herdrFrameTarget == target.paneID, herdrFramePainted,
+                      herdrAcceptsFrames, !herdrFrameSuspended else { return false }
+            }
+            if resource == nil, herdrRawAttach {
+                guard moshRawAttachTarget == target.terminalID, moshSwitchCoverTask == nil else { return false }
+            }
+            return paneMenuPresenter.present(from: view, at: point, target: target,
+                workspaces: control.snapshot.sessions.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+                perform: { [weak self, weak control] action in
+                    guard let self, let control, !self.isStopping, self.viewModel.connState == .live,
+                          self.herdrControl === control else { throw HerdrPaneMenuError.targetChanged }
+                    try await control.performPaneMenuAction(action, target: target)
+                })
+        }
+
         init(connection: ServerConnection, dial: TerminalViewModel.Dialer? = nil) {
             self.connection = connection
             self.viewModel = TerminalViewModel(connection: connection, dial: dial)
             if connection.multiplexer == .herdr {
                 coordinator.onContextMenu = { [weak self] view, point in
-                    guard let self, !self.isStopping, self.viewModel.connState == .live,
-                          let control = self.herdrControl, let target = control.paneMenuTarget() else { return false }
-                    if self.herdrFrameSSH != nil {
-                        guard self.herdrFrameTarget == target.paneID, self.herdrFramePainted,
-                              self.herdrAcceptsFrames, !self.herdrFrameSuspended else { return false }
-                    }
-                    if self.herdrRawAttach {
-                        guard self.moshRawAttachTarget == target.terminalID, self.moshSwitchCoverTask == nil else { return false }
-                    }
-                    return self.paneMenuPresenter.present(from: view, at: point, target: target,
-                        workspaces: control.snapshot.sessions.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
-                        perform: { [weak self, weak control] action in
-                            guard let self, let control, !self.isStopping, self.viewModel.connState == .live,
-                                  self.herdrControl === control else { throw HerdrPaneMenuError.targetChanged }
-                            try await control.performPaneMenuAction(action, target: target)
-                        })
+                    self?.openPaneMenu(from: view, at: point) ?? false
                 }
             }
             coordinator.pathLinks = makePathLinks { [weak self] in await self?.plainWorkingDirectory() }

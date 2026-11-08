@@ -84,14 +84,6 @@ final class TerminalScrollGesture: NSObject, UIGestureRecognizerDelegate {
         pinch.delegate = handler
         terminal.addGestureRecognizer(pinch)
 
-        // Reuse SwiftTerm's existing double-tap recognizer and its single /
-        // triple-tap deference chain instead of racing another double tap.
-        terminal.onDoubleTap = { [weak coordinator, weak terminal] point in
-            guard let terminal else { return false }
-            let consumed = coordinator?.onContextMenu?(terminal, point) ?? false
-            if consumed { terminal.closeSelection() }
-            return consumed
-        }
         let secondary = UITapGestureRecognizer(target: handler, action: #selector(handleSecondaryClick(_:)))
         secondary.name = "terminal-secondary-menu"
         secondary.buttonMaskRequired = .secondary

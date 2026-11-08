@@ -566,7 +566,10 @@ struct TerminalScreen: View {
                             create: {
                                 if let control = active?.herdrControl { control.newSession(named: nil) }
                                 else { presentSheet { showSessionsSheet = true } }
-                            }, collapse: { showsConversationSidebar = false })
+                            }, collapse: { showsConversationSidebar = false },
+                            menu: connection.multiplexer == .herdr ? { resource, source, point in
+                                active?.openPaneMenu(for: resource, from: source, at: point) ?? false
+                            } : nil)
                             .frame(width: compactChrome ? 180 : 144)
                     }
                     VStack(spacing: 0) {
@@ -1279,7 +1282,9 @@ struct TerminalScreen: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(tabs) { tab in
-                            Button { active?.herdrControl?.selectWindow(tab.id) } label: {
+                            ContextListButton(menu: { source, point in
+                                active?.openPaneMenu(for: .tab(tab.id), from: source, at: point) ?? false
+                            }, action: { active?.herdrControl?.selectWindow(tab.id) }) {
                                 HStack(spacing: 5) {
                                     if snapshot.activeWindowId == tab.id {
                                         Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))

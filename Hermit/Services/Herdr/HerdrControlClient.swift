@@ -156,6 +156,7 @@ final class HerdrControlClient: MultiplexerControlling {
     @ObservationIgnored private var pendingPoll: PollBatch?
     @ObservationIgnored private var snapshotPollTask: Task<Void, Never>?
     @ObservationIgnored private var pollGeneration = UUID()
+    @ObservationIgnored private var paneMenuGeneration = UUID()
     @ObservationIgnored private var pollsStopped = false
     /// Last decoded payload, to tell "nothing happened" from "we couldn't read".
     @ObservationIgnored private var lastDecoded: HerdrSnapshot.Decoded?
@@ -198,6 +199,7 @@ final class HerdrControlClient: MultiplexerControlling {
     func stop() {
         pollsStopped = true
         pollGeneration = UUID()
+        paneMenuGeneration = UUID()
         snapshotPollTask?.cancel()
         snapshotPollTask = nil
         activePoll?.finish()
@@ -351,6 +353,7 @@ final class HerdrControlClient: MultiplexerControlling {
             // Not a failure: the host has herdr but no session yet. Empty the
             // tree so the UI can say so instead of showing a stale one.
             serverNotRunning = true
+            paneMenuGeneration = UUID()
             // A host that just lost its server is about to get a new one (the
             // empty state's button, or the user's own shell) — stay attentive.
             unchangedPolls = 0
@@ -378,6 +381,11 @@ final class HerdrControlClient: MultiplexerControlling {
         next.lastSwitchForward = snapshot.lastSwitchForward
         next.hasSwipedSinceAttach = snapshot.hasSwipedSinceAttach
         next.everAttached = snapshot.everAttached || next.isAttached
+        if !Set(snapshot.sessions.keys).isSubset(of: Set(next.sessions.keys))
+            || !Set(snapshot.windows.keys).isSubset(of: Set(next.windows.keys))
+            || !Set(snapshot.panes.keys).isSubset(of: Set(next.panes.keys)) {
+            paneMenuGeneration = UUID()
+        }
         snapshot = next
         agentHooks = decoded.agentHooks
         agentHooksLoaded = true
@@ -1061,26 +1069,54 @@ final class HerdrControlClient: MultiplexerControlling {
 
     /// Captured once at the gesture. Actions never consult the later focused
     /// pane, tab or workspace, and a retired controller cannot execute them.
-    func paneMenuTarget() -> HerdrPaneMenuTarget? {
-        guard !pollsStopped, !serverNotRunning, let id = snapshot.activePaneId,
-              let pane = snapshot.panes[id], let tab = snapshot.windows[pane.windowId],
-              let workspace = snapshot.sessions[tab.sessionId] else { return nil }
-        return .init(generation: pollGeneration, paneID: id, tabID: tab.id, workspaceID: workspace.id,
-            terminalID: terminalIds[id], workspaceName: workspace.name, tabName: tab.name, paneIndex: pane.index)
+    func paneMenuTarget(for resource: HerdrMenuResource? = nil) -> HerdrPaneMenuTarget? {
+        guard !pollsStopped, !serverNotRunning,
+              let resource = resource ?? snapshot.activePaneId.map(HerdrMenuResource.pane) else { return nil }
+        let workspaceID: String
+        let tab: WindowInfo?
+        let pane: PaneInfo?
+        switch resource {
+        case .workspace(let id): workspaceID = id; tab = nil; pane = nil
+        case .tab(let id):
+            guard let value = snapshot.windows[id] else { return nil }
+            tab = value; workspaceID = value.sessionId
+            let panes = snapshot.panes(inWindow: id)
+            pane = panes.first(where: \.isActive) ?? panes.first
+        case .pane(let id):
+            guard let value = snapshot.panes[id], let window = snapshot.windows[value.windowId] else { return nil }
+            pane = value; tab = window; workspaceID = window.sessionId
+        }
+        guard let workspace = snapshot.sessions[workspaceID] else { return nil }
+        return .init(generation: paneMenuGeneration, paneID: pane?.id, tabID: tab?.id, workspaceID: workspaceID,
+            terminalID: pane.flatMap { terminalIds[$0.id] }, workspaceName: workspace.name, tabName: tab?.name,
+            paneIndex: pane?.index, resource: resource)
     }
 
     func isValidPaneMenuTarget(_ target: HerdrPaneMenuTarget) -> Bool {
-        !pollsStopped && !serverNotRunning && target.generation == pollGeneration
-            && snapshot.panes[target.paneID]?.windowId == target.tabID
-            && snapshot.windows[target.tabID]?.sessionId == target.workspaceID
-            && snapshot.sessions[target.workspaceID] != nil
-            && terminalIds[target.paneID] == target.terminalID
+        guard !pollsStopped, !serverNotRunning, target.generation == paneMenuGeneration,
+              snapshot.sessions[target.workspaceID] != nil else { return false }
+        switch target.resource {
+        case .workspace(let id): return id == target.workspaceID
+        case .tab(let id): return id == target.tabID && snapshot.windows[id]?.sessionId == target.workspaceID
+        case .pane(let id): return id == target.paneID && validMenuPane(target)
+        }
+    }
+
+    private func validMenuPane(_ target: HerdrPaneMenuTarget) -> Bool {
+        guard let pane = target.paneID, let tab = target.tabID else { return false }
+        return snapshot.panes[pane]?.windowId == tab && snapshot.windows[tab]?.sessionId == target.workspaceID
+            && terminalIds[pane] == target.terminalID
     }
 
     func performPaneMenuAction(_ action: HerdrPaneMenuAction, target: HerdrPaneMenuTarget) async throws {
-        guard isValidPaneMenuTarget(target) else { throw HerdrPaneMenuError.targetChanged }
+        guard isValidPaneMenuTarget(target), let command = action.command(target: target) else { throw HerdrPaneMenuError.targetChanged }
+        if action == .splitRight || action == .splitDown {
+            guard validMenuPane(target) else { throw HerdrPaneMenuError.targetChanged }
+        }
         if case .switchWorkspace(let id) = action, snapshot.sessions[id] == nil { throw HerdrPaneMenuError.targetChanged }
-        if case .renameTab(let name) = action {
+        let rename: String?
+        switch action { case .renameTab(let name), .renameWorkspace(let name): rename = name; default: rename = nil }
+        if let name = rename {
             guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 100,
                   !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
             else { throw HerdrPaneMenuError.invalidName }
@@ -1088,7 +1124,10 @@ final class HerdrControlClient: MultiplexerControlling {
         // No retries: a lost acknowledgement can follow a successful split.
         guard let reply = await withTimeoutValue(12, { [self] in
             guard await self.isValidPaneMenuTarget(target) else { throw HerdrPaneMenuError.targetChanged }
-            return try await self.run(action.command(target: target))
+            if action == .splitRight || action == .splitDown {
+                guard await self.validMenuPane(target) else { throw HerdrPaneMenuError.targetChanged }
+            }
+            return try await self.run(command)
         }) else { throw HerdrPaneMenuError.unconfirmed }
         guard reply.exitCode == 0 else { throw HerdrPaneMenuError.unconfirmed }
         refresh()

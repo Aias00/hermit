@@ -154,10 +154,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// interrupts.
     public var focusOnTap: Bool = true
 
-    /// A host may consume a double tap without transferring keyboard focus.
-    /// Return false to keep the standard word selection / mouse behavior.
-    public var onDoubleTap: ((CGPoint) -> Bool)?
-
     /// Controls how link tracking resolves hovered links:
     /// `.explicit` = OSC 8 only, `.implicit` = explicit + implicit fallback, `.none` = off.
     public var linkReporting: LinkReporting = .implicit
@@ -901,8 +897,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
 
-        if onDoubleTap?(gestureRecognizer.location(in: self)) == true { return }
-        
         if allowMouseReporting && terminal.mouseMode.sendButtonPress() {
             sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
             

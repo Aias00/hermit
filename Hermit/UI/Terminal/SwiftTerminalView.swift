@@ -791,8 +791,8 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// where ``click(col:row:)`` reports it through SwiftTerm's own encoder.
         /// Cells are 0-based, viewport-relative.
         var onClick: ((_ col: Int, _ row: Int) -> Void)?
-        /// A nonmodal, anchored HERDR menu. Returning false preserves the
-        /// terminal's ordinary double-tap selection, including plain SSH.
+        /// An anchored HERDR menu for a mouse/trackpad secondary click.
+        /// Touch double taps always keep the terminal's word selection.
         var onContextMenu: ((_ source: TerminalView, _ point: CGPoint) -> Bool)?
 
         /// True when the LOCAL terminal's app has mouse reporting on (DECSET

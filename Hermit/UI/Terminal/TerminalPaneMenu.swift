@@ -23,7 +23,8 @@ final class TerminalPaneMenuPresenter: NSObject, UIPopoverPresentationController
             close: { [weak self] in self?.dismiss() })
         let controller = UIHostingController(rootView: content)
         controller.modalPresentationStyle = .popover
-        controller.preferredContentSize = CGSize(width: 288, height: 380)
+        let rows = 3 + (target.canSplit ? 2 : 0) + (workspaces.count > 1 ? 1 : 0)
+        controller.preferredContentSize = CGSize(width: 288, height: CGFloat(92 + rows * 44))
         guard let popover = controller.popoverPresentationController else { return false }
         popover.sourceView = source
         popover.sourceRect = CGRect(x: min(max(0, point.x), source.bounds.width),
@@ -75,33 +76,37 @@ private struct TerminalPaneMenu: View {
                     switch page {
                     case .actions:
                         action("新建标签页", icon: "plus.rectangle.on.rectangle", id: "new-tab") { run(.newTab) }
-                        action("左右分屏", icon: "rectangle.split.2x1", id: "split-right") { run(.splitRight) }
-                        action("上下分屏", icon: "rectangle.split.1x2", id: "split-down") { run(.splitDown) }
+                        if target.canSplit {
+                            action("左右分屏", icon: "rectangle.split.2x1", id: "split-right") { run(.splitRight) }
+                            action("上下分屏", icon: "rectangle.split.1x2", id: "split-down") { run(.splitDown) }
+                        }
                         if workspaces.count > 1 {
                             Menu {
                                 ForEach(workspaces) { workspace in
                                     Button(workspace.name) { run(.switchWorkspace(workspace.id)) }
-                                        .disabled(workspace.id == target.workspaceID)
                                 }
                             } label: { row("切换工作区", icon: "rectangle.stack") }
                                 .foregroundStyle(.primary)
                                 .accessibilityIdentifier("pane-menu-workspaces")
                         }
-                        action("重命名标签页", icon: "pencil", id: "rename") { name = target.tabName; page = .rename }
+                        action(target.renameTitle, icon: "pencil", id: "rename") {
+                            if case .workspace = target.resource { name = target.workspaceName } else { name = target.tabName ?? "" }
+                            page = .rename
+                        }
                         Divider()
-                        action("关闭窗格…", icon: "xmark.rectangle", id: "close-pane", destructive: true) { page = .confirmClose }
+                        action(target.closeTitle + "…", icon: "xmark.rectangle", id: "close-resource", destructive: true) { page = .confirmClose }
                     case .rename:
-                        Text("标签页名称").font(.subheadline).padding(.horizontal, 12).padding(.top, 8)
+                        Text(target.renameTitle).font(.subheadline).padding(.horizontal, 12).padding(.top, 8)
                         TextField("名称", text: $name).textFieldStyle(.roundedBorder).padding(12)
                             .focused($editingName).accessibilityIdentifier("pane-menu-name")
-                        action("保存名称", icon: "checkmark", id: "save-name") { editingName = false; run(.renameTab(name)) }
+                        action("保存名称", icon: "checkmark", id: "save-name") { editingName = false; run(target.renameAction(name)) }
                             .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.count > 100)
                         action("返回", icon: "chevron.left", id: "back") { editingName = false; page = .actions }
                     case .confirmClose:
-                        Text("关闭此窗格？").font(.headline).padding(12)
-                        Text("只关闭上方标明的窗格，窗格内运行的远端任务可能会被结束。")
+                        Text(target.closeTitle + "？").font(.headline).padding(12)
+                        Text("将关闭上方标明的对象及其包含的窗格，相关远端任务可能会被结束。")
                             .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 12)
-                        action("确认关闭窗格", icon: "xmark.rectangle", id: "confirm-close", destructive: true) { run(.closePane) }
+                        action("确认" + target.closeTitle, icon: "xmark.rectangle", id: "confirm-close", destructive: true) { run(target.closeAction) }
                         action("取消", icon: "chevron.left", id: "cancel-close") { page = .actions }
                     }
                 }

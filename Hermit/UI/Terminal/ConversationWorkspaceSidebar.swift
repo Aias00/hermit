@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum TerminalChrome {
     static let background = Color(red: 13.0 / 255, green: 27.0 / 255, blue: 40.0 / 255)
@@ -16,6 +17,7 @@ struct ConversationWorkspaceSidebar: View {
     let manage: () -> Void
     let create: () -> Void
     let collapse: () -> Void
+    var menu: ((HerdrMenuResource, UIView, CGPoint) -> Bool)? = nil
 
     private let foreground = Color(red: 157.0 / 255, green: 166.0 / 255, blue: 190.0 / 255)
     private let muted = Color(red: 111.0 / 255, green: 122.0 / 255, blue: 143.0 / 255)
@@ -79,7 +81,8 @@ struct ConversationWorkspaceSidebar: View {
                 LazyVStack(alignment: .leading, spacing: 4) {
                     sectionHeader("Workspaces", count: sessions.count)
                     ForEach(sessions) { session in
-                        Button { selectSession(session.id) } label: {
+                        ContextListButton(menu: menu.map { show in { source, point in show(.workspace(session.id), source, point) } },
+                                          action: { selectSession(session.id) }) {
                             selectedLine(session.name, state: state(in: session), selected: snapshot.activeSessionId == session.id)
                         }
                         .buttonStyle(.plain).accessibilityIdentifier("workspace-\(session.id)")
@@ -95,7 +98,8 @@ struct ConversationWorkspaceSidebar: View {
                             let name = workspace.flatMap { snapshot.sessions[$0]?.name } ?? pane.displayCommand
                             let siblings = agents.filter { workspaceID(of: $0) == workspace }
                             let ordinal = (siblings.firstIndex(where: { $0.id == pane.id }) ?? 0) + 1
-                            Button { selectPane(pane.id) } label: {
+                            ContextListButton(menu: menu.map { show in { source, point in show(.pane(pane.id), source, point) } },
+                                              action: { selectPane(pane.id) }) {
                                 VStack(alignment: .leading, spacing: 0) {
                                     selectedLine(name + (siblings.count > 1 ? " · \(ordinal)" : ""),
                                         state: hook?.state, selected: snapshot.activePaneId == pane.id)
