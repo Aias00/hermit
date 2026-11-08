@@ -1060,6 +1060,89 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// never send mouse wheels or keys: the selection refers to these cells.
     public var selectionScrollHandler: ((CGFloat) -> CGFloat)?
     public var selectionStateChanged: ((Bool) -> Void)?
+    public var hasSelectionHistory: Bool { terminal.selectionReadBuffer != nil }
+    private var selectionOriginalOffset: CGPoint?
+
+    private final class SelectionHistorySink: TerminalDelegate {
+        func send(source: Terminal, data: ArraySlice<UInt8>) { }
+    }
+
+    /// Prepend bounded history only after uniquely locating the frozen screen
+    /// or the selected text's stable context. Preserve styled cells and anchor.
+    @discardableResult
+    public func installSelectionHistory(_ text: String) -> Bool {
+        guard selection.active, !hasSelectionHistory, text.utf8.count <= 1_000_000 else { return false }
+        let source = terminal.displayBuffer
+        let first = source.yDisp
+        let count = min(source.rows, source.lines.count - first)
+        guard count > 0 else { return false }
+        func normalized(_ line: String) -> String {
+            String(line.replacingOccurrences(of: "\0", with: " ").reversed().drop(while: { $0 == " " || $0 == "\r" }).reversed())
+        }
+        var screen = (first..<(first + count)).map {
+            normalized(source.lines[$0].translateToString(trimRight: true, skipNullCellsFollowingWide: true,
+                characterProvider: { self.terminal.getCharacter(for: $0) }))
+        }
+        while screen.last == "" { screen.removeLast() }
+        guard !screen.isEmpty else { return false }
+        var lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n").map(normalized)
+        if lines.last == "" { lines.removeLast() }
+        guard lines.count <= 1_000, lines.count >= screen.count,
+              !text.unicodeScalars.contains(where: {
+                  ($0.value < 32 && ![9, 10, 13].contains($0.value)) || (0x7f...0x9f).contains($0.value)
+              }) else { return false }
+        func origins(for block: [String], offset: Int) -> [Int] {
+            guard !block.isEmpty, lines.count >= block.count else { return [] }
+            return (0...(lines.count - block.count)).filter { Array(lines[$0..<($0 + block.count)]) == block }.map { $0 - offset }
+        }
+        var matches = origins(for: screen, offset: 0)
+        // A live spinner/status row can change during the read. The selected
+        // text and its stable neighbours must still locate ONE history origin.
+        if matches.count != 1 {
+            let anchor = min(screen.count - 1, max(0, (selection.pivot ?? selection.start).row - first))
+            for radius in [3, 2, 1] {
+                let lower = max(0, anchor - radius), upper = min(screen.count, anchor + radius + 1)
+                let block = Array(screen[lower..<upper])
+                guard block.filter({ !$0.isEmpty }).count >= 2 else { continue }
+                let candidates = origins(for: block, offset: lower)
+                if candidates.count == 1 { matches = candidates; break }
+            }
+        }
+        guard matches.count == 1, let prefixCount = matches.first, prefixCount > 0, prefixCount <= lines.count else { return false }
+        let sink = SelectionHistorySink()
+        let parser = Terminal(delegate: sink, options: TerminalOptions(cols: source.cols, rows: source.rows, scrollback: 1_000))
+        parser.feed(text: lines.prefix(prefixCount).joined(separator: "\r\n"))
+        let parsedCount = min(parser.buffer.lines.count, parser.buffer.yBase + parser.buffer.y + 1)
+        let historyCount = min(1_000, parsedCount)
+        let history = Buffer(cols: source.cols, rows: source.rows, tabStopWidth: 8, scrollback: 1_000)
+        for row in (parsedCount - historyCount)..<parsedCount {
+            let line = BufferLine(from: parser.buffer.lines[row])
+            for col in 0..<source.cols {
+                let cell = line[col]
+                line[col] = terminal.makeCharData(attribute: cell.attribute, char: parser.getCharacter(for: cell), size: Int8(cell.width))
+            }
+            history.lines.push(line)
+        }
+        for row in first..<(first + count) { history.lines.push(BufferLine(from: source.lines[row])) }
+        history.yBase = historyCount; history.yDisp = historyCount
+        history.x = source.x; history.y = source.y
+        selectionOriginalOffset = contentOffset
+        terminal.selectionReadBuffer = history
+        updateScroller()
+        contentOffset.y = CGFloat(historyCount - first) * cellDimension.height + (selectionOriginalOffset?.y ?? 0)
+        selection.translateRows(by: historyCount - first)
+        requestDisplay()
+        return true
+    }
+
+    private func removeSelectionHistory() {
+        guard hasSelectionHistory else { return }
+        terminal.selectionReadBuffer = nil
+        updateScroller()
+        if let offset = selectionOriginalOffset { contentOffset = offset }
+        selectionOriginalOffset = nil
+        requestDisplay()
+    }
     private weak var selectionDragGesture: UIGestureRecognizer?
     private var selectionBackgroundObserver: NSObjectProtocol?
 
@@ -1088,7 +1171,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     private func extendSelectionDrag(_ gesture: UIGestureRecognizer) {
         guard selection.active else { stopSelectionTimer(); return }
         selectionDragGesture = gesture
-        hideContextMenu()
+        if contextMenuVisible { hideContextMenu() }
         extendSelection(at: gesture.location(in: self))
         let delta = selectionScrollDelta(at: gesture.location(in: self), viewport: selectionViewport)
         guard delta != 0 else { stopSelectionTimer(); return }
@@ -1122,8 +1205,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         // Recompute the hit after the viewport moves, including while the
         // finger stays still. UIKit gives its location in the new coordinates.
         extendSelection(at: gesture.location(in: self))
-        return moved != 0
+        // A history read can be in flight at the current screen's edge. Keep
+        // observing the held drag so it continues when those rows arrive.
+        return moved != 0 || selectionHistoryPending
     }
+
+    public var selectionHistoryPending = false
     
     func stopSelectionTimer () {
         panTask?.cancel()
@@ -3031,8 +3118,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     open func selectionChanged(source: Terminal) {
-        if Thread.isMainThread { selectionStateChanged?(selection.active) }
-        else { DispatchQueue.main.async { self.selectionStateChanged?(self.selection.active) } }
+        if Thread.isMainThread {
+            if !selection.active { removeSelectionHistory() }
+            selectionStateChanged?(selection.active)
+        } else {
+            DispatchQueue.main.async {
+                if !self.selection.active { self.removeSelectionHistory() }
+                self.selectionStateChanged?(self.selection.active)
+            }
+        }
         if pendingSelectionChanged {
             return
         }

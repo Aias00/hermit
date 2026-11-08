@@ -420,4 +420,45 @@ struct TerminalSelectionScrollTests {
         #expect(!terminal.selectionActive && !terminal.isFirstResponder)
         #expect(remoteRows == 0 && inputs.isEmpty)
     }
+    @Test("HERDR one-screen repaint gains read-only history while the held drag is waiting")
+    func herdrHistoryAtScreenEdge() async throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let root = UIViewController(); window.rootViewController = root; window.makeKeyAndVisible()
+        let terminal = TerminalView(frame: CGRect(x: 0, y: 0, width: 390, height: 240))
+        terminal.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
+        terminal.allowMouseReporting = false; terminal.focusOnTap = false
+        let host = TerminalHostContainer(frame: CGRect(x: 0, y: 70, width: 390, height: terminal.cellHeight * 14))
+        root.view.addSubview(host); host.remoteGrid = (40, 14); host.host(terminal)
+        let coordinator = SwiftTerminalView.Coordinator(); coordinator.remoteGrid = (40, 14)
+        coordinator.hostContainer = host; coordinator.attach(to: terminal); host.layoutSubviews()
+        let lines = (0..<180).map { "R\(String(format: "%03d", $0)) 中文 é 👩‍💻" }
+        terminal.feed(text: "\u{1b}[?1049h" + (0..<14).map { "\u{1b}[\($0 + 1);1H" + lines[166 + $0] }.joined())
+        let original = terminal.getTerminal().buffer
+        let liveText = terminal.getTerminal().getText(start: Position(col: 0, row: 0), end: Position(col: 40, row: 13))
+        coordinator.onSelectionHistory = { try await Task.sleep(for: .milliseconds(150)); return lines.joined(separator: "\n") + "\n" }
+        var rows = 0; var input: [Data] = []
+        coordinator.onScroll = { rows += $0 }; coordinator.onInput = { input.append($0) }
+        defer { terminal.closeSelection(); coordinator.releaseScrollHold(); window.isHidden = true }
+        let tap = Tap(); tap.space = root.view; tap.point = CGPoint(x: 12, y: host.frame.midY)
+        terminal.addGestureRecognizer(tap); terminal.perform(NSSelectorFromString("doubleTap:"), with: tap)
+        let anchor = try #require(terminal.getSelection())
+        let pan = Pan(); pan.space = root.view; pan.point = tap.point; terminal.addGestureRecognizer(pan)
+        pan.phase = .began; terminal.perform(NSSelectorFromString("panSelectionHandler:"), with: pan)
+        pan.point.y = host.frame.minY + 1; pan.phase = .changed
+        terminal.perform(NSSelectorFromString("panSelectionHandler:"), with: pan)
+        #expect(!terminal.canScroll && terminal.selectionHistoryPending)
+        try await Task.sleep(for: .milliseconds(750))
+        #expect(terminal.hasSelectionHistory && terminal.canScroll)
+        let text = try #require(terminal.getSelection())
+        #expect(text.split(separator: "\n").count > 14)
+        #expect(text.contains(anchor) && text.contains("中文") && text.contains("é") && text.contains("👩‍💻"))
+        #expect(terminal.getTerminal().buffer === original && original.yDisp == 0)
+        pan.phase = .ended; terminal.perform(NSSelectorFromString("panSelectionHandler:"), with: pan)
+        let copied = terminal.getSelection(); terminal.copy(nil)
+        #expect(UIPasteboard.general.string == copied && !terminal.hasSelectionHistory)
+        #expect(terminal.getTerminal().isCurrentBufferAlternate && terminal.getTerminal().buffer === original)
+        #expect(terminal.getTerminal().getText(start: Position(col: 0, row: 0), end: Position(col: 40, row: 13)) == liveText)
+        #expect(rows == 0 && input.isEmpty)
+    }
+
 }

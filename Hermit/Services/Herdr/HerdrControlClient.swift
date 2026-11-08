@@ -1133,6 +1133,17 @@ final class HerdrControlClient: MultiplexerControlling {
         refresh()
     }
 
+    /// Read-only, bounded history for a captured pane. Never focus, scroll or
+    /// resize the server terminal to retrieve text for local selection.
+    func selectionHistory(paneID: String) async throws -> String {
+        guard let target = paneMenuTarget(for: .pane(paneID)) else { throw HerdrPaneMenuError.targetChanged }
+        guard let reply = await withTimeoutValue(8, { [self] in
+            try await self.run("pane read \(HerdrLaunch.quote(paneID)) --source recent --lines 1000 --format text")
+        }), reply.exitCode == 0, reply.output.utf8.count <= 1_000_000 else { throw HerdrPaneMenuError.unconfirmed }
+        guard isValidPaneMenuTarget(target) else { throw HerdrPaneMenuError.targetChanged }
+        return reply.output
+    }
+
     /// Split the focused pane. herdr needs an explicit target, and `--current`
     /// means "the pane this CLI invocation runs in" — which for us is nothing,
     /// since we run over our own SSH channel — so pass the id from the

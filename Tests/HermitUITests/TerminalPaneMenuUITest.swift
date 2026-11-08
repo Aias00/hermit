@@ -1,16 +1,23 @@
 import XCTest
 
 final class TerminalPaneMenuUITest: XCTestCase {
-    @MainActor private func launch(plain: Bool = false, selection: Bool = false) -> XCUIApplication {
+    @MainActor private func launch(plain: Bool = false, selection: Bool = false, history: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-HERMIT_PANE_MENU_FIXTURE"] + (plain ? ["-HERMIT_PANE_MENU_PLAIN"] : [])
         if selection { app.launchArguments.append("-HERMIT_SELECTION_SCROLL_FIXTURE") }
+        if history { app.launchArguments.append("-HERMIT_SELECTION_HISTORY_FIXTURE") }
         app.launch()
         return app
     }
     @MainActor func testSelectionDragScrollsBeyondOneScreen() throws {
-        let app = launch(selection: true)
+        try verifySelectionScroll(history: false)
+    }
+    @MainActor func testHERDRFrameLoadsHistoryForSelection() throws {
+        try verifySelectionScroll(history: true)
+    }
+    @MainActor private func verifySelectionScroll(history: Bool) throws {
+        let app = launch(selection: true, history: history)
         defer { app.terminate() }
         let terminal = app.descendants(matching: .any).matching(identifier: "pane-menu-fixture-terminal").firstMatch
         XCTAssertTrue(terminal.waitForExistence(timeout: 10))

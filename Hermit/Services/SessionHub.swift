@@ -1975,6 +1975,15 @@ final class SessionHub {
             coordinator.onScroll = { [weak self] lines in
                 self?.scrollActiveTerminal(lines: lines)
             }
+            coordinator.onSelectionHistory = { [weak self] in
+                guard let self, !self.herdrFrameSuspended, self.herdrFramePainted,
+                      let pane = self.herdrFrameTarget, let control = self.herdrControl else { throw SSHError.sessionClosed }
+                let target = self.herdrTargetGeneration
+                let history = try await control.selectionHistory(paneID: pane)
+                guard self.herdrTargetGeneration == target, self.herdrFrameTarget == pane,
+                      !self.herdrFrameSuspended else { throw SSHError.sessionClosed }
+                return history
+            }
 
             pumpTask = Task { [weak self] in
                 var parser = HerdrFrameParser()

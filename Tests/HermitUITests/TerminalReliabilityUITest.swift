@@ -311,6 +311,32 @@ final class TerminalReliabilityUITest: XCTestCase {
     }
 
     @MainActor
+    func testHERDRHistorySelectionOverRealSSH() throws {
+        let app = try openTerminal(explicitNavigation: true)
+        let field = composer(app)
+        field.tap(); field.typeText("history keeps draft")
+        expectation(for: NSPredicate(format: "value == 'history keeps draft'"), evaluatedWith: field)
+        waitForExpectations(timeout: 8)
+        if app.keyboards.firstMatch.exists {
+            app.buttons["conversation-keyboard-toggle"].tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        }
+        let surface = app.descendants(matching: .any).matching(identifier: "terminal-input-surface").firstMatch
+        XCTAssertTrue(surface.waitForExistence(timeout: 10))
+        let start = surface.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.5))
+        let edge = surface.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.002))
+        start.press(forDuration: 1.2, thenDragTo: edge, withVelocity: .slow, thenHoldForDuration: 3)
+        let copy = app.menuItems.matching(NSPredicate(format: "label IN %@", ["Copy", "拷贝", "复制"])).firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 8))
+        captureScreenshot(app, name: "herdr-real-ssh-history-selection")
+        copy.tap()
+        XCTAssertEqual(field.value as? String, "history keeps draft")
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        // The harness reads this owned simulator's pasteboard and verifies
+        // that it includes history older than the original one-screen frame.
+    }
+
+    @MainActor
     func testRemoteWebPreviewKeepsDraftLoadsAssetsAndStopsOnBackground() throws {
         let port = try XCTUnwrap(ProcessInfo.processInfo.environment["MOSHPIT_WEB_PREVIEW_PORT"])
         let app = try openTerminal(explicitNavigation: true)

@@ -570,6 +570,46 @@ struct SwiftTerminalView: UIViewRepresentable {
         private var heldFeed: [Data] = []
         private var heldBytes = 0
         private let heldByteLimit = 1_000_000
+        var onSelectionHistory: (() async throws -> String)?
+        private var selectionHistoryTask: Task<Void, Never>?
+        private var selectionHistoryGeneration = UUID()
+        private var selectionWasActive = false
+
+        private func cancelSelectionHistory() {
+            selectionHistoryGeneration = UUID()
+            selectionHistoryTask?.cancel(); selectionHistoryTask = nil
+            terminalView?.selectionHistoryPending = false
+        }
+
+        private func selectionChanged(on view: TerminalView) {
+            updateScrollHold(view)
+            let active = view.selectionActive
+            guard active != selectionWasActive else { return }
+            selectionWasActive = active
+            cancelSelectionHistory()
+            guard active, let load = onSelectionHistory else { return }
+            let generation = selectionHistoryGeneration
+            let grid = (view.getTerminal().cols, view.getTerminal().rows)
+            view.selectionHistoryPending = true
+            selectionHistoryTask = Task { @MainActor [weak self, weak view] in
+                defer {
+                    if let self, self.selectionHistoryGeneration == generation {
+                        view?.selectionHistoryPending = false; self.selectionHistoryTask = nil
+                    }
+                }
+                do {
+                    let text = try await load()
+                    guard let self, let view, !Task.isCancelled,
+                          self.selectionHistoryGeneration == generation, self.terminalView === view,
+                          view.window != nil, view.selectionActive,
+                          view.getTerminal().cols == grid.0, view.getTerminal().rows == grid.1 else { return }
+                    let installed = view.installSelectionHistory(text)
+                    Log.input.info("selection history: installed=\(installed, privacy: .public)")
+                } catch {
+                    if !Task.isCancelled { Log.input.notice("selection history: read unavailable") }
+                }
+            }
+        }
         private let readingVersion = TerminalOutputVersion()
         var outputRevision: UInt64 { readingVersion.value }
         private(set) var outputGeneration = UUID()
@@ -1226,9 +1266,11 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// the fresh one (the remote repaints from scratch anyway).
         func discardScrollHold() {
             cancelPendingWheel()
-            scrollHeld = false
             heldFeed.removeAll()
             heldBytes = 0
+            cancelSelectionHistory()
+            terminalView?.closeSelection()
+            scrollHeld = false
         }
 
         /// Feed a string (for seeding banners, status text, etc.). Same
@@ -1246,6 +1288,9 @@ struct SwiftTerminalView: UIViewRepresentable {
         /// Programmatic resize — typically driven by the parent in response
         /// to remote window-size requests rather than UI layout.
         func resize(cols: Int, rows: Int) {
+            if terminalView?.hasSelectionHistory == true || selectionHistoryTask != nil {
+                terminalView?.closeSelection()
+            }
             if let terminalView { prediction?.withdraw(from: terminalView.getTerminal()) }
             terminalView?.resize(cols: cols, rows: rows)
         }
@@ -1262,6 +1307,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         func resetInputParser() {
             outputGeneration = UUID()
             cancelPendingWheel()
+            if selectionHistoryTask != nil || terminalView?.hasSelectionHistory == true { discardScrollHold() }
             terminalView?.getTerminal().discardPendingInput()
         }
 
@@ -1276,6 +1322,7 @@ struct SwiftTerminalView: UIViewRepresentable {
         private var backgroundObserver: NSObjectProtocol?
 
         deinit {
+            selectionHistoryTask?.cancel()
             wheelWork?.cancel()
             if let backgroundObserver {
                 NotificationCenter.default.removeObserver(backgroundObserver)
@@ -1316,7 +1363,11 @@ struct SwiftTerminalView: UIViewRepresentable {
         weak var hostContainer: TerminalHostContainer? {
             didSet {
                 oldValue?.onDetached = nil
-                hostContainer?.onDetached = { [weak self] in self?.cancelPendingWheel() }
+                hostContainer?.onDetached = { [weak self] in
+                    self?.cancelPendingWheel()
+                    self?.cancelSelectionHistory()
+                    self?.terminalView?.closeSelection()
+                }
                 hostContainer?.remoteGrid = remoteGrid
                 hostContainer?.onViewportLaidOut = { [weak self] cols, rows in
                     self?.reportViewport(cols: cols, rows: rows)
@@ -1603,7 +1654,12 @@ struct SwiftTerminalView: UIViewRepresentable {
             if backgroundObserver == nil {
                 backgroundObserver = NotificationCenter.default.addObserver(
                     forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
-                ) { [weak self] _ in self?.cancelPendingWheel() }
+                ) { [weak self] _ in
+                    self?.cancelPendingWheel()
+                    if self?.selectionHistoryTask != nil || self?.terminalView?.hasSelectionHistory == true {
+                        self?.terminalView?.closeSelection()
+                    }
+                }
             }
             // Install scroll/zoom here (not in makeUIView) so it covers tmux
             // panes too — those are minted by the controller and only ever go
@@ -1611,14 +1667,22 @@ struct SwiftTerminalView: UIViewRepresentable {
             TerminalScrollGesture.attach(to: terminalView, coordinator: self)
             terminalView.selectionScrollHandler = { [weak self] delta in
                 guard let self else { return 0 }
+                if self.terminalView?.hasSelectionHistory == true {
+                    if delta > 0 {
+                        let moved = self.hostContainer?.panRemoteViewport(by: delta) ?? 0
+                        return moved + self.scrollLocal(pixels: delta - moved)
+                    }
+                    let moved = self.scrollLocal(pixels: delta)
+                    return moved + (self.hostContainer?.panRemoteViewport(by: delta - moved) ?? 0)
+                }
                 if self.remoteGrid != nil {
                     return self.hostContainer?.panRemoteViewport(by: delta) ?? 0
                 }
                 return self.scrollLocal(pixels: delta)
             }
             terminalView.selectionStateChanged = { [weak self, weak terminalView] _ in
-                guard let self, let terminalView else { return }
-                self.updateScrollHold(terminalView)
+                guard let self, let terminalView, self.terminalView === terminalView else { return }
+                self.selectionChanged(on: terminalView)
             }
             // Switching the input method (globe key) is INVISIBLE to every
             // path we had: the CN/EN keyboards are the same height, so no

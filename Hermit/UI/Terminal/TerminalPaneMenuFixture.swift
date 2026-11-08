@@ -22,6 +22,7 @@ struct TerminalPaneMenuFixture: UIViewControllerRepresentable {
         let coordinator = SwiftTerminalView.Coordinator()
         let menu = TerminalPaneMenuPresenter()
         var selections = 0
+        private var historySeeded = false
         static let snapshot = """
         {"result":{"snapshot":{
           "workspaces":[{"workspace_id":"w1","label":"Project","focused":true},{"workspace_id":"w2","label":"Empty workspace"}],
@@ -52,7 +53,8 @@ struct TerminalPaneMenuFixture: UIViewControllerRepresentable {
             terminal.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
             terminal.getTerminal().setCursorStyle(.steadyBlock)
             let selectionFixture = ProcessInfo.processInfo.arguments.contains("-HERMIT_SELECTION_SCROLL_FIXTURE")
-            if selectionFixture {
+            let historyFixture = ProcessInfo.processInfo.arguments.contains("-HERMIT_SELECTION_HISTORY_FIXTURE")
+            if selectionFixture || historyFixture {
                 terminal.feed(text: (1...200).map { "R\(String(format: "%03d", $0)) 中文\r\n" }.joined())
             } else {
                 terminal.feed(text: "\u{1b}[2J\u{1b}[HHERDR terminal\r\nDouble tap selects words\r\nList opens actions\r\n")
@@ -101,6 +103,23 @@ struct TerminalPaneMenuFixture: UIViewControllerRepresentable {
                 draft.heightAnchor.constraint(equalToConstant: 44),
                 draft.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -12)
             ])
+        }
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            guard !historySeeded, ProcessInfo.processInfo.arguments.contains("-HERMIT_SELECTION_HISTORY_FIXTURE"),
+                  terminal.bounds.height > 0 else { return }
+            historySeeded = true
+            terminal.layoutIfNeeded()
+            let grid = terminal.getTerminal()
+            let lines = (0..<300).map { "R\(String(format: "%03d", $0)) 中文" }
+            terminal.feed(text: "\u{1b}[?1049h\u{1b}[2J" + (0..<grid.rows).map {
+                "\u{1b}[\($0 + 1);1H" + lines[300 - grid.rows + $0]
+            }.joined())
+            coordinator.remoteGrid = (grid.cols, grid.rows)
+            coordinator.onSelectionHistory = {
+                try await Task.sleep(for: .milliseconds(250))
+                return lines.joined(separator: "\n") + "\n"
+            }
         }
         private func showMenu(for resource: HerdrMenuResource?, from source: UIView, at point: CGPoint) -> Bool {
             guard let target = control.paneMenuTarget(for: resource) else { return false }

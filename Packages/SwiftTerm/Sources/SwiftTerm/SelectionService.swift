@@ -71,6 +71,13 @@ class SelectionService: CustomDebugStringConvertible {
      */
     public var pivot: Position? 
 
+    func translateRows(by offset: Int) {
+        start = Position(col: start.col, row: start.row + offset)
+        end = Position(col: end.col, row: end.row + offset)
+        if let pivot { self.pivot = Position(col: pivot.col, row: pivot.row + offset) }
+        setActiveAndNotify()
+    }
+
     /**
      * Returns the selection ending point in buffer coordinates
      */

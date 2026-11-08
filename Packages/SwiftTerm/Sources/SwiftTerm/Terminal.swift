@@ -343,13 +343,17 @@ open class Terminal {
     private var synchronizedOutputBuffer: Buffer?
     private var synchronizedOutputBufferIsAlternate: Bool = false
     private var synchronizedOutputTimeoutItem: DispatchWorkItem?
+    // A read-only selection surface. The live parser and its alternate screen
+    // keep their original buffers; selecting history must not rewrite them.
+    var selectionReadBuffer: Buffer?
 
     var displayBuffer: Buffer {
-        synchronizedOutputBuffer ?? buffer
+        selectionReadBuffer ?? synchronizedOutputBuffer ?? buffer
     }
 
     var isDisplayBufferAlternate: Bool {
-        synchronizedOutputBuffer != nil ? synchronizedOutputBufferIsAlternate : isCurrentBufferAlternate
+        if selectionReadBuffer != nil { return false }
+        return synchronizedOutputBuffer != nil ? synchronizedOutputBufferIsAlternate : isCurrentBufferAlternate
     }
     
     public var isCurrentBufferAlternate: Bool {
@@ -5674,6 +5678,7 @@ open class Terminal {
 
     func setViewYDisp (_ newValue: Int)
     {
+        if let selectionReadBuffer { selectionReadBuffer.yDisp = newValue; return }
         buffer.yDisp = newValue
         synchronizedOutputBuffer?.yDisp = newValue
     }
