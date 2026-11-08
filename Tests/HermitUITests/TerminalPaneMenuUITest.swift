@@ -51,6 +51,16 @@ final class TerminalPaneMenuUITest: XCTestCase {
         let terminal = app.descendants(matching: .any).matching(identifier: "pane-menu-fixture-terminal").firstMatch
         XCTAssertTrue(terminal.waitForExistence(timeout: 10))
         XCTAssertFalse(app.keyboards.firstMatch.exists)
+        // The fixture must wire the production secondary-click callback. A
+        // finger tap must never enter that pointer-only path, anywhere on it.
+        let dismiss = app.buttons["pane-menu-dismiss"]
+        for point in [CGVector(dx: 0.12, dy: 0.015), CGVector(dx: 0.85, dy: 0.3), CGVector(dx: 0.5, dy: 0.7)] {
+            terminal.coordinate(withNormalizedOffset: point).tap()
+            XCTAssertTrue(dismiss.waitForNonExistence(timeout: 2), "A single finger tap must not open HERDR actions")
+        }
+        app.buttons["menu-fixture-pane-w1:p2"].tap()
+        XCTAssertTrue(app.staticTexts["selected pane-w1:p2 count=1"].waitForExistence(timeout: 5))
+        XCTAssertFalse(dismiss.exists)
         app.buttons["menu-fixture-workspace-w2"].doubleTap()
         XCTAssertTrue(app.buttons["pane-menu-dismiss"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.keyboards.firstMatch.exists)

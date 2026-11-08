@@ -55,14 +55,16 @@ struct TerminalPaneMenuFixture: UIViewControllerRepresentable {
             result.accessibilityIdentifier = "pane-menu-fixture-result"
             result.text = "No actions executed"
             coordinator.attach(to: terminal)
+            if !ProcessInfo.processInfo.arguments.contains("-HERMIT_PANE_MENU_PLAIN") {
+                coordinator.onContextMenu = { [weak self] source, point in
+                    self?.showMenu(for: nil, from: source, at: point) ?? false
+                }
+            }
             Task { await control.pollNowForTesting() }
             let rows = UIHostingController(rootView: Rows(select: { [weak self] id in
                 guard let self else { return }; selections += 1; result.text = "selected \(id) count=\(selections)"
             }, show: { [weak self] resource, source, point in
-                guard let self, let target = control.paneMenuTarget(for: resource) else { return false }
-                return menu.present(from: source, at: point, target: target,
-                    workspaces: [.init(id: "w1", name: "Project"), .init(id: "w2", name: "Empty workspace")],
-                    perform: { [weak self] action in self?.result.text = action.command(target: target) })
+                self?.showMenu(for: resource, from: source, at: point) ?? false
             }))
             addChild(rows); rows.view.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(rows.view); rows.didMove(toParent: self)
@@ -85,6 +87,12 @@ struct TerminalPaneMenuFixture: UIViewControllerRepresentable {
                 draft.heightAnchor.constraint(equalToConstant: 44),
                 draft.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -12)
             ])
+        }
+        private func showMenu(for resource: HerdrMenuResource?, from source: UIView, at point: CGPoint) -> Bool {
+            guard let target = control.paneMenuTarget(for: resource) else { return false }
+            return menu.present(from: source, at: point, target: target,
+                workspaces: [.init(id: "w1", name: "Project"), .init(id: "w2", name: "Empty workspace")],
+                perform: { [weak self] action in self?.result.text = action.command(target: target) })
         }
     }
 

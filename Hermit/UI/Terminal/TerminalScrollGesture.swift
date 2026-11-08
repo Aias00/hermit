@@ -87,6 +87,9 @@ final class TerminalScrollGesture: NSObject, UIGestureRecognizerDelegate {
         let secondary = UITapGestureRecognizer(target: handler, action: #selector(handleSecondaryClick(_:)))
         secondary.name = "terminal-secondary-menu"
         secondary.buttonMaskRequired = .secondary
+        // buttonMaskRequired only filters pointer buttons. Without an explicit
+        // touch type, an ordinary finger tap can also recognize this gesture.
+        secondary.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
         secondary.cancelsTouchesInView = false
         secondary.delegate = handler
         terminal.addGestureRecognizer(secondary)
@@ -271,6 +274,10 @@ final class TerminalScrollGesture: NSObject, UIGestureRecognizerDelegate {
     }
 
     // MARK: - UIGestureRecognizerDelegate
+
+    func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        gesture.name != "terminal-secondary-menu" || touch.type == .indirectPointer
+    }
 
     // The "reading window" tap-swallower that used to live here — a
     // recognizer that ate taps for two seconds after a scroll so SwiftTerm's

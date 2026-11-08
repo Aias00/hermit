@@ -26,6 +26,7 @@ struct HerdrPaneMenuTests {
         #expect(input.isEmpty && !terminal.isFirstResponder)
         let pointer = try #require(terminal.gestureRecognizers?.first { $0.name == "terminal-secondary-menu" })
         #expect((pointer as? UITapGestureRecognizer)?.buttonMaskRequired == .secondary)
+        #expect(pointer.allowedTouchTypes == [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)])
         coordinator.onContextMenu = nil
         #expect(pointer.delegate?.gestureRecognizerShouldBegin?(pointer) == false)
     }
