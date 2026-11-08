@@ -636,6 +636,7 @@ final class SessionHub {
         /// True while the user is intentionally tearing this session down, so a
         /// concurrent keepalive / death callback doesn't fight it by reconnecting.
         @ObservationIgnored var isStopping = false
+        @ObservationIgnored private let paneMenuPresenter = TerminalPaneMenuPresenter()
         /// Guards against overlapping reconnect attempts (death callback +
         /// keepalive timer can both fire).
         @ObservationIgnored private var isReconnecting = false
@@ -697,6 +698,7 @@ final class SessionHub {
         /// windows at the phone width. Hand the pins back here; `repinForeground()`
         /// re-applies them when the terminal returns. Covers SSH + the mosh sidecar.
         func releaseWindowPinsForBackground(reason: String = "background") {
+            paneMenuPresenter.dismiss()
             if connection.multiplexer == .herdr {
                 Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) herdr presentation: released reason=\(reason, privacy: .public)")
             }
@@ -864,6 +866,26 @@ final class SessionHub {
         init(connection: ServerConnection, dial: TerminalViewModel.Dialer? = nil) {
             self.connection = connection
             self.viewModel = TerminalViewModel(connection: connection, dial: dial)
+            if connection.multiplexer == .herdr {
+                coordinator.onContextMenu = { [weak self] view, point in
+                    guard let self, !self.isStopping, self.viewModel.connState == .live,
+                          let control = self.herdrControl, let target = control.paneMenuTarget() else { return false }
+                    if self.herdrFrameSSH != nil {
+                        guard self.herdrFrameTarget == target.paneID, self.herdrFramePainted,
+                              self.herdrAcceptsFrames, !self.herdrFrameSuspended else { return false }
+                    }
+                    if self.herdrRawAttach {
+                        guard self.moshRawAttachTarget == target.terminalID, self.moshSwitchCoverTask == nil else { return false }
+                    }
+                    return self.paneMenuPresenter.present(from: view, at: point, target: target,
+                        workspaces: control.snapshot.sessions.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+                        perform: { [weak self, weak control] action in
+                            guard let self, let control, !self.isStopping, self.viewModel.connState == .live,
+                                  self.herdrControl === control else { throw HerdrPaneMenuError.targetChanged }
+                            try await control.performPaneMenuAction(action, target: target)
+                        })
+                }
+            }
             coordinator.pathLinks = makePathLinks { [weak self] in await self?.plainWorkingDirectory() }
             coordinator.onOpenRemoteWebURL = { [weak self] url in
                 Task { @MainActor [weak self] in self?.openWebPreview(url) }
@@ -3215,6 +3237,7 @@ final class SessionHub {
             webPreviews.removeAll()
             webPreview = nil
             retryScheduledAt = nil
+            paneMenuPresenter.dismiss()
             resetPlainSSHObservation()
             herdrFrameRecoveryTask?.cancel()
             herdrFrameRecoveryTask = nil

@@ -84,6 +84,21 @@ final class TerminalScrollGesture: NSObject, UIGestureRecognizerDelegate {
         pinch.delegate = handler
         terminal.addGestureRecognizer(pinch)
 
+        // Reuse SwiftTerm's existing double-tap recognizer and its single /
+        // triple-tap deference chain instead of racing another double tap.
+        terminal.onDoubleTap = { [weak coordinator, weak terminal] point in
+            guard let terminal else { return false }
+            let consumed = coordinator?.onContextMenu?(terminal, point) ?? false
+            if consumed { terminal.closeSelection() }
+            return consumed
+        }
+        let secondary = UITapGestureRecognizer(target: handler, action: #selector(handleSecondaryClick(_:)))
+        secondary.name = "terminal-secondary-menu"
+        secondary.buttonMaskRequired = .secondary
+        secondary.cancelsTouchesInView = false
+        secondary.delegate = handler
+        terminal.addGestureRecognizer(secondary)
+
         // Tap-to-position. A mouse-aware program (Claude Code's prompt, vim,
         // less) reads a click as "put the cursor here" — the only way to reach a
         // character in the middle of a long line without walking the arrow keys
@@ -258,6 +273,11 @@ final class TerminalScrollGesture: NSObject, UIGestureRecognizerDelegate {
         }
     }
 
+    @objc private func handleSecondaryClick(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended, let terminal = gesture.view as? TerminalView else { return }
+        _ = coordinator?.onContextMenu?(terminal, gesture.location(in: terminal))
+    }
+
     // MARK: - UIGestureRecognizerDelegate
 
     // The "reading window" tap-swallower that used to live here — a
@@ -270,6 +290,7 @@ final class TerminalScrollGesture: NSObject, UIGestureRecognizerDelegate {
     /// Gate the one-finger scroll so it never steals taps, long-press selection,
     /// or full-screen-app drags.
     func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+        if gesture.name == "terminal-secondary-menu" { return coordinator?.onContextMenu != nil }
         guard let pan = gesture as? UIPanGestureRecognizer,
               pan.maximumNumberOfTouches == 1,
               let terminal = pan.view as? TerminalView else { return true }

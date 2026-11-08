@@ -40,7 +40,9 @@
 | 单击 | D | 永不弹键盘（光标在屏外）；click 照发 | U ✅ |
 | 单击链接 | A/B/C/D | 打开链接，**不**弹键盘、不聚焦（fork patch 4+13+15）。跨行 URL 点任一行都是完整地址：软换行由 `isRowWrapped` 拼接；**硬换行**（Claude Code 自排版，贴右边缘断行+缩进续行）由 PlainLinkDetector 的续接启发式拼接，防误伤门槛=续行段 ≥2 字符且含非字母 | U ✅ / M ✅ |
 | 单击 | F | **清除选择**（app `handleTap` → fork `closeSelection()`，聚焦与否都成立；不发 click、不弹键盘） | U ✅ |
-| 双击 | 任意 | 选中词/表达式 + 出现手柄 + **Copy 菜单（无需聚焦，UIEditMenuInteraction）** | M（菜单出现 S 待补） |
+| 双击 | HERDR 已就绪 | 点击位置弹出原生窗格操作菜单；保持键盘和草稿，不发终端输入；操作绑定触发时的工作区/窗格，关闭需确认 | U+S |
+| 双击 | 普通 SSH / 其他模式 | 选中词/表达式 + 出现手柄 + **Copy 菜单（无需聚焦，UIEditMenuInteraction）** | M（菜单出现 S 待补） |
+| 鼠标／触控板右键 | HERDR 已就绪 | 与双击共用同一个就地操作菜单 | T（真实指针待手测） |
 | 三击 | 任意 | 选整行 + 菜单 | M |
 | 长按 | 任意 | **选中指下的词** + 手柄；按住滑动=扩选；松手出菜单（含 Paste）。不弹键盘（fork patch 17） | S ✅ |
 | 手柄拖动 | F | 抓取窗口 = **手指尺寸**（22pt 折算格子，`selectionHandleTolerance`）；抓中端点 → 拖动该端点；抓空 → 从 pivot 扩展 | U ✅ + M |

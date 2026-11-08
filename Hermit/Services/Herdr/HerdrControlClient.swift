@@ -393,7 +393,7 @@ final class HerdrControlClient: MultiplexerControlling {
     // MARK: - Running commands
 
     /// One `herdr` invocation and how it ended.
-    struct CommandResult: Equatable {
+    struct CommandResult: Equatable, Sendable {
         var output: String
         /// The command's exit status, or nil if the trailer went missing.
         var exitCode: Int?
@@ -1057,6 +1057,41 @@ final class HerdrControlClient: MultiplexerControlling {
         var command = "tab create --focus"
         if let name, !name.isEmpty { command += " --label \(HerdrLaunch.quote(name))" }
         send(command)
+    }
+
+    /// Captured once at the gesture. Actions never consult the later focused
+    /// pane, tab or workspace, and a retired controller cannot execute them.
+    func paneMenuTarget() -> HerdrPaneMenuTarget? {
+        guard !pollsStopped, !serverNotRunning, let id = snapshot.activePaneId,
+              let pane = snapshot.panes[id], let tab = snapshot.windows[pane.windowId],
+              let workspace = snapshot.sessions[tab.sessionId] else { return nil }
+        return .init(generation: pollGeneration, paneID: id, tabID: tab.id, workspaceID: workspace.id,
+            terminalID: terminalIds[id], workspaceName: workspace.name, tabName: tab.name, paneIndex: pane.index)
+    }
+
+    func isValidPaneMenuTarget(_ target: HerdrPaneMenuTarget) -> Bool {
+        !pollsStopped && !serverNotRunning && target.generation == pollGeneration
+            && snapshot.panes[target.paneID]?.windowId == target.tabID
+            && snapshot.windows[target.tabID]?.sessionId == target.workspaceID
+            && snapshot.sessions[target.workspaceID] != nil
+            && terminalIds[target.paneID] == target.terminalID
+    }
+
+    func performPaneMenuAction(_ action: HerdrPaneMenuAction, target: HerdrPaneMenuTarget) async throws {
+        guard isValidPaneMenuTarget(target) else { throw HerdrPaneMenuError.targetChanged }
+        if case .switchWorkspace(let id) = action, snapshot.sessions[id] == nil { throw HerdrPaneMenuError.targetChanged }
+        if case .renameTab(let name) = action {
+            guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.count <= 100,
+                  !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+            else { throw HerdrPaneMenuError.invalidName }
+        }
+        // No retries: a lost acknowledgement can follow a successful split.
+        guard let reply = await withTimeoutValue(12, { [self] in
+            guard await self.isValidPaneMenuTarget(target) else { throw HerdrPaneMenuError.targetChanged }
+            return try await self.run(action.command(target: target))
+        }) else { throw HerdrPaneMenuError.unconfirmed }
+        guard reply.exitCode == 0 else { throw HerdrPaneMenuError.unconfirmed }
+        refresh()
     }
 
     /// Split the focused pane. herdr needs an explicit target, and `--current`
