@@ -51,10 +51,24 @@ struct TerminalPaneMenuFixture: UIViewControllerRepresentable {
             terminal.allowMouseReporting = false
             terminal.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
             terminal.getTerminal().setCursorStyle(.steadyBlock)
-            terminal.feed(text: "\u{1b}[2J\u{1b}[HHERDR terminal\r\nDouble tap selects words\r\nList opens actions\r\n")
+            let selectionFixture = ProcessInfo.processInfo.arguments.contains("-HERMIT_SELECTION_SCROLL_FIXTURE")
+            if selectionFixture {
+                terminal.feed(text: (1...200).map { "R\(String(format: "%03d", $0)) 中文\r\n" }.joined())
+            } else {
+                terminal.feed(text: "\u{1b}[2J\u{1b}[HHERDR terminal\r\nDouble tap selects words\r\nList opens actions\r\n")
+            }
             result.accessibilityIdentifier = "pane-menu-fixture-result"
             result.text = "No actions executed"
             coordinator.attach(to: terminal)
+            if selectionFixture {
+                let prior = terminal.selectionStateChanged
+                terminal.selectionStateChanged = { [weak self] active in
+                    prior?(active)
+                    guard let self else { return }
+                    let lines = terminal.getSelection()?.split(separator: "\n").count ?? 0
+                    result.text = "selected=\(lines) visible=\(Int(terminal.bounds.height / terminal.cellHeight))"
+                }
+            }
             if !ProcessInfo.processInfo.arguments.contains("-HERMIT_PANE_MENU_PLAIN") {
                 coordinator.onContextMenu = { [weak self] source, point in
                     self?.showMenu(for: nil, from: source, at: point) ?? false

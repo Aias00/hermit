@@ -830,7 +830,10 @@ struct SwiftTerminalView: UIViewRepresentable {
                     Data("FEED-HELD bytes=\(data.count)\n".utf8))
                 heldFeed.append(data)
                 heldBytes += data.count
-                if heldBytes > heldByteLimit { releaseScrollHold() }
+                if heldBytes > heldByteLimit {
+                    terminalView.closeSelection()
+                    releaseScrollHold()
+                }
                 return
             }
             liftingPredictions(on: terminalView) {
@@ -1189,12 +1192,12 @@ struct SwiftTerminalView: UIViewRepresentable {
             updateScrollHold(terminalView)
         }
 
-        /// Hold live output exactly while history is on screen. `canScroll`
+        /// Hold live output while selecting or while history is on screen. `canScroll`
         /// first: `scrollPosition` is 0 both at the very top AND when there is
         /// nothing to scroll, so on its own a swipe over an empty pane would
         /// freeze its output until the next keystroke.
         private func updateScrollHold(_ terminalView: TerminalView) {
-            if terminalView.canScroll, terminalView.scrollPosition < 0.999 {
+            if terminalView.selectionActive || (terminalView.canScroll && terminalView.scrollPosition < 0.999) {
                 engageScrollHold()
             } else {
                 releaseScrollHold()
@@ -1606,6 +1609,17 @@ struct SwiftTerminalView: UIViewRepresentable {
             // panes too — those are minted by the controller and only ever go
             // through this attach, never through the SwiftUI representable.
             TerminalScrollGesture.attach(to: terminalView, coordinator: self)
+            terminalView.selectionScrollHandler = { [weak self] delta in
+                guard let self else { return 0 }
+                if self.remoteGrid != nil {
+                    return self.hostContainer?.panRemoteViewport(by: delta) ?? 0
+                }
+                return self.scrollLocal(pixels: delta)
+            }
+            terminalView.selectionStateChanged = { [weak self, weak terminalView] _ in
+                guard let self, let terminalView else { return }
+                self.updateScrollHold(terminalView)
+            }
             // Switching the input method (globe key) is INVISIBLE to every
             // path we had: the CN/EN keyboards are the same height, so no
             // sizeChanged fires, and neither SwiftTerm nor UIKit repaints the
@@ -1723,6 +1737,7 @@ struct SwiftTerminalView: UIViewRepresentable {
             cancelPendingWheel()
             // Typing means "I'm done reading" — resume live output and snap to
             // the bottom (the flush makes SwiftTerm follow the tail again).
+            source.closeSelection()
             releaseScrollHold()
             // Sticky-Ctrl: fold the next single printable key into its control
             // code (standard mapping: byte & 0x1F covers @A-Z[\]^_ and a-z).

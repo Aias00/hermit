@@ -1,12 +1,38 @@
 import XCTest
 
 final class TerminalPaneMenuUITest: XCTestCase {
-    @MainActor private func launch(plain: Bool = false) -> XCUIApplication {
+    @MainActor private func launch(plain: Bool = false, selection: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-HERMIT_PANE_MENU_FIXTURE"] + (plain ? ["-HERMIT_PANE_MENU_PLAIN"] : [])
+        if selection { app.launchArguments.append("-HERMIT_SELECTION_SCROLL_FIXTURE") }
         app.launch()
         return app
+    }
+    @MainActor func testSelectionDragScrollsBeyondOneScreen() throws {
+        let app = launch(selection: true)
+        defer { app.terminate() }
+        let terminal = app.descendants(matching: .any).matching(identifier: "pane-menu-fixture-terminal").firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
+        let start = terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.5))
+        let edge = terminal.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.003))
+        start.press(forDuration: 1, thenDragTo: edge, withVelocity: .slow, thenHoldForDuration: 3)
+        let status = app.staticTexts["pane-menu-fixture-result"]
+        let beyondScreen = NSPredicate { _, _ in
+            let counts = status.label.split(separator: " ").compactMap { Int($0.split(separator: "=").last ?? "") }
+            return counts.count == 2 && counts[0] > counts[1]
+        }
+        expectation(for: beyondScreen, evaluatedWith: status)
+        waitForExpectations(timeout: 8)
+        XCTAssertFalse(app.buttons["pane-menu-dismiss"].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        let copy = app.menuItems.matching(NSPredicate(format: "label IN %@", ["Copy", "拷贝", "复制"])).firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 5))
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "terminal-selection-cross-screen"; shot.lifetime = .keepAlways; add(shot)
+        copy.tap()
+        expectation(for: NSPredicate(format: "label BEGINSWITH 'selected=0 '"), evaluatedWith: status)
+        waitForExpectations(timeout: 5)
     }
     @MainActor func testDoubleTapPreservesKeyboardDraftAndCloseRequiresConfirmation() throws {
         let app = launch()

@@ -462,6 +462,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     deinit {
         link?.invalidate()
         progressReportTimer?.invalidate()
+        panTask?.cancel()
+        if let selectionBackgroundObserver { NotificationCenter.default.removeObserver(selectionBackgroundObserver) }
+    }
+
+    open override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { stopSelectionTimer() }
     }
 
     private func setupProgressBar() {
@@ -696,10 +703,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     func makeContextMenuRegionForSelection () -> CGRect {
         let width = selection.isMultiLine ? frame.width : CGFloat(selection.end.col-selection.start.col)*cellDimension.width
         
-        return CGRect (x: CGFloat (selection.start.col)*cellDimension.width,
+        let region = CGRect (x: CGFloat (selection.start.col)*cellDimension.width,
                        y: CGFloat (selection.start.row)*cellDimension.height,
                        width: width,
                        height: CGFloat (selection.end.row-selection.start.row+1)*cellDimension.height)
+        // The original endpoint can be several screens away after edge
+        // scrolling. Keep Copy anchored to the visible part of the selection.
+        let visible = region.intersection(selectionViewport)
+        return visible.isNull || visible.isEmpty ? selectionViewport : visible
     }
     
     @objc func longPress (_ gestureRecognizer: UILongPressGestureRecognizer)
@@ -712,8 +723,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let hit = calculateTapHit(gesture: gestureRecognizer).grid
         switch gestureRecognizer.state {
         case .began:
+            stopSelectionTimer()
             selection.selectWordOrExpression(at: hit, in: terminal.displayBuffer)
             selection.selectionMode = .character
+            selection.pivot = nil
             enableSelectionPanGesture()
             queuePendingDisplay()
         case .changed:
@@ -721,16 +734,17 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             // text selection behaves.
             if selection.active {
                 if selection.pivot == nil {
-                    selection.pivot = selection.start
+                    selection.pivot = Position.compare(hit, selection.start) == .before ? selection.end : selection.start
                 }
-                selection.pivotExtend(bufferPosition: hit)
-                queuePendingDisplay()
+                extendSelectionDrag(gestureRecognizer)
             }
         case .ended:
+            stopSelectionTimer()
             if selection.active {
                 showContextMenu(forRegion: makeContextMenuRegionForSelection(), pos: hit)
             }
         default:
+            stopSelectionTimer()
             break
         }
     }
@@ -1042,19 +1056,79 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
    
-    @MainActor
-    func startSelectionTimer (_ callback: @MainActor @escaping ()->()) {
-        panTask = Task {
+    /// A host with a clipped remote grid can pan that grid locally. This must
+    /// never send mouse wheels or keys: the selection refers to these cells.
+    public var selectionScrollHandler: ((CGFloat) -> CGFloat)?
+    public var selectionStateChanged: ((Bool) -> Void)?
+    private weak var selectionDragGesture: UIGestureRecognizer?
+    private var selectionBackgroundObserver: NSObjectProtocol?
+
+    private var selectionViewport: CGRect {
+        var visible = bounds
+        var ancestor = superview
+        while let view = ancestor {
+            if view.clipsToBounds || view is UIWindow {
+                visible = visible.intersection(convert(view.bounds, from: view))
+            }
+            ancestor = view.superview
+        }
+        return visible
+    }
+
+    private func selectionScrollDelta(at point: CGPoint, viewport: CGRect) -> CGFloat {
+        guard !viewport.isEmpty, !viewport.isNull else { return 0 }
+        let band = min(44, viewport.height / 4)
+        guard band > 0 else { return 0 }
+        let top = (viewport.minY + band - point.y) / band
+        let bottom = (point.y - viewport.maxY + band) / band
+        let pressure = top > 0 ? min(1, top) : -max(0, min(1, bottom))
+        return pressure * max(1, cellDimension.height) * 0.75
+    }
+
+    private func extendSelectionDrag(_ gesture: UIGestureRecognizer) {
+        guard selection.active else { stopSelectionTimer(); return }
+        selectionDragGesture = gesture
+        hideContextMenu()
+        extendSelection(at: gesture.location(in: self))
+        let delta = selectionScrollDelta(at: gesture.location(in: self), viewport: selectionViewport)
+        guard delta != 0 else { stopSelectionTimer(); return }
+        guard panTask == nil else { return }
+        panTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                callback ()
-                try? await Task.sleep(nanoseconds: 100_000_000)
+                do { try await Task.sleep(nanoseconds: 50_000_000) } catch { return }
+                guard !Task.isCancelled, let view = self else { return }
+                if !view.advanceSelectionScroll() { view.stopSelectionTimer(); return }
             }
         }
+    }
+
+    private func extendSelection(at point: CGPoint) {
+        let viewport = selectionViewport
+        guard !viewport.isEmpty, !viewport.isNull, cellDimension.height > 0, cellDimension.width > 0 else { return }
+        let point = CGPoint(x: min(viewport.maxX, max(viewport.minX, point.x)),
+                            y: min(viewport.maxY - 1, max(viewport.minY, point.y)))
+        let hit = calculateTapHit(point: point).grid
+        selection.pivotExtend(bufferPosition: Position(col: hit.col,
+            row: min(max(0, terminal.displayBuffer.lines.count - 1), max(0, hit.row))))
+        requestDisplay()
+    }
+
+    private func advanceSelectionScroll() -> Bool {
+        guard window != nil, selection.active, let gesture = selectionDragGesture,
+              gesture.state == .began || gesture.state == .changed else { return false }
+        let delta = selectionScrollDelta(at: gesture.location(in: self), viewport: selectionViewport)
+        guard delta != 0 else { return false }
+        let moved = selectionScrollHandler?(delta) ?? scrollViewport(by: delta)
+        // Recompute the hit after the viewport moves, including while the
+        // finger stays still. UIKit gives its location in the new coordinates.
+        extendSelection(at: gesture.location(in: self))
+        return moved != 0
     }
     
     func stopSelectionTimer () {
         panTask?.cancel()
         panTask = nil
+        selectionDragGesture = nil
     }
     
     // The start of the pan operation, for the case where we are not sending the input to the client
@@ -1084,6 +1158,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         
         switch gestureRecognizer.state {
         case .began:
+            stopSelectionTimer()
+            hideContextMenu()
             let hit = calculateTapHit(gesture: gestureRecognizer).grid
             if selection.active {
                 var extend = false
@@ -1096,25 +1172,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 }
                 if extend {
                     selection.pivotExtend(bufferPosition: hit)
-                    requestDisplay()
+                    extendSelectionDrag(gestureRecognizer)
                     break
                 }
+                selection.pivot = selection.start
+                extendSelectionDrag(gestureRecognizer)
             }
             panStart = hit
         case .changed:
-            let absoluteY = gestureRecognizer.location (in: self).y - contentOffset.y
             let hit = calculateTapHit(gesture: gestureRecognizer).grid
             if selection.active {
-                stopSelectionTimer()
-                selection.pivotExtend(bufferPosition: hit)
+                extendSelectionDrag(gestureRecognizer)
                 gestureRecognizer.setTranslation(CGPoint.zero, in: self)
-                if absoluteY < 0 || absoluteY > bounds.height {
-                    startSelectionTimer {
-                        let newPlace = CGRect (x: 0, y: max (0, self.contentOffset.y+absoluteY), width: self.bounds.width, height: self.bounds.height)
-                        self.scrollRectToVisible(newPlace, animated: true)
-                    }
-                }
-                requestDisplay()
             } else {
                 if let ps = panStart {
                     let deltaRow = ps.row - hit.row
@@ -1129,6 +1198,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 }
             }
         case .ended:
+            if selection.active { extendSelection(at: gestureRecognizer.location(in: self)) }
             stopSelectionTimer()
             if selection.active {
                 showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: calculateTapHit(gesture: gestureRecognizer).grid)
@@ -1171,6 +1241,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     func disableSelectionPanGesture() {
+        stopSelectionTimer()
         guard let gesture = panSelectionGesture else {
             return
         }
@@ -1180,6 +1251,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     func setupGestures ()
     {
+        selectionBackgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.stopSelectionTimer() }
         let longPress = UILongPressGestureRecognizer (target: self, action: #selector(longPress(_:)))
         longPress.minimumPressDuration = 0.7
         addGestureRecognizer(longPress)
@@ -2957,6 +3031,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     open func selectionChanged(source: Terminal) {
+        if Thread.isMainThread { selectionStateChanged?(selection.active) }
+        else { DispatchQueue.main.async { self.selectionStateChanged?(self.selection.active) } }
         if pendingSelectionChanged {
             return
         }

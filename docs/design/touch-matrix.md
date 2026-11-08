@@ -47,6 +47,7 @@
 | 三击 | 任意 | 选整行 + 菜单 | M |
 | 长按 | 任意 | **选中指下的词** + 手柄；按住滑动=扩选；松手出菜单（含 Paste）。不弹键盘（fork patch 17） | S ✅ |
 | 手柄拖动 | F | 抓取窗口 = **手指尺寸**（22pt 折算格子，`selectionHandleTolerance`）；抓中端点 → 拖动该端点；抓空 → 从 pivot 扩展 | U ✅ + M |
+| 选区拖到上下边缘 | F | 按实际可见区域自动滚动，停住手指也继续扩选；只移动本地历史或已加载的远端画面，不发送 wheel/按键；松手、取消、离开前台或视图移除后停止 | U+S |
 | 单指纵向拖 | B/C（primary） | 滚动本地 scrollback；到底自动释放 hold | S(待补)/M |
 | 单指纵向拖 | E | wheel 事件转发给远端应用（tmux 由 `#{mouse_any_flag}` 决定 wheel vs copy-mode，见 scroll 架构 memory） | M |
 | 单指纵向拖 | F | **让步给选择 pan**（app pan 不启动） | T ✅ |

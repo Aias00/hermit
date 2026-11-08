@@ -346,3 +346,78 @@ struct GestureTopologyTests {
         #expect(big.cols >= 3 && big.rows >= 2)
     }
 }
+
+@MainActor @Suite("Selection scrolling", .serialized)
+struct TerminalSelectionScrollTests {
+    private final class Tap: UITapGestureRecognizer {
+        weak var space: UIView?
+        var point = CGPoint.zero
+        override var state: UIGestureRecognizer.State { get { .ended } set { } }
+        override func location(in view: UIView?) -> CGPoint { view?.convert(point, from: space) ?? point }
+    }
+    private final class Pan: UIPanGestureRecognizer {
+        weak var space: UIView?
+        var point = CGPoint.zero
+        var phase: UIGestureRecognizer.State = .began
+        override var state: UIGestureRecognizer.State { get { phase } set { phase = newValue } }
+        override func location(in view: UIView?) -> CGPoint { view?.convert(point, from: space) ?? point }
+    }
+
+    @Test("A stationary edge drag expands selection through local history or a clipped remote grid without remote input",
+          arguments: [false, true], [false, true])
+    func edgeDrag(remote: Bool, upward: Bool) async throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let root = UIViewController(); window.rootViewController = root
+        window.makeKeyAndVisible()
+        let host = TerminalHostContainer(frame: CGRect(x: 0, y: 70, width: 390, height: 240))
+        root.view.addSubview(host)
+        let terminal = TerminalView(frame: host.bounds)
+        terminal.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
+        terminal.focusOnTap = false; terminal.allowMouseReporting = false
+        let coordinator = SwiftTerminalView.Coordinator()
+        if remote { host.remoteGrid = (80, 60); coordinator.remoteGrid = (80, 60) }
+        host.host(terminal); coordinator.hostContainer = host; coordinator.attach(to: terminal)
+        host.layoutSubviews()
+        if remote {
+            terminal.feed(text: (1...60).map { "\u{1b}[\($0);1HR\(String(format: "%03d", $0)) 中文" }.joined())
+            host.invalidateRemoteContentExtent(); host.layoutSubviews()
+            _ = host.panRemoteViewport(by: 300)
+        } else {
+            terminal.feed(text: (1...180).map { "R\(String(format: "%03d", $0)) 中文\r\n" }.joined())
+            terminal.scroll(toPosition: 0.5)
+        }
+        defer { terminal.closeSelection(); coordinator.releaseScrollHold(); window.isHidden = true }
+        var remoteRows = 0; var inputs: [Data] = []
+        coordinator.onScroll = { remoteRows += $0 }; coordinator.onInput = { inputs.append($0) }
+        let tap = Tap(); tap.space = root.view; tap.point = CGPoint(x: 12, y: host.frame.midY)
+        terminal.addGestureRecognizer(tap)
+        terminal.perform(NSSelectorFromString("doubleTap:"), with: tap)
+        let anchor = try #require(terminal.getSelection()); #expect(anchor.hasPrefix("R"))
+        let pan = Pan(); pan.space = root.view
+        pan.point = CGPoint(x: upward ? 1 : 50, y: host.frame.midY)
+        terminal.addGestureRecognizer(pan)
+        terminal.perform(NSSelectorFromString("panSelectionHandler:"), with: pan)
+        pan.phase = .changed
+        pan.point.y = upward ? host.frame.minY + 1 : host.frame.maxY - 1
+        terminal.perform(NSSelectorFromString("panSelectionHandler:"), with: pan)
+        let offset: () -> CGFloat = { remote ? terminal.frame.minY : -terminal.contentOffset.y }
+        let before = offset(); let first = terminal.getSelection() ?? ""
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(upward ? offset() > before : offset() < before)
+        let expanded = try #require(terminal.getSelection())
+        #expect(expanded.count > first.count && expanded.contains(anchor))
+        // A new output chunk cannot replace the cells underneath the drag.
+        coordinator.feed(data: Data("STREAM_DURING_SELECTION\r\n".utf8))
+        #expect(coordinator.hasHeldOutput)
+        #expect(terminal.getSelection() == expanded)
+        pan.phase = .ended
+        terminal.perform(NSSelectorFromString("panSelectionHandler:"), with: pan)
+        let stopped = offset(); let copied = terminal.getSelection()
+        try await Task.sleep(for: .milliseconds(160))
+        #expect(offset() == stopped && terminal.getSelection() == copied)
+        terminal.copy(nil)
+        #expect(UIPasteboard.general.string == copied)
+        #expect(!terminal.selectionActive && !terminal.isFirstResponder)
+        #expect(remoteRows == 0 && inputs.isEmpty)
+    }
+}
