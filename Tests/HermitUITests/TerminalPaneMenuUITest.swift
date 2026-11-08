@@ -14,7 +14,9 @@ final class TerminalPaneMenuUITest: XCTestCase {
         let draft = app.textFields["pane-menu-fixture-draft"]
         XCTAssertTrue(draft.waitForExistence(timeout: 10))
         draft.tap(); draft.typeText(" unchanged")
-        let value = draft.value as? String
+        let value = "keep draft unchanged"
+        expectation(for: NSPredicate { _, _ in draft.value as? String == value }, evaluatedWith: draft)
+        waitForExpectations(timeout: 10)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         let row = app.buttons["menu-fixture-pane-w1:p1"]
         row.doubleTap()
@@ -32,7 +34,8 @@ final class TerminalPaneMenuUITest: XCTestCase {
         XCTAssertTrue(dismiss.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         draft.typeText(" kept focus")
-        XCTAssertEqual(draft.value as? String, (value ?? "") + " kept focus")
+        expectation(for: NSPredicate { _, _ in draft.value as? String == value + " kept focus" }, evaluatedWith: draft)
+        waitForExpectations(timeout: 10)
         row.doubleTap()
         XCTAssertTrue(app.buttons["pane-menu-split-down"].waitForExistence(timeout: 5))
         let screenshot = XCTAttachment(screenshot: app.screenshot())

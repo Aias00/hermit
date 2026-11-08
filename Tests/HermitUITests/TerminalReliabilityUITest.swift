@@ -320,6 +320,8 @@ final class TerminalReliabilityUITest: XCTestCase {
         app.buttons["网页预览"].tap()
         let address = app.textFields["remote-web-address"]
         XCTAssertTrue(address.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["remote-web-start"].exists)
+        captureScreenshot(app, name: "herdr-remote-web-preview-ready")
         address.tap()
         address.press(forDuration: 1.2)
         if app.menuItems["全选"].exists { app.menuItems["全选"].tap() }
@@ -338,12 +340,19 @@ final class TerminalReliabilityUITest: XCTestCase {
         }
         XCTAssertTrue(web.staticTexts["资源已加载"].exists)
         XCTAssertTrue(web.staticTexts["synthetic-post"].exists)
+        XCTAssertTrue(address.waitForNonExistence(timeout: 5), "The address editor must give its space back to the page")
+        XCTAssertFalse(app.buttons["remote-web-start"].exists)
+        let editAddress = app.buttons["remote-web-edit-address"]
+        XCTAssertTrue(editAddress.exists)
+        captureScreenshot(app, name: "herdr-remote-web-preview-compact")
+        editAddress.tap()
         let favorite = app.buttons["remote-web-favorite"]
         XCTAssertTrue(favorite.waitForExistence(timeout: 5))
         favorite.tap()
         expectation(for: NSPredicate(format: "label == '取消收藏预览地址'"), evaluatedWith: favorite)
         waitForExpectations(timeout: 5)
-        captureScreenshot(app, name: "herdr-remote-web-preview")
+        editAddress.tap()
+        XCTAssertTrue(address.waitForNonExistence(timeout: 5))
         web.links["测试远端重定向"].tap()
         XCTAssertTrue(web.staticTexts["重定向成功"].waitForExistence(timeout: 8))
         XCUIDevice.shared.press(.home)
@@ -351,6 +360,7 @@ final class TerminalReliabilityUITest: XCTestCase {
         XCTAssertTrue(app.staticTexts["预览已暂停"].waitForExistence(timeout: 10))
         app.buttons["remote-web-open"].tap()
         XCTAssertTrue(web.staticTexts["WebSocket 已连接"].waitForExistence(timeout: 15))
+        XCTAssertTrue(address.waitForNonExistence(timeout: 5))
         app.buttons["完成"].tap()
         XCTAssertEqual(field.value as? String, "web preview keeps draft")
         XCTAssertTrue(app.buttons["conversation-send"].isEnabled)
@@ -362,6 +372,8 @@ final class TerminalReliabilityUITest: XCTestCase {
         let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "localhost:" + port)).firstMatch
         XCTAssertTrue(saved.waitForExistence(timeout: 5)); saved.tap()
         XCTAssertTrue(app.webViews.firstMatch.staticTexts["WebSocket 已连接"].waitForExistence(timeout: 15))
+        XCTAssertTrue(address.waitForNonExistence(timeout: 5))
+        app.buttons["remote-web-edit-address"].tap()
         XCTAssertEqual(app.buttons["remote-web-favorite"].label, "取消收藏预览地址")
         captureScreenshot(app, name: "herdr-preview-favorite-reopened")
         app.buttons["完成"].tap()

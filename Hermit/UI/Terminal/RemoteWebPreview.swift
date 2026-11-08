@@ -95,47 +95,48 @@ struct RemoteWebPreview: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var editing: Bool
+    @State private var addressExpanded = false
+    private var showsAddressEditor: Bool { model.localURL == nil || model.error != nil || addressExpanded }
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("远端主机 · \(model.host)", systemImage: "desktopcomputer").font(.subheadline).lineLimit(1)
-                    HStack {
-                        TextField("http://localhost:3000", text: $model.address)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                            .focused($editing).submitLabel(.go).onSubmit { connect() }
-                            .accessibilityIdentifier("remote-web-address")
-                        if model.scope != nil {
-                            Button { model.toggleFavorite() } label: {
-                                Image(systemName: model.isFavorite ? "star.fill" : "star").frame(width: 44, height: 44)
-                            }
-                            .accessibilityLabel(model.isFavorite ? "取消收藏预览地址" : "收藏预览地址")
-                            .accessibilityIdentifier("remote-web-favorite")
-                            .disabled(PreviewPreferences.savedAddress(model.address) == nil)
-                            Menu {
-                                if !model.favorites.isEmpty {
-                                    Section("收藏") { ForEach(model.favorites) { entry in historyButton(entry) } }
+                if showsAddressEditor {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            TextField("http://localhost:3000", text: $model.address)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                                .focused($editing).submitLabel(.go).onSubmit { connect() }
+                                .accessibilityIdentifier("remote-web-address")
+                            if model.scope != nil {
+                                Button { model.toggleFavorite() } label: {
+                                    Image(systemName: model.isFavorite ? "star.fill" : "star").frame(width: 44, height: 44)
                                 }
-                                if !model.recent.isEmpty {
-                                    Section("最近访问") { ForEach(model.recent) { entry in historyButton(entry) } }
-                                    Button("清空最近访问", role: .destructive) {
-                                        if let scope = model.scope { model.preferences.clearRecent(scope: scope) }
+                                .accessibilityLabel(model.isFavorite ? "取消收藏预览地址" : "收藏预览地址")
+                                .accessibilityIdentifier("remote-web-favorite")
+                                .disabled(PreviewPreferences.savedAddress(model.address) == nil)
+                                Menu {
+                                    if !model.favorites.isEmpty {
+                                        Section("收藏") { ForEach(model.favorites) { entry in historyButton(entry) } }
                                     }
-                                }
-                                Text("仅保存本主机的地址和路径；查询参数不保存。")
-                            } label: { Image(systemName: "clock.arrow.circlepath").frame(width: 44, height: 44) }
-                            .accessibilityLabel("收藏与最近预览").accessibilityIdentifier("remote-web-history")
-                            .disabled(model.favorites.isEmpty && model.recent.isEmpty)
+                                    if !model.recent.isEmpty {
+                                        Section("最近访问") { ForEach(model.recent) { entry in historyButton(entry) } }
+                                        Button("清空最近访问", role: .destructive) {
+                                            if let scope = model.scope { model.preferences.clearRecent(scope: scope) }
+                                        }
+                                    }
+                                    Text("仅保存本主机的地址和路径；查询参数不保存。")
+                                } label: { Image(systemName: "clock.arrow.circlepath").frame(width: 44, height: 44) }
+                                .accessibilityLabel("收藏与最近预览").accessibilityIdentifier("remote-web-history")
+                                .disabled(model.favorites.isEmpty && model.recent.isEmpty)
+                            }
+                            Button { connect() } label: {
+                                Image(systemName: model.localURL == nil ? "arrow.right" : "arrow.clockwise")
+                                    .frame(width: 44, height: 44)
+                            }.accessibilityLabel("打开网页预览").accessibilityIdentifier("remote-web-open")
                         }
-                        Button { connect() } label: {
-                            Image(systemName: model.localURL == nil ? "arrow.right" : "arrow.clockwise")
-                                .frame(width: 44, height: 44)
-                        }.accessibilityLabel("打开网页预览").accessibilityIdentifier("remote-web-open")
-                    }
-                    Text("通过当前 SSH 访问此主机的 HTTP 本地服务。关闭预览或进入后台会断开转发。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }.padding(.horizontal, 16).padding(.vertical, 8)
-                Divider()
+                    }.padding(.horizontal, 16).padding(.vertical, 8)
+                    Divider()
+                }
                 if let error = model.error {
                     ContentUnavailableView {
                         Label("网页暂时无法打开", systemImage: "exclamationmark.triangle").accessibilityIdentifier("remote-web-error")
@@ -148,12 +149,39 @@ struct RemoteWebPreview: View {
                 } else if model.localURL != nil {
                     RemoteWebBrowser(model: model)
                 } else {
-                    ContentUnavailableView(model.suspended ? "预览已暂停" : "预览远端网页", systemImage: "globe",
-                        description: Text(model.suspended ? "返回前台后，点击打开继续预览。" : "输入远端开发服务地址，例如 localhost:3000 或 localhost:5173。"))
+                    ContentUnavailableView {
+                        Label(model.suspended ? "预览已暂停" : "预览远端网页", systemImage: "globe")
+                    } description: {
+                        Text(model.suspended ? "返回前台后，点击打开继续预览。" : "输入远端开发服务地址，例如 localhost:3000 或 localhost:5173。")
+                        Text("通过当前 SSH 访问此主机的 HTTP 本地服务。关闭预览或进入后台会断开转发。")
+                    } actions: {
+                        Button(model.suspended ? "继续预览" : "打开预览") { connect() }
+                            .buttonStyle(.borderedProminent).accessibilityIdentifier("remote-web-start")
+                    }
                 }
             }
             .navigationTitle("网页预览").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { model.stop(); dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Button {
+                        addressExpanded.toggle()
+                        editing = addressExpanded
+                    } label: {
+                        VStack(spacing: 2) {
+                            Text(model.localURL == nil ? "网页预览" : (model.original?.url.host ?? "网页预览") + (model.original.map { ":\($0.port)" } ?? ""))
+                                .font(.headline).lineLimit(1).truncationMode(.middle)
+                            Text(model.host).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("编辑预览地址")
+                    .accessibilityIdentifier("remote-web-edit-address")
+                }
+                ToolbarItem(placement: .confirmationAction) { Button("完成") { model.stop(); dismiss() } }
+            }
+        }
+        .onChange(of: model.localURL) { _, url in
+            if url != nil { addressExpanded = false; editing = false }
         }
         .task { if model.opensOnPresentation, model.original == nil, !model.suspended { connect() } }
         .onChange(of: scenePhase) { _, phase in if phase == .background { model.suspend() } }
