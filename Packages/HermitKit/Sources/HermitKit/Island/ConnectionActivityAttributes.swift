@@ -94,6 +94,26 @@ public struct ConnectionActivityAttributes: ActivityAttributes {
 
         public var statusDate: Date { observedAt ?? updatedAt }
 
+        /// Counts and rows cover every connection. The preferred deep link's
+        /// alias names a navigation target, not the scope of a multi-host card.
+        public var isConnectionOverview: Bool { connectionCount > 1 }
+        public var cardTitle: String {
+            isConnectionOverview
+                ? "Hermit · " + String(localized: "\(connectionCount) connections")
+                : headlineName ?? "Hermit"
+        }
+
+        /// Older snapshots omitted the preferred host's alias from its rows.
+        /// Recover that label by connection identity, never by row ordering.
+        public func hostName(for task: TaskSummary) -> String? {
+            if let name = task.hostName { return name }
+            guard isConnectionOverview,
+                  let headline = AgentDeepLink.parse(deepLink),
+                  let target = AgentDeepLink.parse(task.deepLink),
+                  headline.connectionId == target.connectionId else { return nil }
+            return headlineName
+        }
+
         public var freshnessInterval: TimeInterval {
             isBackground == true || connectionState == .background
                 ? ConnectionActivityAttributes.backgroundFreshnessInterval

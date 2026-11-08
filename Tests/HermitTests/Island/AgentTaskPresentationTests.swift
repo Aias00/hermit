@@ -45,6 +45,24 @@ struct AgentTaskPresentationTests {
                 "an unrepresented pane cannot update this activity")
     }
 
+    @Test("cross-server events preserve overview scope and legacy row provenance")
+    func crossServerOverviewPreservesHostNames() throws {
+        let other = UUID()
+        var state = snapshot()
+        state.connectionCount = 2
+        state.headlineName = "Mac mini"
+        state.tasks?[1].hostName = "MacBook"
+        state.tasks?[1].id = "\(other.uuidString):w1:p2"
+        state.tasks?[1].deepLink = AgentDeepLink.string(connectionId: other, paneId: "w1:p2")
+        let prompt = AgentTaskEvent(connectionID: other, paneID: "w1:p2", state: .attention,
+            occurredAt: now.addingTimeInterval(1), receivedAt: now.addingTimeInterval(2))
+        let changed = try #require(TaskActivityPresentation.applying(prompt, to: state)).content
+        #expect(changed.headlineName == "MacBook" && changed.cardTitle == state.cardTitle)
+        #expect(changed.tasks?.first(where: { $0.id.hasPrefix(connection.uuidString) })?.hostName == "Mac mini")
+        #expect(changed.tasks?.first?.hostName == "MacBook")
+        #expect(AgentDeepLink.parse(changed.deepLink)?.connectionId == other)
+    }
+
     @Test("An older poll cannot undo an event, but a newer remote turn supersedes it")
     func reconcilePollingAndNewTurn() throws {
         let signal = event()

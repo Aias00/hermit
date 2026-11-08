@@ -68,6 +68,80 @@ struct ConnectionLiveActivityTests {
         #expect(target.paneId == "%12")
     }
 
+    @Test("multi-server cards have an overview title and every task identifies its host")
+    func multiServerHeaderAndRowOrigins() throws {
+        let first = UUID(), second = UUID(), third = UUID()
+        let entries = [
+            ConnectionActivityEntry(id: first, name: "Mac mini", state: .connected, working: 1,
+                tasks: [.init(workspaceName: "same-project", programName: "Codex", taskState: "working", paneID: "w1:p1")]),
+            ConnectionActivityEntry(id: second, name: "MacBook", state: .connected, attention: 1,
+                tasks: [.init(workspaceName: "same-project", programName: "Claude Code", taskState: "attention", paneID: "w1:p1")]),
+            ConnectionActivityEntry(id: third, name: "Offline host", state: .offline)
+        ]
+        let state = try #require(ConnectionActivitySnapshot.make(entries: entries, preferredID: first,
+            foreground: true, showHostNames: true, now: now))
+        #expect(state.isConnectionOverview && state.cardTitle.hasPrefix("Hermit · "))
+        #expect(state.cardTitle.contains("3") && !state.cardTitle.contains("MacBook"))
+        #expect(state.tasks?.first?.hostName == "MacBook")
+        #expect(state.tasks?.first(where: { $0.id.hasPrefix(first.uuidString) })?.hostName == "Mac mini")
+        #expect(AgentDeepLink.parse(state.deepLink)?.connectionId == second)
+        let privateState = try #require(ConnectionActivitySnapshot.make(entries: entries, preferredID: first,
+            foreground: false, showHostNames: false, now: now))
+        #expect(privateState.cardTitle.hasPrefix("Hermit · "))
+        #expect(privateState.tasks?.allSatisfy { privateState.hostName(for: $0) == nil } == true)
+        let single = try #require(ConnectionActivitySnapshot.make(entries: [entries[0]], preferredID: nil,
+            foreground: true, showHostNames: true, now: now))
+        #expect(!single.isConnectionOverview && single.cardTitle == "Mac mini")
+        #expect(single.tasks?.first?.hostName == nil)
+        let hidden = try #require(ConnectionActivitySnapshot.make(entries: [entries[0]], preferredID: nil,
+            foreground: true, showHostNames: false, now: now))
+        #expect(hidden.cardTitle == "Hermit")
+    }
+
+    @Test("old multi-host snapshots recover omitted aliases by deep-link identity")
+    func legacyOverviewHostLabels() throws {
+        let first = UUID(), second = UUID()
+        var state = content()
+        state.connectionCount = 2
+        state.headlineName = "Mac mini"
+        state.deepLink = AgentDeepLink.string(connectionId: first, paneId: "w1:p1")
+        let a = ConnectionActivityAttributes.TaskSummary(id: "a", workspaceName: "project", state: .working,
+            deepLink: AgentDeepLink.string(connectionId: first, paneId: "w1:p2"))
+        var b = a; b.id = "b"; b.deepLink = AgentDeepLink.string(connectionId: second, paneId: "w1:p2")
+        #expect(state.hostName(for: a) == "Mac mini")
+        #expect(state.hostName(for: b) == nil)
+        b.hostName = "MacBook"
+        #expect(state.hostName(for: b) == "MacBook")
+        state.tasks = [a, b]
+        let decoded = try JSONDecoder().decode(ConnectionActivityAttributes.ContentState.self, from: JSONEncoder().encode(state))
+        #expect(decoded.cardTitle == state.cardTitle && decoded.hostName(for: a) == "Mac mini")
+        state.headlineName = nil
+        #expect(state.hostName(for: a) == nil)
+    }
+
+    @Test("multi-host overview titles and row labels fit the lock screen", arguments: [320.0, 360.0, 600.0])
+    func multiHostLayout(width: Double) throws {
+        let entries = (0..<3).map { index in
+            ConnectionActivityEntry(id: UUID(), name: ["Mac mini", "MacBook", "Linux server"][index],
+                state: .connected, working: 1, observedAt: now,
+                tasks: [.init(workspaceName: "同名工作区", programName: "Codex", taskState: "working", paneID: "w1:p1",
+                              taskDetail: "正在审阅当前项目")])
+        }
+        let state = try #require(ConnectionActivitySnapshot.make(entries: entries, preferredID: entries[0].id,
+            foreground: false, showHostNames: true, now: now, showTaskDetails: true))
+        let renderer = ImageRenderer(content: ConnectionActivityLockScreen(state: state, isStale: false, now: now)
+            .environment(\.locale, Locale(identifier: "zh-Hans"))
+            .environment(\.colorScheme, .dark).background(Color(white: 0.12)))
+        renderer.proposedSize = .init(width: width, height: nil)
+        let image = try #require(renderer.uiImage)
+        #expect(image.size.height <= 160)
+        if let directory = ProcessInfo.processInfo.environment["MOSHPIT_ACTIVITY_LAYOUT_OUTPUT"] {
+            let output = URL(fileURLWithPath: directory, isDirectory: true)
+            try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+            try image.pngData()?.write(to: output.appendingPathComponent("multi-host-\(Int(width)).png"))
+        }
+    }
+
     @Test("disconnected hosts cannot contribute cached task counts")
     func offlineCountsAreIgnored() throws {
         let entry = ConnectionActivityEntry(id: UUID(), name: "host", state: .offline,

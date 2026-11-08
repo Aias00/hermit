@@ -21,6 +21,11 @@ public enum TaskActivityPresentation {
         }
         guard var rows = original.tasks,
               let index = rows.firstIndex(where: { $0.id == event.taskID }) else { return nil }
+        // Preserve an old snapshot's omitted host labels before an event moves
+        // its navigation headline to a different server.
+        for row in rows.indices where rows[row].hostName == nil {
+            rows[row].hostName = original.hostName(for: rows[row])
+        }
         let previous = rows[index]
         if previous.eventID == event.id || previous.eventAt.map({ $0 > event.occurredAt }) == true {
             return Update(content: original, isRepeat: true)

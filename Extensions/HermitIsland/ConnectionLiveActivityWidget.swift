@@ -51,7 +51,7 @@ struct ConnectionLiveActivityWidget: Widget {
             let presentation = ActivityPresentation(state: context.state, isStale: context.isStale)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label(context.state.headlineName ?? "Hermit", systemImage: "terminal")
+                    Label(context.state.cardTitle, systemImage: "terminal")
                         .font(.headline).lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
@@ -107,7 +107,7 @@ struct ConnectionActivityLockScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(state.headlineName ?? "Hermit")
+                Text(state.cardTitle)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1).truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -126,7 +126,7 @@ struct ConnectionActivityLockScreen: View {
                             Link(destination: url) {
                                 ConnectionActivityTaskRow(task: task, isStale: task.isStale(
                                     at: now, maximumAge: state.freshnessInterval, fallback: isStale),
-                                    showsStaleLabel: !historical)
+                                    showsStaleLabel: !historical, hostName: state.hostName(for: task))
                             }
                             .accessibilityIdentifier("connection-live-activity-task-\(task.id)")
                         }
@@ -185,19 +185,21 @@ private struct ConnectionActivityTaskRow: View {
     let task: ConnectionActivityAttributes.TaskSummary
     let isStale: Bool
     let showsStaleLabel: Bool
+    let hostName: String?
 
     private var subtitle: String {
         let detail = task.state == .idle ? task.state.label : task.detail ?? task.state.label
         // The card footer already marks a historical snapshot. Keep individual
         // stale labels only when they distinguish an old row in a current card.
         return [isStale && showsStaleLabel ? String(localized: "Last known status") : nil, detail,
-                task.programName, task.hostName].compactMap { $0 }.joined(separator: " · ")
+                task.programName].compactMap { $0 }.joined(separator: " · ")
     }
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             ConnectionActivityTaskStatus(state: task.state, isStale: isStale)
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: task.workspaceName ?? task.programName ?? String(localized: "Task"))
+                Text(verbatim: [hostName, task.workspaceName ?? task.programName ?? String(localized: "Task")]
+                    .compactMap { $0 }.joined(separator: " · "))
                     .font(.caption.weight(.semibold)).lineLimit(1).truncationMode(.middle)
                 Text(verbatim: subtitle)
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -206,7 +208,7 @@ private struct ConnectionActivityTaskRow: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([task.workspaceName, task.programName, task.state.label,
-                             task.state == .idle ? nil : task.detail, task.hostName,
+                             task.state == .idle ? nil : task.detail, hostName,
                              isStale ? String(localized: "Last known status") : nil]
             .compactMap { $0 }.joined(separator: ", "))
     }
@@ -222,7 +224,8 @@ private struct ConnectionActivityDetails: View {
     private var context: String {
         // Plain SSH already uses the transport as its title.
         let transport = state.programName == nil ? nil : state.transportName
-        return [transport, state.workspaceName].compactMap { $0 }.joined(separator: " · ")
+        return [state.isConnectionOverview ? state.headlineName : nil, transport, state.workspaceName]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 
     var body: some View {

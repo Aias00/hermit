@@ -50,7 +50,7 @@ enum ConnectionActivitySnapshot {
                 else { return nil }
                 return .init(id: "\(entry.id.uuidString):\(pane)",
                     workspaceName: showHostNames ? boundedText(context.workspaceName, bytes: 80) : nil,
-                    hostName: showHostNames && entry.id != headline.id ? boundedText(entry.name, bytes: 80) : nil,
+                    hostName: showHostNames && entries.count > 1 ? boundedText(entry.name, bytes: 80) : nil,
                     programName: context.programName,
                     detail: showTaskDetails && state != .idle ? boundedText(
                         AgentNotificationCopy.taskDetail(context.taskDetail, workspace: context.workspaceName,
