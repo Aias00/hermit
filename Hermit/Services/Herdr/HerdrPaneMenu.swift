@@ -24,7 +24,7 @@ struct HerdrPaneMenuTarget: Equatable, Sendable {
         switch resource {
         case .workspace: return workspaceName
         case .tab: return [workspaceName, tabName].compactMap { $0 }.joined(separator: " · ")
-        case .pane: return [workspaceName, tabName, paneIndex.map { String($0 + 1) }].compactMap { $0 }.joined(separator: " · ")
+        case .pane: return [workspaceName, tabName, paneIndex.map(String.init)].compactMap { $0 }.joined(separator: " · ")
         }
     }
     var renameTitle: String { if case .workspace = resource { return "重命名工作区" }; return "重命名标签页" }

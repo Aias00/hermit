@@ -59,6 +59,7 @@ struct HerdrPaneMenuTests {
         let pane = try #require(control.paneMenuTarget(for: .pane("w1:p1")))
         let tab = try #require(control.paneMenuTarget(for: .tab("w1:t1")))
         #expect(pane.paneID == "w1:p1" && control.snapshot.activePaneId == "w1:p2")
+        #expect(pane.title == "Project · Agent · 1")
         #expect(HerdrPaneMenuAction.closePane.command(target: pane) == "pane close 'w1:p1'")
         #expect(tab.closeAction == .closeTab && HerdrPaneMenuAction.closeTab.command(target: tab) == "tab close 'w1:t1'")
         #expect(HerdrPaneMenuAction.closeWorkspace.command(target: tab) == nil)

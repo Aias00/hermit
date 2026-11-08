@@ -20,6 +20,7 @@ final class TerminalPaneMenuUITest: XCTestCase {
         row.doubleTap()
         let dismiss = app.buttons["pane-menu-dismiss"]
         XCTAssertTrue(dismiss.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Project · Agent · 1"].exists)
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         XCTAssertEqual(draft.value as? String, value)
         app.buttons["pane-menu-close-resource"].tap()
