@@ -250,6 +250,8 @@ struct TerminalScreen: View {
     /// A fetched host file on its way into QuickLook (a tapped path link).
     @State private var quickLookURL: URL?
     @State private var markdownDocument: MarkdownFileDocument?
+    @State private var htmlDocument: StaticHTMLDocument?
+    @State private var workspaceReview: WorkspaceReviewTarget?
     /// A tapped host FOLDER, presented as the folder sheet.
     @State private var remoteFolder: RemoteFolderTarget?
     /// A tapped host video is playing (`RemoteVideoPlayer`, presented
@@ -426,7 +428,7 @@ struct TerminalScreen: View {
     /// 状态").
     private var anySheetOpen: Bool {
         showWindowsSheet || showSessionsSheet || showPaneSheet || showCamera
-            || quickLookURL != nil || markdownDocument != nil || remoteFolder != nil || remoteVideoOpen
+            || quickLookURL != nil || markdownDocument != nil || htmlDocument != nil || workspaceReview != nil || remoteFolder != nil || remoteVideoOpen
             || photoPickerPresented || filePickerPresented || showsFileUploads || outputReader != nil || active?.webPreview != nil || showTerminalActions
     }
 
@@ -933,6 +935,8 @@ struct TerminalScreen: View {
             MarkdownFilePreview(document: document)
                 .environment(\.remoteWebPreviewFactory, active?.webPreviewFactory)
         }
+        .appSheet(item: $htmlDocument, onDismiss: { dismissRemotePreview() }) { StaticHTMLPreview(document: $0) }
+        .appSheet(item: $workspaceReview) { WorkspaceReviewView(target: $0) }
         .onChange(of: quickLookURL) { _, url in
             if url == nil { dismissRemotePreview() }
         }
@@ -942,6 +946,9 @@ struct TerminalScreen: View {
         }
         .onChange(of: active?.remotePreview?.phase) { _, phase in
             switch phase {
+            case .html(let path)?:
+                guard let files = active?.remotePreview?.files else { return }
+                presentSheet { htmlDocument = StaticHTMLDocument(path: path, files: files) }
             case .ready(let url)?:
                 let identity = active?.remotePreview.map { "remote:\($0.files.scope):\($0.path)" }
                 if let document = MarkdownFileDocument.load(url, identity: identity) {
@@ -1178,6 +1185,23 @@ struct TerminalScreen: View {
                 }
                 terminalAction("网页预览", icon: "globe", enabled: launchIsConnected) {
                     presentSheet { active?.openWebPreview() }
+                }
+                terminalAction("Git 改动与批注", icon: "chevron.left.forwardslash.chevron.right", enabled: launchIsConnected) {
+                    guard let source = active, let input = source.inputTarget else { return }
+                    let owner = composerDraft
+                    let files = source.remoteFileAccess
+                    let target = WorkspaceReviewTarget(run: WorkspaceInspection.runner(files), directory: { [weak source] in
+                        guard let source, source.inputTarget == input else { throw WorkspaceReviewError.unavailable }
+                        if let directory = await source.focusedWorkingDirectory() { return directory }
+                        return try await files.channel().remoteHomeDirectory()
+                    }, export: { [weak source, weak owner] text in
+                        guard let source, let owner, active === source,
+                              source.inputTarget == input, composerDraft === owner,
+                              !owner.isSending, !owner.requiresSendReview else { return false }
+                        owner.append((owner.text.isEmpty ? "" : "\n\n") + text, kind: .review)
+                        return true
+                    })
+                    presentSheet { workspaceReview = target }
                 }
                 terminalAction("选择会话", icon: "rectangle.stack", enabled: tmuxSnapshot != nil) {
                     presentSheet { showSessionsSheet = true }
@@ -2590,7 +2614,7 @@ struct TerminalScreen: View {
             }
             if composerDraft.canUndoAddition {
                 HStack {
-                    Text(composerDraft.additionKind == .voice ? "语音已加入草稿" : "附件路径已加入草稿")
+                    Text(composerDraft.additionKind == .voice ? "语音已加入草稿" : composerDraft.additionKind == .review ? "审阅批注已加入草稿" : "附件路径已加入草稿")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                     Spacer()
                     Button("撤销追加") {

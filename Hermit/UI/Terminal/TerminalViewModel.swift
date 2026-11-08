@@ -42,7 +42,7 @@ final class TerminalComposerDraft {
             }
         }
     }
-    enum AdditionKind { case voice, attachment }
+    enum AdditionKind { case voice, attachment, review }
     private struct Addition {
         let kind: AdditionKind
         let textBefore: String

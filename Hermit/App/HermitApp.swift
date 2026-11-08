@@ -164,7 +164,9 @@ struct HermitApp: App {
             // be reached in a simulator: it requires a live SSH session, so
             // Settings disables its row and the sheet renders nothing. Compiled
             // out of Release entirely, like -MOSHPIT_RESET.
-            if let scenario = HostSetupDemo.scenario(from: ProcessInfo.processInfo.arguments) {
+            if WorkspaceReviewFixture.enabled {
+                WorkspaceReviewFixture()
+            } else if let scenario = HostSetupDemo.scenario(from: ProcessInfo.processInfo.arguments) {
                 HostSetupDemo.view(scenario)
                     .environment(settings)
                     .tint(Ink.accent)

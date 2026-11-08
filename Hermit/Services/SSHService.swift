@@ -440,6 +440,21 @@ actor SSHSession {
         }
     }
 
+    /// A preview owns only this child channel. Closing a sheet or hitting its
+    /// deadline must not close SSH, the terminal or another file transfer.
+    func inspectWorkspace(_ command: String) async throws -> Data {
+        guard !closed else { throw SSHError.sessionClosed }
+        let scope = SSHChildChannelScope()
+        let deadline = Task {
+            do { try await Task.sleep(for: .seconds(15)); scope.cancel() }
+            catch { }
+        }
+        defer { deadline.cancel(); scope.cancel() }
+        return try await CancellableTransfer.run(onCancel: { scope.cancel() }) {
+            try await self.draftUploadCommand(command, scope: scope)
+        }
+    }
+
     /// Run a command with a separate, binary-safe stdin payload. The caller
     /// frames the payload (for example one JSON line); no payload is placed in
     /// the remote process arguments or diagnostics.

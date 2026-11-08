@@ -128,6 +128,7 @@ final class RemotePreviewModel: Identifiable {
         case confirm(RemoteFileEntry)
         case downloading(RemoteFileEntry, Double)
         case ready(URL)
+        case html(String)
         case folder(RemoteFileEntry)
         /// A video opened for streaming: the player takes it from here.
         case stream(RemoteFileEntry, RemoteFileHandle)
@@ -139,6 +140,7 @@ final class RemotePreviewModel: Identifiable {
             case let (.confirm(x), .confirm(y)): return x == y
             case let (.downloading(x, p), .downloading(y, q)): return x == y && p == q
             case let (.ready(x), .ready(y)): return x == y
+            case let (.html(x), .html(y)): return x == y
             case let (.folder(x), .folder(y)): return x == y
             case let (.stream(x, f), .stream(y, g)): return x == y && f === g
             case let (.failed(x), .failed(y)): return x == y
@@ -167,7 +169,7 @@ final class RemotePreviewModel: Identifiable {
     /// fetched file belongs to QuickLook and a folder to its sheet.
     var showsHUD: Bool {
         switch phase {
-        case .ready, .folder, .stream: return false
+        case .ready, .html, .folder, .stream: return false
         default: return true
         }
     }
@@ -195,6 +197,8 @@ final class RemotePreviewModel: Identifiable {
                 let entry = try await channel.remoteStat(self.path)
                 if entry.isDirectory {
                     self.phase = .folder(entry)
+                } else if StaticHTMLResource.isHTML(entry.path) {
+                    self.phase = .html(entry.path)
                 } else if entry.kind == .video, let source = try? await channel.openRemoteFile(entry.path) {
                     // Streamed whatever its size — nothing to wait for or
                     // confirm. A host without SFTP downloads it below.
@@ -293,7 +297,7 @@ struct RemotePreviewHUD: View {
     private var header: some View {
         HStack(spacing: 8) {
             switch model.phase {
-            case .looking, .ready, .folder, .stream:
+            case .looking, .ready, .html, .folder, .stream:
                 ProgressView().controlSize(.mini).tint(Ink.accent)
                 statusLabel(String(localized: "OPENING…"), tint: Ink.secondary)
             case .downloading(_, let fraction):
@@ -395,6 +399,7 @@ final class RemoteFolderModel {
     private(set) var local: [String: URL] = [:]
     var previewURL: URL?
     var markdownDocument: MarkdownFileDocument?
+    var htmlDocument: StaticHTMLDocument?
     /// Why the file just tapped couldn't be opened (the grid stays up).
     var openFailure: String?
     /// An upload under way, as a fraction — shown above the grid.
@@ -480,6 +485,10 @@ final class RemoteFolderModel {
     }
 
     func open(_ entry: RemoteFileEntry) async {
+        if StaticHTMLResource.isHTML(entry.path) {
+            htmlDocument = StaticHTMLDocument(path: entry.path, files: files)
+            return
+        }
         if let url = local[entry.path] {
             presentCopy(url, entry: entry)
             return
@@ -837,6 +846,7 @@ struct RemoteFolderView: View {
         .refreshable { await model.load() }
         .quickLookPreview($model.previewURL, in: model.previewItems)
         .appSheet(item: $model.markdownDocument) { MarkdownFilePreview(document: $0) }
+        .appSheet(item: $model.htmlDocument) { StaticHTMLPreview(document: $0) }
         .alert(String(localized: "CAN'T OPEN"), isPresented: Binding(
             get: { model.openFailure != nil }, set: { if !$0 { model.openFailure = nil } }
         )) {

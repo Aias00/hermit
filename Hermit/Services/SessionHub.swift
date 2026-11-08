@@ -462,7 +462,7 @@ final class SessionHub {
 
         /// Where the pane on screen runs: tmux is asked about its active
         /// pane, everything else goes through `plainWorkingDirectory`.
-        private func focusedWorkingDirectory() async -> String? {
+        func focusedWorkingDirectory() async -> String? {
             if let tmuxController {
                 guard let pane = tmuxController.snapshot.activePaneId
                         ?? tmuxController.snapshot.activePanes.first?.id else { return nil }
