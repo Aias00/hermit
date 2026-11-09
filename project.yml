@@ -375,6 +375,7 @@ targets:
           - CFBundleURLSchemes:
               - hermit
               - moshpit
+              - hermit-diagnostics
             CFBundleURLName: com.cluas.moshpit
 
   HermitIsland:

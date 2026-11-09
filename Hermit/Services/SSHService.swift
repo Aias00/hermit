@@ -1475,6 +1475,8 @@ actor SSHService {
         func record(_ outcome: SSHConnectionDiagnostic.Outcome, error: Error? = nil) {
             let event = SSHConnectionDiagnostic(attemptID: attemptID, connectionID: connection.id,
                 route: route, phase: phase, outcome: outcome, errorClass: error.map(SSHConnectionDiagnostic.classify))
+            let diagnostic = DiagnosticRecord.ssh(event)
+            Task { await DiagnosticJournal.shared.append(diagnostic) }
             Log.ssh.notice("\(event.message, privacy: .public)")
             onConnectionDiagnostic?(event)
             onProgress?(event)

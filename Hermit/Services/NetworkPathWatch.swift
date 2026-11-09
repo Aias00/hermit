@@ -31,7 +31,15 @@ final class NetworkPathWatch: @unchecked Sendable {
                 guard let self else { return }
                 // Only the default path can describe internet availability;
                 // absence of a split-tunnel interface does not mean offline.
-                if index == 0 { onAvailability(path.status == .satisfied) }
+                if index == 0 {
+                    onAvailability(path.status == .satisfied)
+                    let kind = path.status != .satisfied ? "unavailable"
+                        : path.usesInterfaceType(.wifi) ? "wifi"
+                        : path.usesInterfaceType(.cellular) ? "cellular"
+                        : path.usesInterfaceType(.wiredEthernet) ? "ethernet" : "other"
+                    let flags = (path.isExpensive ? 1 : 0) + (path.isConstrained ? 2 : 0)
+                    Task { await DiagnosticJournal.shared.append(DiagnosticRecord(kind: .network, code: "path." + kind, value: flags)) }
+                }
                 let isFirst = self.lock.withLock { self.primed.insert(index).inserted }
                 if !isFirst { onChange() }
             }

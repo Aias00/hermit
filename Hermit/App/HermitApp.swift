@@ -18,6 +18,7 @@ struct HermitApp: App {
     @State private var router: DeepLinkRouter
     @State private var notificationHandler: AgentNotificationHandler
     @State private var taskNotificationRouter: AgentTaskNotificationRouter
+    @State private var diagnosticReporter = DiagnosticReporter.shared
     /// Remote-push tokens are delivered to a UIApplicationDelegate and nowhere
     /// else — SwiftUI has no equivalent hook, so the app keeps a minimal one
     /// whose only job is forwarding them to PushService.
@@ -219,9 +220,12 @@ struct HermitApp: App {
                 monitor: monitor, connectionHolder: connectionHolder,
                 keychainHolder: keychainHolder, router: router))
             .onOpenURL { url in
-                router.handle(url)
+                if url.host?.lowercased() == "diagnostics" { _ = diagnosticReporter.offer(url) }
+                else { router.handle(url) }
             }
+            .sheet(item: $diagnosticReporter.proposedConfiguration) { DiagnosticReportingConsentView(configuration: $0) }
             .onAppear {
+                diagnosticReporter.setForeground(scenePhase == .active)
                 connectionActivity.setForeground(scenePhase == .active)
                 monitor.setForeground(scenePhase == .active)
                 CloudSyncService.shared.configure(CloudSyncLocalStore(
@@ -263,6 +267,7 @@ struct HermitApp: App {
                 // notification shade) is transient — ignore it.
                 switch phase {
                 case .active:
+                    diagnosticReporter.setForeground(true)
                     reloadStoresIfNeeded()
                     Task { await CloudSyncService.shared.sync() }
                     hub.setForeground(true)
@@ -278,6 +283,7 @@ struct HermitApp: App {
                     // rest for the next drain (session start re-drains too).
                     Task { await ShareQueueDrainer.drain(hub: hub) }
                 case .background:
+                    diagnosticReporter.setForeground(false)
                     hub.setForeground(false)
                     connectionActivity.setForeground(false)
                     monitor.setForeground(false)

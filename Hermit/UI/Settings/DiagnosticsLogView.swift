@@ -16,7 +16,8 @@ import MoshpitKit
 /// wrote itself, so the answer travels as a screenshot instead. Nothing here
 /// is collected, uploaded or persisted beyond what the system already keeps —
 /// it is the same log `log stream` would show, shown in the place where the
-/// problem was seen.
+/// problem was seen. Optional automatic reporting uses separate structured
+/// records, rather than these free-form messages.
 struct DiagnosticsLogView: View {
     @State private var entries: [Entry] = []
     @State private var loadError: String?

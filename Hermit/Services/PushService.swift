@@ -480,6 +480,12 @@ enum PushRelayClient {
 /// NSObject: as a UIResponder vending `keyCommands` it silently broke every
 /// SwiftUI `.keyboardShortcut` in the app.
 final class PushAppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        if identifier == DiagnosticReporter.sessionIdentifier {
+            DiagnosticReporter.shared.handleBackgroundEvents(completion: completionHandler)
+        } else { completionHandler() }
+    }
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Task { @MainActor in PushService.shared.handle(deviceToken: deviceToken) }

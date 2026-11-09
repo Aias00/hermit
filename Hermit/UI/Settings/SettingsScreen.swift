@@ -163,6 +163,8 @@ struct SettingsScreen: View {
                             Spacer()
                         }
                     }
+                    NavigationLink("自动诊断上报") { DiagnosticReportingSettingsView() }
+                        .accessibilityIdentifier("settings-diagnostic-reporting")
                 }
 
                 FormGroup(

@@ -3529,6 +3529,9 @@ final class SessionHub {
         /// fact unless each one says so at the time.
         func connectionDropped(reason: String = "unspecified") async {
             guard !isStopping, canAutomaticallyReconnect else { return }
+            let code = ["transport-closed", "tmux-channel-silent"].contains(reason) ? reason : "unspecified"
+            Task { await DiagnosticJournal.shared.append(DiagnosticRecord(kind: .health, connection: connection.id,
+                                                                          route: connection.transport, code: code)) }
             Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) health: dropped (\(reason, privacy: .public)) — reconnecting")
             viewModel.markReconnecting()
             await reconnect()
@@ -3565,6 +3568,8 @@ final class SessionHub {
                     probeTimeouts = 0
                 case .failed:
                     Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) health: probe failed — reconnecting")
+                    Task { await DiagnosticJournal.shared.append(DiagnosticRecord(kind: .health, connection: connection.id,
+                        route: connection.transport, code: "probe-failed")) }
                     probeTimeouts = 0
                     viewModel.markReconnecting()
                     await reconnect()
@@ -3576,9 +3581,13 @@ final class SessionHub {
                         // dead socket errors rather than going quiet, and that
                         // path above still reconnects immediately.
                         Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) health: probe timed out (1) — holding")
+                        Task { await DiagnosticJournal.shared.append(DiagnosticRecord(kind: .health, connection: connection.id,
+                            route: connection.transport, code: "probe-timeout-first")) }
                         return
                     }
                     Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) health: probe timed out twice — reconnecting")
+                    Task { await DiagnosticJournal.shared.append(DiagnosticRecord(kind: .health, connection: connection.id,
+                        route: connection.transport, code: "probe-timeout-confirmed")) }
                     probeTimeouts = 0
                     viewModel.markReconnecting()
                     await reconnect()
@@ -4146,6 +4155,7 @@ final class SessionHub {
     /// can't hold a socket there, and the foreground return resumes anyway.
     func networkPathChanged() {
         guard isForeground else { return }
+        Task { await DiagnosticJournal.shared.append(DiagnosticRecord(kind: .network, code: "path-changed")) }
         pathKick?.cancel()
         let delay = pathDebounceDelay
         pathKick = Task { @MainActor [weak self] in

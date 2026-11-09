@@ -424,6 +424,14 @@ final class TailscaleAccount {
     private func apply(_ snapshot: TailscaleAccountSnapshot) {
         if state != snapshot.state || healthIssues != snapshot.healthIssues || (loginURL != nil) != (snapshot.loginURL != nil) {
             let stateName = String(describing: snapshot.state)
+            Task { await DiagnosticJournal.shared.append(DiagnosticRecord(kind: .tailscale, code: "state." + stateName.lowercased())) }
+            let issues = snapshot.healthIssues
+            Task {
+                for issue in issues {
+                    await DiagnosticJournal.shared.append(DiagnosticRecord(kind: .tailscale,
+                        code: "health." + issue.rawValue.replacingOccurrences(of: "_", with: "-")))
+                }
+            }
             let healthCodes = snapshot.healthIssues.map(\.rawValue).joined(separator: ",")
             Log.ssh.notice("tailscale: state=\(stateName, privacy: .public) login_link=\(snapshot.loginURL != nil, privacy: .public) health=\(healthCodes, privacy: .public)")
         }

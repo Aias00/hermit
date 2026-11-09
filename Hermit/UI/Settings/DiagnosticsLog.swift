@@ -3,8 +3,9 @@ import OSLog
 import MoshpitKit
 
 /// The app's own recent log, read back through `OSLogStore` — what the
-/// Recent Log screen shows and what a feedback mail can attach. Nothing is
-/// collected or persisted beyond what the system already keeps; see
+/// Recent Log screen shows and what a feedback mail can attach. This reader
+/// does not automatically upload free-form messages. Optional automatic
+/// reporting uses the separate, bounded structured DiagnosticJournal; see
 /// `DiagnosticsLogView` for why reading it back on the phone matters.
 enum DiagnosticsLog {
     struct Entry: Identifiable {
