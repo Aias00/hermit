@@ -177,6 +177,15 @@ struct SSHRouteSelectionTests {
         #expect(try saved.automaticRouteTrustIdentity() == nil)
     }
 
+    @Test("Editing a legacy host does not introduce route metadata or a spurious reconnect")
+    func unchangedLegacyForm() throws {
+        let original = ServerConnection(host: "server.internal", username: "user", transportRaw: "direct")
+        let form = ConnectionTransportForm(connection: original)
+        let saved = try form.validatedConnection(from: original, host: original.host, port: "22", usesMosh: false)
+        #expect(saved.preferLocalNetwork == nil)
+        #expect(saved.localEndpoints == nil)
+    }
+
     @Test("Automatic LAN routing rejects public, loopback, link-local and malformed endpoints",
           arguments: ["8.8.8.8", "100.80.1.2", "127.0.0.1", "169.254.1.2", "ssh://192.168.1.2",
                       "192.168.1.2:22", "192.168.1.2 bad", "localhost", "fe80::1", "2001:db8::1", ""])

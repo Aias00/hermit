@@ -120,11 +120,15 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
         connection.tailscaleAccountID = selection == .tailscale ? tailscaleAccountID : nil
         connection.tailscalePeerID = selection == .tailscale ? tailscalePeerID : nil
         connection.preferLocalNetwork = selection == .tailscale && preferLocalNetwork
-        connection.localEndpoints = localEndpoints.map {
+            ? true : original.preferLocalNetwork.map { _ in false }
+        let endpoints = localEndpoints.map {
             var endpoint = $0
             endpoint.host = endpoint.host.trimmingCharacters(in: .whitespacesAndNewlines)
             return endpoint
         }
+        // Keep absent legacy metadata absent. Saving an unrelated name edit
+        // must not introduce an apparent route change and reconnect SSH.
+        connection.localEndpoints = endpoints.isEmpty && original.localEndpoints == nil ? nil : endpoints
         connection.relayServer = selection == .relay ? relaySettings?.server : nil
         connection.relayDeviceID = selection == .relay ? relaySettings?.deviceID : nil
         connection.relayService = selection == .relay ? relaySettings?.service : nil
