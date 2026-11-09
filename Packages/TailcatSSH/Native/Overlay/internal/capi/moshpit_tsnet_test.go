@@ -23,12 +23,13 @@ import (
 )
 
 type fakeMTBackend struct {
-	starts    atomic.Int32
-	logins    atomic.Int32
-	closes    atomic.Int32
-	startGate <-chan struct{}
-	status    *ipnstate.Status
-	dial      func(context.Context, string, string) (net.Conn, error)
+	starts         atomic.Int32
+	logins         atomic.Int32
+	closes         atomic.Int32
+	networkChanges atomic.Int32
+	startGate      <-chan struct{}
+	status         *ipnstate.Status
+	dial           func(context.Context, string, string) (net.Conn, error)
 }
 
 func (f *fakeMTBackend) Start() error {
@@ -44,7 +45,8 @@ func (f *fakeMTBackend) Logout(context.Context) error                     { retu
 func (f *fakeMTBackend) Dial(ctx context.Context, network, address string) (net.Conn, error) {
 	return f.dial(ctx, network, address)
 }
-func (f *fakeMTBackend) Close() error { f.closes.Add(1); return nil }
+func (f *fakeMTBackend) Close() error    { f.closes.Add(1); return nil }
+func (f *fakeMTBackend) NetworkChanged() { f.networkChanges.Add(1) }
 func fakeMTNode(t *testing.T, f *fakeMTBackend) (Handle, *tailscaleNode) {
 	t.Helper()
 	if f.status != nil && f.status.Peer == nil {
@@ -75,6 +77,12 @@ func mtToken(t *testing.T, timeout time.Duration) Handle {
 func TestMTNodeOfflineStatusNoImplicitLogin(t *testing.T) {
 	f := &fakeMTBackend{}
 	id, _ := fakeMTNode(t, f)
+	if err := NetworkChangedTailscaleNode(id, NoCancel); err != nil {
+		t.Fatal(err)
+	}
+	if f.networkChanges.Load() != 0 {
+		t.Fatal("unstarted engine received a network hint")
+	}
 	status, err := TailscaleNodeStatus(id, NoCancel)
 	if err != nil || !strings.Contains(status, `"backend_state":"Stopped"`) {
 		t.Fatalf("%v %s", err, status)
@@ -187,6 +195,12 @@ func TestMTStreamsReuseTailcatLifetimeAndEOF(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := []byte("你好\x00\xffSSH")
+	if err := NetworkChangedTailscaleNode(id, NoCancel); err != nil {
+		t.Fatal(err)
+	}
+	if f.networkChanges.Load() != 1 || f.starts.Load() != 1 || f.closes.Load() != 0 || f.logins.Load() != 0 {
+		t.Fatal("network refresh restarted or enrolled the node")
+	}
 	go func() { remote.Write(payload); remote.Close() }()
 	buf := make([]byte, 128)
 	count, err := Read(stream, mtToken(t, time.Second), buf)
@@ -336,6 +350,9 @@ func TestMTRealEngineRequiresExplicitInteractiveLogin(t *testing.T) {
 		t.Fatal("engine startup failed")
 	}
 	until := time.Now().Add(300 * time.Millisecond)
+	if err := NetworkChangedTailscaleNode(id, NoCancel); err != nil {
+		t.Fatal(err)
+	}
 	for time.Now().Before(until) {
 		status, err := backend.Status(context.Background())
 		if err != nil {

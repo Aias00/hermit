@@ -5,6 +5,7 @@ import Foundation
 protocol TailscaleNativeAPI: Sendable {
     func makeNode(_ configuration: TailscaleNodeConfiguration) throws -> UInt64
     func start(node: UInt64, token: UInt64) throws
+    func networkChanged(node: UInt64, token: UInt64) throws
     func status(node: UInt64, token: UInt64) throws -> TailscaleNodeStatus
     func startLogin(node: UInt64, token: UInt64) throws
     func logout(node: UInt64, token: UInt64) throws
@@ -14,7 +15,7 @@ protocol TailscaleNativeAPI: Sendable {
 
 struct LiveTailscaleNativeAPI: TailscaleNativeAPI {
     func makeNode(_ configuration: TailscaleNodeConfiguration) throws -> UInt64 {
-        guard mt_abi_version() == 1, tc_abi_version() == 1 else { throw TailscaleSSHTransportError.unsupportedABI }
+        guard mt_abi_version() == 2, tc_abi_version() == 1 else { throw TailscaleSSHTransportError.unsupportedABI }
         let data = try JSONSerialization.data(withJSONObject: [
             "state_directory": configuration.stateDirectory.path,
             "hostname": configuration.hostname,
@@ -36,6 +37,10 @@ struct LiveTailscaleNativeAPI: TailscaleNativeAPI {
 
     func start(node: UInt64, token: UInt64) throws {
         try Self.check(mt_node_start(node, token, nil), operation: .start)
+    }
+
+    func networkChanged(node: UInt64, token: UInt64) throws {
+        try Self.check(mt_node_network_changed(node, token, nil), operation: .networkChanged)
     }
 
     func status(node: UInt64, token: UInt64) throws -> TailscaleNodeStatus {

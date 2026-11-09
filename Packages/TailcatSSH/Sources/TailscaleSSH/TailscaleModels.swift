@@ -142,7 +142,7 @@ private struct StatusDocument: Decodable {
 }
 
 public enum TailscaleNativeOperation: String, Equatable, Sendable {
-    case createNode, createToken, start, status, startLogin, logout, dial, read, write
+    case createNode, createToken, start, status, startLogin, logout, dial, read, write, networkChanged
 }
 
 /// Error text from Go is never exposed: it can contain host or account details.

@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 int main(void) {
-    assert(tc_abi_version() == 1 && mt_abi_version() == 1);
+    assert(tc_abi_version() == 1 && mt_abi_version() == 2);
     char directory[] = "/tmp/moshpit-tsnet-smoke-XXXXXX";
     assert(mkdtemp(directory) != NULL);
     char config[1024];
@@ -16,6 +16,7 @@ int main(void) {
     char *error = NULL, *status = NULL;
     assert(mt_node_new(config, key, sizeof(key), &node, &error) == TC_OK);
     assert(node != 0 && error == NULL);
+    assert(mt_node_network_changed(node, TC_NO_CANCEL, &error) == TC_OK);
     assert(mt_node_status(node, TC_NO_CANCEL, &status, &error) == TC_OK);
     assert(strstr(status, "\"backend_state\":\"Stopped\"") != NULL);
     assert(strstr(status, "\"account_identity\":null") != NULL);

@@ -36,6 +36,11 @@ int32_t mt_node_new(char *config_json, uint8_t *key, size_t key_len,
  * or expired login needs mt_node_start_login, even with ambient CLI auth env. */
 int32_t mt_node_start(tc_handle node, tc_token token, char **error);
 
+/* ABI 2: notify the existing engine of a path change or foreground resume.
+ * Coalesced by upstream netmon; no implicit startup/login, no node/TCP reset.
+ * Unstarted/starting nodes ignore the hint and discover the path at startup. */
+int32_t mt_node_network_changed(tc_handle node, tc_token token, char **error);
+
 /* No network startup is triggered by status. Before start backend_state=Stopped.
  * schema_version=1; backend_state/auth_url/tailnet_name/user_login are strings;
  * account_identity is null or a stable nonsecret account binding string;

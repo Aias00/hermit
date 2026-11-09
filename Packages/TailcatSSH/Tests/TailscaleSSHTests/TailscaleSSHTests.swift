@@ -93,6 +93,7 @@ final class TailscaleSSHTests: XCTestCase {
         let configuration = try TailscaleNodeConfiguration(stateDirectory: directory,
                                                            stateEncryptionKey: Data(repeating: 0x73, count: 32), hostname: "moshpit-offline-test")
         let node = try await TailscaleNode(configuration: configuration)
+        try await node.networkChanged()
         let status = try await node.status()
         XCTAssertEqual(status.backendState, "Stopped")
         XCTAssertNil(status.authURL)
@@ -159,6 +160,12 @@ final class TailscaleSSHTests: XCTestCase {
         let (first, second) = try await (a, b)
         XCTAssertEqual(api.makeCount, 1)
         XCTAssertEqual(api.streams.count, 2)
+        try await node.networkChanged()
+        XCTAssertEqual(api.networkChangeCount, 1)
+        XCTAssertEqual(api.closeCount, 0)
+        XCTAssertEqual(api.loginCount, 0)
+        XCTAssertTrue(first.channel.isActive)
+        XCTAssertTrue(second.channel.isActive)
         await first.close()
         XCTAssertEqual(api.closeCount, 0)
         XCTAssertTrue(second.channel.isActive)
@@ -263,7 +270,7 @@ final class TailscaleSSHTests: XCTestCase {
 
 private final class FakeTailscaleAPI: TailscaleNativeAPI, @unchecked Sendable {
     private let lock = NSLock()
-    private var created = 0, started = 0, logins = 0, logouts = 0, closed = 0
+    private var created = 0, started = 0, logins = 0, logouts = 0, closed = 0, networkChanges = 0
     private var connections: [EchoByteStream] = []
     private let state: String
     private var authURL: URL?
@@ -278,11 +285,13 @@ private final class FakeTailscaleAPI: TailscaleNativeAPI, @unchecked Sendable {
     var loginCount: Int { lock.lock(); defer { lock.unlock() }; return logins }
     var logoutCount: Int { lock.lock(); defer { lock.unlock() }; return logouts }
     var closeCount: Int { lock.lock(); defer { lock.unlock() }; return closed }
+    var networkChangeCount: Int { lock.lock(); defer { lock.unlock() }; return networkChanges }
     var streams: [EchoByteStream] { lock.lock(); defer { lock.unlock() }; return connections }
     func makeNode(_ configuration: TailscaleNodeConfiguration) throws -> UInt64 {
         lock.lock(); defer { lock.unlock() }; created += 1; return 100
     }
     func start(node: UInt64, token: UInt64) throws { lock.lock(); started += 1; lock.unlock() }
+    func networkChanged(node: UInt64, token: UInt64) throws { lock.lock(); networkChanges += 1; lock.unlock() }
     func status(node: UInt64, token: UInt64) throws -> TailscaleNodeStatus {
         lock.lock(); defer { lock.unlock() }; return .init(backendState: state, authURL: authURL)
     }

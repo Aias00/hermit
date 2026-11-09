@@ -33,6 +33,7 @@ type tailscaleBackend interface {
 	Status(context.Context) (*ipnstate.Status, error)
 	Login(context.Context) error
 	Logout(context.Context) error
+	NetworkChanged()
 	Dial(context.Context, string, string) (net.Conn, error)
 	Close() error
 }
@@ -70,7 +71,8 @@ func (b *embeddedBackend) Dial(ctx context.Context, network, address string) (ne
 	}
 	return b.server.MoshpitDialPeerTCP(ctx, destination)
 }
-func (b *embeddedBackend) Close() error { return b.server.Close() }
+func (b *embeddedBackend) Close() error    { return b.server.Close() }
+func (b *embeddedBackend) NetworkChanged() { b.server.MoshpitNetworkChanged() }
 
 type tailscaleNode struct {
 	backend     tailscaleBackend
@@ -153,6 +155,26 @@ func (n *tailscaleNode) close() error {
 
 func StartTailscaleNode(id, token Handle) error {
 	return use[*tailscaleNode](id, token, func(ctx context.Context, e *entry, n *tailscaleNode) error { return n.start(ctx) })
+}
+
+// A lifecycle hint is not a start/login request. The resource gate keeps the
+// monitor alive until this call finishes, including a concurrent node close.
+func NetworkChangedTailscaleNode(id, token Handle) error {
+	return use[*tailscaleNode](id, token, func(ctx context.Context, e *entry, n *tailscaleNode) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		select {
+		case <-n.startDone:
+			if n.startErr != nil {
+				return n.startErr
+			}
+			n.backend.NetworkChanged()
+		default:
+			// Startup will obtain the current path itself.
+		}
+		return nil
+	})
 }
 
 type TailscalePeer struct {

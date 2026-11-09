@@ -8,6 +8,17 @@ import (
 	"net/netip"
 )
 
+// MoshpitNetworkChanged wakes the engine's own network monitor after an app
+// resume or NWPath change. Start must already have completed. Let upstream
+// classify the change: real interface changes rebind UDP, while an unchanged
+// path only refreshes endpoints (ReSTUN). Never recreate the node or its TCP
+// streams, and never force a disruptive UDP/DERP reset on every app activation.
+func (s *Server) MoshpitNetworkChanged() {
+	if s.netMon != nil {
+		s.netMon.InjectEvent()
+	}
+}
+
 // MoshpitDialPeerTCP is the deliberately narrow app embedding path. Server.Dial
 // delegates to UserDial, which can fall back to the system network when a route
 // is not in the tailnet. We only accept an already resolved, currently known

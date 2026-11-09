@@ -34,7 +34,7 @@ func mtGuard(out **C.char, fn func() error) (code C.int32_t) {
 }
 
 //export mt_abi_version
-func mt_abi_version() C.uint32_t { return 1 }
+func mt_abi_version() C.uint32_t { return 2 }
 
 //export mt_node_new
 func mt_node_new(config *C.char, key *C.uint8_t, keyLen C.size_t, out *C.tc_handle, err **C.char) C.int32_t {
@@ -58,6 +58,11 @@ func mt_node_status(node C.tc_handle, token C.tc_token, out, err **C.char) C.int
 	return mtGuard(err, func() error {
 		return text(out, func() (string, error) { return capi.TailscaleNodeStatus(capi.Handle(node), capi.Handle(token)) })
 	})
+}
+
+//export mt_node_network_changed
+func mt_node_network_changed(node C.tc_handle, token C.tc_token, err **C.char) C.int32_t {
+	return mtGuard(err, func() error { return capi.NetworkChangedTailscaleNode(capi.Handle(node), capi.Handle(token)) })
 }
 
 //export mt_node_start_login

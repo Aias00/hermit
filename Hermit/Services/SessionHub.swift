@@ -4163,6 +4163,9 @@ final class SessionHub {
     /// The kick itself, reachable synchronously for tests.
     func kickSessionsAfterPathChange() async {
         Log.ssh.debug("resume: network path changed")
+        // Notify WireGuard/netmon before probing SSH. The engine decides
+        // whether to rebind; this never logs out or replaces the shared node.
+        await TailscaleAccount.shared.networkPathChanged()
         let redialAfter = pathRedialAfter
         await withTaskGroup(of: Void.self) { group in
             for session in sessions.values {

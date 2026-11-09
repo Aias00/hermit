@@ -40,6 +40,7 @@ enum TailscaleAccountError: Error, Equatable, LocalizedError, Sendable {
 protocol TailscaleAccountNode: AnyObject, Sendable {
     var nativeNode: TailscaleNode? { get }
     func start() async throws
+    func networkChanged() async throws
     func status() async throws -> TailscaleNodeStatus
     func startLogin() async throws -> TailscaleNodeStatus
     func logout() async throws
@@ -51,6 +52,7 @@ final class NativeTailscaleAccountNode: TailscaleAccountNode, @unchecked Sendabl
     var nativeNode: TailscaleNode? { node }
     init(configuration: TailscaleNodeConfiguration) async throws { node = try await TailscaleNode(configuration: configuration) }
     func start() async throws { try await node.start() }
+    func networkChanged() async throws { try await node.networkChanged() }
     func status() async throws -> TailscaleNodeStatus { try await node.status() }
     func startLogin() async throws -> TailscaleNodeStatus { try await node.startLogin() }
     func logout() async throws { try await node.logout() }
@@ -85,6 +87,7 @@ actor TailscaleRuntime {
     private var generation = UUID()
     private var signOutOperations = 0
     private var firstRunningAt: ContinuousClock.Instant?
+    private var networkCheck: (id: UUID, task: Task<Void, Error>)?
     private let peerStartupGrace: Duration
 
     init(vault: TailscaleAccountVault = TailscaleAccountVault(), peerStartupGrace: Duration = .seconds(10),
@@ -139,6 +142,22 @@ actor TailscaleRuntime {
         let status = try await (startLogin ? node.startLogin() : node.status())
         guard generation == currentGeneration else { throw CancellationError() }
         return try await accept(status, record: record)
+    }
+
+    /// A shared engine receives one hint even when foreground and NWPath
+    /// callbacks overlap. No node creation, Keychain read, or login is needed.
+    func networkChanged() async throws {
+        guard signOutOperations == 0, let node else { return }
+        let currentGeneration = generation
+        let work: (id: UUID, task: Task<Void, Error>)
+        if let networkCheck { work = networkCheck }
+        else {
+            work = (UUID(), Task { try await node.networkChanged() })
+            networkCheck = work
+        }
+        defer { if networkCheck?.id == work.id { networkCheck = nil } }
+        try await work.task.value
+        guard generation == currentGeneration else { throw CancellationError() }
     }
 
     private func accept(_ status: TailscaleNodeStatus, record: TailscaleAccountRecord) async throws -> TailscaleAccountSnapshot {
@@ -245,6 +264,8 @@ actor TailscaleRuntime {
 
     private func stopNode() async {
         generation = UUID()
+        networkCheck?.task.cancel()
+        networkCheck = nil
         let previousClose = closing
         let existing = node
         let pending = starting?.task
@@ -380,12 +401,24 @@ final class TailscaleAccount {
         } catch { if operation == id { fail(error) } }
     }
 
-    /// Refresh only the node's own state. Time spent in the background, an SSH
+    /// Refresh the path and the node's own state. Time in the background, an SSH
     /// probe failure or a HERDR channel timeout is not evidence of node failure.
     /// Restarting this shared node would close every host's otherwise live SSH.
     func resume() async {
+        await networkPathChanged()
         await refresh()
         pollIfNeeded()
+    }
+
+    func networkPathChanged() async {
+        do {
+            try await runtime.networkChanged()
+        } catch is CancellationError { }
+        catch {
+            // A failed hint must not turn SSH loss into an account failure or
+            // tear down healthy sibling streams. Normal health checks continue.
+            Log.ssh.notice("tailscale: network refresh hint failed; retaining shared node")
+        }
     }
 
     private func apply(_ snapshot: TailscaleAccountSnapshot) {

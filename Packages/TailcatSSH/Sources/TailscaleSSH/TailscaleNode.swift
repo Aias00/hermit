@@ -29,6 +29,15 @@ public final class TailscaleNode: @unchecked Sendable {
         return try await TailscaleNativeAttempt.perform(timeout: 10_000_000_000) { try resource.api.status(node: handle, token: $0) }
     }
 
+    /// Re-check the underlying path without restarting the shared node or its
+    /// TCP streams. Does not enroll an account or start an unstarted engine.
+    public func networkChanged() async throws {
+        let resource = resource, handle = try resource.handle()
+        try await TailscaleNativeAttempt.perform(timeout: 2_000_000_000) {
+            try resource.api.networkChanged(node: handle, token: $0)
+        }
+    }
+
     /// Call only in response to an explicit user action. Enrollment is observed
     /// by polling status; an authURL may arrive after this method returns.
     @discardableResult public func startLogin() async throws -> TailscaleNodeStatus {

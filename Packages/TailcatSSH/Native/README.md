@@ -36,7 +36,7 @@ runtime. The build stages `Overlay/` into a fresh upstream source tree and adds
 one reviewed node-close case to the existing C handle registry; `stage-overlay.py`
 fails if the exact upstream anchor changes. The fixed Tailscale module is cloned
 to disposable build space, selected using a relative module replacement, and
-given one additional method through Go's source-overlay mechanism. This avoids
+given narrow additional methods through Go's source-overlay mechanism. This avoids
 modifying the module cache. Both the overlay sources and hashes are recorded in
 `BUILD-INFO.json`. No second Go static/shared runtime is linked.
 The Go runtime is linked into the app for its lifetime. All C API I/O calls are
@@ -62,6 +62,15 @@ App nodes opt into `MoshpitExplicitLoginOnly`, a checked source patch that stops
 upstream tsnet's automatic interactive enrollment from `Start()` and ignores
 ambient CLI authentication keys/forced-login settings. Restoring an existing
 node still starts normally; a new or expired login needs the explicit login ABI.
+
+Embedded Tailscale ABI 2 adds `mt_node_network_changed`. Hermit forwards
+foreground resumes and debounced network-path changes to the existing engine's
+`netmon.InjectEvent()`. Upstream coalesces these hints, re-reads interfaces,
+rebinds UDP only for a significant change, and runs ReSTUN for viable paths.
+It does not recreate the node, initiate login, or close userspace TCP streams.
+Hints before engine startup are ignored. This improves recovery after app
+suspension; it does not give an ordinary iOS app Network Extension background
+execution or establish parity with the official client.
 
 The App supplies a 32-byte Keychain encryption key and a protected, excluded-from-
 backup data directory. `moshpit-tailscale.state` stores all tsnet identity state

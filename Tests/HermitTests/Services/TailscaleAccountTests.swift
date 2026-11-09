@@ -192,7 +192,57 @@ struct TailscaleAccountTests {
         #expect(await node.starts == 1)
         #expect(await node.closes == 0)
         #expect(await node.logins == 1, "resume must not implicitly start a new login")
+        #expect(await node.networkChanges == 1)
         await account.logout()
+    }
+
+    @Test("Path hints do not create an account or engine")
+    func pathHintDoesNotStartNode() async throws {
+        let (vault, node, runtime) = fixture()
+        defer { try? FileManager.default.removeItem(at: vault.root) }
+        try await runtime.networkChanged()
+        #expect(await node.starts == 0)
+        #expect(await node.networkChanges == 0)
+        #expect(try vault.load() == nil)
+    }
+
+    @Test("Overlapping path hints share one native refresh and preserve node identity")
+    func overlappingPathHints() async throws {
+        let (vault, node, runtime) = fixture()
+        defer { try? FileManager.default.removeItem(at: vault.root) }
+        let original = try await runtime.snapshot(startLogin: true)
+        await node.holdNetworkChange()
+        let first = Task { try await runtime.networkChanged() }
+        while await node.networkChanges == 0 { await Task.yield() }
+        let second = Task { try await runtime.networkChanged() }
+        // Hold native work while a second lifecycle callback reaches the actor.
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(await node.networkChanges == 1)
+        await node.releaseNetworkChange()
+        try await first.value
+        try await second.value
+        #expect(await node.networkChanges == 1)
+        #expect(await node.closes == 0)
+        #expect(await node.starts == 1)
+        let current = try await runtime.snapshot()
+        #expect(current.accountID == original.accountID)
+        await runtime.restart()
+    }
+
+    @Test("A stale network hint cannot complete as the current account after node replacement")
+    func stalePathHint() async throws {
+        let (vault, node, runtime) = fixture()
+        defer { try? FileManager.default.removeItem(at: vault.root) }
+        _ = try await runtime.snapshot(startLogin: true)
+        await node.holdNetworkChange()
+        let hint = Task { try await runtime.networkChanged() }
+        while await node.networkChanges == 0 { await Task.yield() }
+        await runtime.restart()
+        await node.releaseNetworkChange()
+        do { try await hint.value; Issue.record("stale hint accepted after node replacement") }
+        catch { #expect(error is CancellationError) }
+        #expect(await node.closes == 1)
+        #expect(await node.logins == 1)
     }
 
     @MainActor
@@ -398,6 +448,9 @@ private actor FakeAccountNode: TailscaleAccountNode {
     private(set) var starts = 0
     private(set) var logins = 0
     private(set) var closes = 0
+    private(set) var networkChanges = 0
+    private var holdNetwork = false
+    private var networkContinuation: CheckedContinuation<Void, Never>?
     private var hold = false
     private var startContinuation: CheckedContinuation<Void, Never>?
     private var holdsNextStatus = false
@@ -417,6 +470,12 @@ private actor FakeAccountNode: TailscaleAccountNode {
     }
     func startLogin() async throws -> TailscaleNodeStatus { logins += 1; return value }
     func logout() async throws {}
+    func networkChanged() async throws {
+        networkChanges += 1
+        if holdNetwork { await withCheckedContinuation { networkContinuation = $0 } }
+    }
+    func holdNetworkChange() { holdNetwork = true }
+    func releaseNetworkChange() { holdNetwork = false; networkContinuation?.resume(); networkContinuation = nil }
     func close() async { closes += 1 }
     func update(_ value: TailscaleNodeStatus) { self.value = value }
     func holdStart() { hold = true }

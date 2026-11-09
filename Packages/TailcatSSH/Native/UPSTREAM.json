@@ -12,9 +12,10 @@
     "Overlay/: Moshpit encrypted tsnet state store, lifecycle/C ABI, and tests",
     "stage-overlay.py: add tailscaleNode shutdown to the existing capi registry",
     "OverlayDependencies/tsnet/moshpit_peer_dial.go: userspace-only peer TCP dial, no system-network fallback",
-    "stage-overlay.py: opt-in tsnet explicit enrollment; ignore ambient CLI auth keys and forced-login environment"
+    "stage-overlay.py: opt-in tsnet explicit enrollment; ignore ambient CLI auth keys and forced-login environment",
+    "OverlayDependencies/tsnet/moshpit_peer_dial.go: lifecycle network hints through upstream netmon, preserving node and TCP streams"
   ],
   "embedded_tailscale_revision": "v1.105.0-pre.0.20261013225543-fb79793d99f5",
-  "tailscale_abi_version": 1,
+  "tailscale_abi_version": 2,
   "build_tags": "Native/build-tags.txt"
 }
