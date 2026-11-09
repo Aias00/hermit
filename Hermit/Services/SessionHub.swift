@@ -1611,6 +1611,9 @@ final class SessionHub {
             // Its success must not be torn down by an earlier retry timer.
             tunnelRetryTask?.cancel()
             tunnelRetryTask = nil
+            tailscaleResumeProbeTask?.cancel()
+            tailscaleResumeProbeTask = nil
+            probeTimeouts = 0
             retryScheduledAt = nil
             herdrFrameRecoveryTask?.cancel()
             herdrFrameRecoveryTask = nil
@@ -3247,6 +3250,8 @@ final class SessionHub {
         /// with it (``inheritedPinLedger``); the replacement re-pins the same
         /// window on attach and settles the rest on the real disconnect.
         func stop(forReconnect: Bool = false, preservingComposerDrafts: Bool = false) async {
+            tailscaleResumeProbeTask?.cancel()
+            tailscaleResumeProbeTask = nil
             if !forReconnect && !preservingComposerDrafts { composerDrafts.cancelTransfers() }
             webPreviewGeneration = UUID()
             for reference in webPreviews { reference.value?.suspend() }
@@ -3533,9 +3538,11 @@ final class SessionHub {
         /// app is foreground). Doubles as NAT-warmth (the probe is real
         /// traffic) and fast death detection, and retries a stalled reconnect.
         func keepAlive() async {
-            guard !isStopping, !isReconnecting, canAutomaticallyReconnect else { return }
+            guard !isStopping, !isReconnecting, !isResuming, !healthProbeInFlight, canAutomaticallyReconnect else { return }
             // mosh owns its own UDP resume/roam; don't probe its closed bootstrap.
             if moshTransport != nil { await resumeIfNeeded(); return }
+            healthProbeInFlight = true
+            defer { healthProbeInFlight = false }
             switch viewModel.status {
             case .connected:
                 // Bytes arrived recently: the connection is demonstrably
@@ -3544,7 +3551,16 @@ final class SessionHub {
                     probeTimeouts = 0
                     return
                 }
-                switch await probeTransport() {
+                let observed = viewModel.session
+                let generation = startGeneration
+                let began = Date()
+                let result = await probeTransport()
+                guard !isStopping, generation == startGeneration, viewModel.session === observed else { return }
+                if inboundAge() < Date().timeIntervalSince(began) {
+                    probeTimeouts = 0
+                    return
+                }
+                switch result {
                 case .alive:
                     probeTimeouts = 0
                 case .failed:
@@ -3640,7 +3656,7 @@ final class SessionHub {
         /// plus the periodic keepalive tick can both call this for the same
         /// session.
         func resumeIfNeeded(probeTimeout: Double? = nil) async {
-            guard !isStopping, !isReconnecting, !isResuming, canAutomaticallyReconnect else { return }
+            guard !isStopping, !isReconnecting, !isResuming, !healthProbeInFlight, canAutomaticallyReconnect else { return }
             if herdrFrameSSH != nil, herdrExpectedCloses > 0, !herdrFrameSuspended {
                 // The render recovery owns this transition; don't race it with
                 // an SSH probe that would gate-block its reconnect.
@@ -3709,7 +3725,28 @@ final class SessionHub {
             // the TCP socket during suspension without NIO seeing a close, so it
             // lies (home shows "connected" but -CC can't attach). Actively
             // round-trip a trivial command with a short timeout instead.
-            if await isTransportAlive(timeout: probeTimeout) { return }
+            if connection.transport == .tailscale, inboundAge() < Self.inboundProofWindow {
+                probeTimeouts = 0
+                return
+            }
+            let observed = viewModel.session
+            let generation = startGeneration
+            let began = Date()
+            let result = await probeTransport(timeout: probeTimeout)
+            guard !isStopping, generation == startGeneration, viewModel.session === observed else { return }
+            if result == .alive || inboundAge() < Date().timeIntervalSince(began) {
+                probeTimeouts = 0
+                return
+            }
+            if connection.transport == .tailscale, result == .timedOut {
+                probeTimeouts += 1
+                if probeTimeouts < 2 {
+                    Log.ssh.notice("\(self.viewModel.diagnosticSessionLabel, privacy: .public) tailscale SSH resume: probe timed out — retaining stream for confirmation")
+                    scheduleTailscaleResumeProbe()
+                    return
+                }
+            }
+            probeTimeouts = 0
             if usesTunnelTransport, connection.multiplexer == .none {
                 shellWasReopened = true
             }
@@ -3777,6 +3814,21 @@ final class SessionHub {
 
         /// Consecutive probe TIMEOUTS (not failures) — see `keepAlive`.
         @ObservationIgnored private var probeTimeouts = 0
+        @ObservationIgnored private var healthProbeInFlight = false
+        @ObservationIgnored private var tailscaleResumeProbeTask: Task<Void, Never>?
+        @ObservationIgnored var tailscaleResumeProbeDelay: Duration = .seconds(1)
+
+        private func scheduleTailscaleResumeProbe() {
+            guard tailscaleResumeProbeTask == nil else { return }
+            let generation = startGeneration
+            let delay = tailscaleResumeProbeDelay
+            tailscaleResumeProbeTask = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: delay) } catch { return }
+                guard let self, !Task.isCancelled, generation == self.startGeneration else { return }
+                self.tailscaleResumeProbeTask = nil
+                await self.resumeIfNeeded(probeTimeout: self.foregroundProbeTimeout)
+            }
+        }
 
         /// Probe deadline for `isTransportAlive`/`isSidecarAlive`. 8s absorbs
         /// a genuinely slow link (see the rationale above `isTransportAlive`);
