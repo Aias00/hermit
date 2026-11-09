@@ -395,12 +395,20 @@ struct TerminalScreen: View {
         guard let snapshot = tmuxSnapshot,
               let sessionID = snapshot.activeSessionId,
               let session = snapshot.sessions[sessionID] else {
-            return "\(connection.username)@\(connection.host)"
+            return currentRouteDescription
         }
         guard let windowID = snapshot.activeWindowId,
               let window = snapshot.windows[windowID] else { return session.name }
         let windowTitle = window.name == String(window.index) ? window.name : "\(window.index):\(window.name)"
         return "\(session.name) › \(windowTitle)"
+    }
+
+    private var currentRouteDescription: String {
+        guard connection.usesAutomaticLocalRouting, let selected = active?.viewModel.session?.connection else {
+            return "\(connection.username)@\(connection.host)"
+        }
+        let route = selected.transport == .direct ? "局域网" : "Tailscale"
+        return "\(route) · \(HostListPresentation.endpoint(for: selected))"
     }
 
     /// The agent hooks matching ``tmuxSnapshot`` — same concrete-type dance,
@@ -1117,6 +1125,12 @@ struct TerminalScreen: View {
                     Text(connection.multiplexer == .none ? connection.connectionProtocol.label : connection.multiplexer.label)
                         .font(.system(size: 11, weight: .semibold)).foregroundStyle(.cyan)
                         .padding(.horizontal, 7).padding(.vertical, 3).background(.blue.opacity(0.15), in: Capsule())
+                    if connection.usesAutomaticLocalRouting, let selected = active?.viewModel.session?.connection {
+                        Text(selected.transport == .direct ? "局域网" : "Tailscale")
+                            .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                            .accessibilityLabel(currentRouteDescription)
+                            .accessibilityIdentifier("terminal-active-route")
+                    }
                 }
                 Label(terminalLocationTitle, systemImage: tmuxSnapshot == nil ? "network" : "rectangle.stack")
                     .font(.system(size: 11, weight: highlightedTerminalLocation == nil ? .regular : .semibold))
@@ -1605,7 +1619,7 @@ struct TerminalScreen: View {
                 // Show the connection identity, plus the multiplexer running
                 // inside so it's clear you're multiplexing — navigate it with
                 // Ctrl-b, which is the prefix for both tmux and herdr.
-                Text("\(connection.username)@\(connection.host)")
+                Text(currentRouteDescription)
                     .font(Face.mono(11))
                     .foregroundStyle(Ink.secondary)
                     .lineLimit(1)

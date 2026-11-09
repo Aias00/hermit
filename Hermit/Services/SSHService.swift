@@ -1449,6 +1449,26 @@ actor SSHService {
                  onUnknownHost: @escaping TrustNewHostHandler = { _, _, _ in false },
                  onChangedHost: @escaping AcceptChangedHostHandler = { _, _, _, _ in false },
                  onProgress: (@Sendable (SSHConnectionDiagnostic) -> Void)? = nil) async throws -> SSHSession {
+        let trustIdentity = try connection.automaticRouteTrustIdentity()
+        return try await SSHRouteSelection.connect(connection) { candidate, local in
+            if local { Log.ssh.notice("conn=\(connection.id.uuidString, privacy: .public) route=local attempt started") }
+            do {
+                return try await self.connectAttempt(candidate, overrideSecret: overrideSecret,
+                    onUnknownHost: onUnknownHost, onChangedHost: onChangedHost, onProgress: onProgress,
+                    boundedLocalDial: local, sharedTrustIdentity: trustIdentity, sharedTrustPort: connection.port)
+            } catch is LocalSSHRouteUnavailable {
+                Log.ssh.notice("conn=\(connection.id.uuidString, privacy: .public) route=local TCP unavailable; trying next configured route")
+                throw LocalSSHRouteUnavailable()
+            }
+        }
+    }
+
+    private func connectAttempt(_ connection: ServerConnection,
+                 overrideSecret: String?,
+                 onUnknownHost: @escaping TrustNewHostHandler,
+                 onChangedHost: @escaping AcceptChangedHostHandler,
+                 onProgress: (@Sendable (SSHConnectionDiagnostic) -> Void)?,
+                 boundedLocalDial: Bool, sharedTrustIdentity: String?, sharedTrustPort: Int) async throws -> SSHSession {
         let attemptID = UUID()
         let route = connection.transport
         var phase = SSHConnectionDiagnostic.Phase.transportValidation
@@ -1463,6 +1483,7 @@ actor SSHService {
             let session = try await connectImplementation(connection, overrideSecret: overrideSecret,
                 onUnknownHost: onUnknownHost, onChangedHost: onChangedHost, diagnosticID: attemptID.uuidString,
                 diagnosticContext: "conn=\(connection.id.uuidString) route=\(route?.rawValue ?? "unknown")",
+                boundedLocalDial: boundedLocalDial, sharedTrustIdentity: sharedTrustIdentity, sharedTrustPort: sharedTrustPort,
                 onPhase: { next in phase = next; record(.started) })
             record(.succeeded)
             return session
@@ -1479,6 +1500,7 @@ actor SSHService {
                  onUnknownHost: @escaping TrustNewHostHandler,
                  onChangedHost: @escaping AcceptChangedHostHandler,
                  diagnosticID: String, diagnosticContext: String,
+                 boundedLocalDial: Bool, sharedTrustIdentity: String?, sharedTrustPort: Int,
                  onPhase: (SSHConnectionDiagnostic.Phase) -> Void) async throws -> SSHSession {
         // Validate before reading SSH keys or touching the network. Unknown
         // transport values and Cloudflare+Mosh must never fall back to direct.
@@ -1552,7 +1574,9 @@ actor SSHService {
         // A Tailcat alias is only a display name. Pin SSH trust to the remote
         // node identity so two servers named "mac-mini" never share trust.
         let hostKeyIdentity: String
-        if case .relay(let settings) = transport {
+        if let sharedTrustIdentity {
+            hostKeyIdentity = sharedTrustIdentity
+        } else if case .relay(let settings) = transport {
             hostKeyIdentity = settings.hostKeyIdentity
         } else if case .tailcat(let settings) = transport {
             hostKeyIdentity = settings.hostKeyIdentity
@@ -1562,17 +1586,18 @@ actor SSHService {
             hostKeyIdentity = connection.host
         }
         // Relay chooses the target port by service; editable metadata cannot fork SSH trust.
-        let trustPort = connection.transport == .relay ? 22 : connection.port
+        let trustPort = sharedTrustIdentity != nil ? sharedTrustPort : (connection.transport == .relay ? 22 : connection.port)
         let displayHost = connection.host
+        let displayPort = connection.port
         let delegate = TOFUHostKeyDelegate(
             validator: validator,
             host: hostKeyIdentity,
             port: trustPort,
-            onNewHost: { _, port, fingerprint in
-                await onUnknownHost(displayHost, port, fingerprint)
+            onNewHost: { _, _, fingerprint in
+                await onUnknownHost(displayHost, displayPort, fingerprint)
             },
-            onChangedHost: { _, port, newFingerprint, oldFingerprint in
-                await onChangedHost(displayHost, port, newFingerprint, oldFingerprint)
+            onChangedHost: { _, _, newFingerprint, oldFingerprint in
+                await onChangedHost(displayHost, displayPort, newFingerprint, oldFingerprint)
             }
         )
         let hostKeyValidator = SSHHostKeyValidator.custom(delegate)
@@ -1721,15 +1746,41 @@ actor SSHService {
                 }
             case .direct:
                 onPhase(.directSSHConnect)
-                client = try await clientProvider.connect(
-                    host: connection.host,
-                    port: connection.port,
-                    authenticationMethod: authMethod,
-                    hostKeyValidator: hostKeyValidator
-                )
+                if boundedLocalDial {
+                    let channel: Channel
+                    do {
+                        channel = try await ClientBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+                            .connectTimeout(.milliseconds(1500))
+                            // Preserve an early SSH banner until NIOSSH is installed.
+                            .channelOption(ChannelOptions.autoRead, value: false)
+                            .connect(host: connection.host, port: connection.port).get()
+                    } catch {
+                        try Task.checkCancellation()
+                        throw LocalSSHRouteUnavailable()
+                    }
+                    do {
+                        try Task.checkCancellation()
+                        onPhase(.sshAuthentication)
+                        client = try await clientProvider.connect(on: channel, authenticationMethod: authMethod,
+                                                                  hostKeyValidator: hostKeyValidator)
+                        try await SSHChannelAuthentication.complete(on: channel) {
+                            try await channel.setOption(ChannelOptions.autoRead, value: true).get()
+                            channel.read()
+                        }
+                        try Task.checkCancellation()
+                    } catch {
+                        try? await channel.close()
+                        throw error
+                    }
+                } else {
+                    client = try await clientProvider.connect(
+                        host: connection.host, port: connection.port,
+                        authenticationMethod: authMethod, hostKeyValidator: hostKeyValidator)
+                }
             }
             return SSHSession(connection: connection, client: client, carrierCleanup: carrierCleanup)
         } catch {
+            if error is LocalSSHRouteUnavailable { throw error }
             throw SSHError.map(error)
         }
     }

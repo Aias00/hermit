@@ -21,6 +21,7 @@ enum HostListPresentation {
     }
 
     static func routeLabel(for host: ServerConnection) -> String {
+        if host.usesAutomaticLocalRouting { return "自动 · 局域网 / Tailscale" }
         switch host.transport {
         case .direct: return String(localized: "Direct")
         case .socks5: return "SOCKS5"
@@ -61,6 +62,7 @@ enum HostListPresentation {
         if host.transport == .cloudflareSSH, let hostname = host.cloudflareHostname {
             fields.append(hostname)
         }
+        if host.usesAutomaticLocalRouting { fields += (host.localEndpoints ?? []).map(\.host) }
         return fields
     }
 }

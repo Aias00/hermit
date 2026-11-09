@@ -163,6 +163,7 @@ enum ConnectionTransportError: Error, Equatable, LocalizedError, Sendable {
     case invalidTailscaleConfiguration
     case relayRequiresSSH
     case invalidRelayConfiguration
+    case invalidLocalEndpoint
 
     var errorDescription: String? {
         switch self {
@@ -200,6 +201,8 @@ enum ConnectionTransportError: Error, Equatable, LocalizedError, Sendable {
             return "Import a valid Relay invitation and pair this device first."
         case .invalidTailscaleConfiguration:
             return String(localized: "Sign in to Tailscale in this app and select an account for this connection.")
+        case .invalidLocalEndpoint:
+            return "自动线路需要 SSH + Tailscale，并配置 1–4 个有效的局域网 IP 和端口。"
         }
     }
 }
@@ -357,6 +360,10 @@ struct ServerConnection: Identifiable, Codable, Equatable {
     var relayDeviceID: String?
     var relayService: String?
     var relayCredentialRef: String?
+    /// Opt-in LAN-first routing. Credentials, connection ID and remote session
+    /// stay shared; the selected Tailscale host remains the fallback endpoint.
+    var preferLocalNetwork: Bool?
+    var localEndpoints: [SSHLocalEndpoint]?
 
     var transport: ConnectionTransport? {
         if let transportRaw { return ConnectionTransport(rawValue: transportRaw) }

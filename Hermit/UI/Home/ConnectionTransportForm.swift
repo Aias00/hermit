@@ -22,6 +22,8 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
     var tailscaleAccountID: String?
     var tailscalePeerID: String?
     private(set) var tailscalePeerHost: String?
+    var preferLocalNetwork = false
+    var localEndpoints: [SSHLocalEndpoint] = []
     private let tailcatDraftReference = TailcatCredentials.newReference()
 
     init(connection: ServerConnection? = nil) {
@@ -39,6 +41,8 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
         tailscaleAccountID = connection.tailscaleAccountID
         tailscalePeerID = connection.tailscalePeerID
         tailscalePeerHost = connection.tailscalePeerID == nil ? nil : connection.host
+        preferLocalNetwork = connection.preferLocalNetwork == true
+        localEndpoints = connection.localEndpoints ?? []
     }
 
     mutating func bindRelay(_ credential: RelayCredential) throws {
@@ -115,11 +119,18 @@ struct ConnectionTransportForm: Equatable, CustomStringConvertible, CustomDebugS
         }
         connection.tailscaleAccountID = selection == .tailscale ? tailscaleAccountID : nil
         connection.tailscalePeerID = selection == .tailscale ? tailscalePeerID : nil
+        connection.preferLocalNetwork = selection == .tailscale && preferLocalNetwork
+        connection.localEndpoints = localEndpoints.map {
+            var endpoint = $0
+            endpoint.host = endpoint.host.trimmingCharacters(in: .whitespacesAndNewlines)
+            return endpoint
+        }
         connection.relayServer = selection == .relay ? relaySettings?.server : nil
         connection.relayDeviceID = selection == .relay ? relaySettings?.deviceID : nil
         connection.relayService = selection == .relay ? relaySettings?.service : nil
         connection.relayCredentialRef = selection == .relay ? relaySettings?.credentialRef : nil
         let validated = try connection.validatedTransport()
+        _ = try connection.validatedLocalEndpoints()
         if case .cloudflare(let settings) = validated {
             // An absent override follows the Host field on subsequent edits.
             if connection.cloudflareHostname != nil { connection.cloudflareHostname = settings.hostname }

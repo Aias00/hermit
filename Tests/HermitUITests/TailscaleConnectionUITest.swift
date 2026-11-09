@@ -5,21 +5,82 @@ import XCTest
 final class TailscaleConnectionUITest: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
+    @MainActor func testLocalAddressesCanBeConfiguredWithoutStartingLogin() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MOSHPIT_AUTOCARE_OFF", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+        let add = app.buttons["home-add"]
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
+        add.tap()
+        choose("Tailscale (Experimental)", picker: "connection-transport-picker", in: app)
+        let toggle = app.switches["connection-auto-local-toggle"].firstMatch
+        XCTAssertTrue(reveal(toggle, in: app))
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        XCTAssertEqual(toggle.value as? String, "1")
+        attach(app, name: "local-routing-enabled")
+        let localHosts = app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@", "connection-local-host-"))
+        if !reveal(localHosts.firstMatch, in: app) {
+            attach(app, name: "missing-local-address-field")
+            XCTFail("local field is missing: \(app.debugDescription)")
+            return
+        }
+        localHosts.firstMatch.tap()
+        localHosts.firstMatch.typeText("192.168.1.10")
+        let extra = app.buttons["connection-local-add"].firstMatch
+        XCTAssertTrue(reveal(extra, in: app))
+        extra.tap()
+        XCTAssertEqual(localHosts.count, 2)
+        attach(app, name: "automatic-lan-tailscale-addresses")
+        XCTAssertFalse(app.webViews.firstMatch.exists, "editing local endpoints must not open login")
+        XCTAssertTrue(reveal(toggle, in: app))
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        XCTAssertTrue(waitForValue("0", of: toggle))
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: extra)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 3), .completed,
+                       "disabling the feature must hide automatic route controls")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        XCTAssertTrue(waitForValue("1", of: toggle))
+        XCTAssertTrue(reveal(extra, in: app))
+        XCTAssertEqual(localHosts.firstMatch.value as? String, "192.168.1.10", "temporarily disabling must retain the draft")
+        let removeSecond = app.buttons.matching(NSPredicate(format: "label == %@", "移除此地址")).element(boundBy: 1)
+        XCTAssertTrue(reveal(removeSecond, in: app))
+        removeSecond.tap()
+        XCTAssertEqual(localHosts.count, 1)
+        XCTAssertEqual(localHosts.firstMatch.value as? String, "192.168.1.10", "removing another endpoint must retain the first address")
+    }
+
+    @MainActor private func waitForValue(_ value: String, of element: XCUIElement) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: 3) == .completed
+    }
+
     @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
         let form = app.collectionViews.firstMatch
         var upward = false
         for attempt in 0...18 {
-            if element.exists, element.isHittable { return true }
+            var viewport = app.frame.intersection(form.frame)
+            let navigationBar = app.navigationBars.firstMatch
+            if navigationBar.exists {
+                let top = max(viewport.minY, navigationBar.frame.maxY + 4)
+                viewport = CGRect(x: viewport.minX, y: top, width: viewport.width, height: max(120, viewport.maxY - top))
+            }
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists { viewport.size.height = max(120, min(viewport.height, keyboard.frame.minY - viewport.minY)) }
+            if element.exists, element.isHittable,
+               viewport.insetBy(dx: 0, dy: 5).contains(CGPoint(x: element.frame.midX, y: element.frame.midY)) { return true }
             if element.exists, !element.isEnabled, !element.frame.isEmpty,
-               app.frame.intersection(form.frame).contains(CGPoint(x: element.frame.midX, y: element.frame.midY)) { return true }
+               viewport.contains(CGPoint(x: element.frame.midX, y: element.frame.midY)) { return true }
             if attempt == 18 { break }
             if element.exists, !element.frame.isEmpty {
-                upward = element.frame.midY < form.frame.midY
+                upward = element.frame.midY < viewport.midY
             } else if attempt == 9 {
                 upward.toggle()
             }
-            let start = form.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: upward ? 0.3 : 0.78))
-            let end = form.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: upward ? 0.78 : 0.3))
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: viewport.minX + 12, dy: viewport.minY + viewport.height * (upward ? 0.3 : 0.78)))
+            let end = origin.withOffset(CGVector(dx: viewport.minX + 12, dy: viewport.minY + viewport.height * (upward ? 0.78 : 0.3)))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
         return false

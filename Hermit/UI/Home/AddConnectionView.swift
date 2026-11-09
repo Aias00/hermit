@@ -204,6 +204,7 @@ struct AddConnectionView: View {
                 }
 
                 transportSection
+                if transportForm.selection == .tailscale { automaticLocalRoutesSection }
 
                 FormGroup(title: "AUTHENTICATION") {
                     PillSegmentedControl(
@@ -501,6 +502,41 @@ struct AddConnectionView: View {
             if let transportIssue {
                 Text(transportIssue).font(.footnote).foregroundStyle(.orange)
                     .accessibilityIdentifier("connection-transport-error")
+            }
+        }
+    }
+
+    private var automaticLocalRoutesSection: some View {
+        FormGroup(title: "多地址自动切换", footer: "连接或断线重连时，按顺序尝试局域网地址；无法建立连接时改用上方的 Tailscale。正常连接保持当前线路。所有地址共用 SSH 身份验证及服务器指纹。") {
+            Toggle("优先使用局域网", isOn: $transportForm.preferLocalNetwork)
+                .accessibilityIdentifier("connection-auto-local-toggle")
+                .onChange(of: transportForm.preferLocalNetwork) { _, enabled in
+                    if enabled, transportForm.localEndpoints.isEmpty {
+                        transportForm.localEndpoints.append(SSHLocalEndpoint())
+                    }
+                }
+            if transportForm.preferLocalNetwork {
+                ForEach($transportForm.localEndpoints) { $endpoint in
+                    VStack(alignment: .leading, spacing: 8) {
+                        FieldRow(placeholder: "局域网 IP，例如 192.168.1.10", text: $endpoint.host)
+                            .accessibilityIdentifier("connection-local-host-\(endpoint.id)")
+                        NumberFieldRow(label: "SSH 端口", placeholder: "22", text: Binding(
+                            get: { endpoint.port == 0 ? "" : String(endpoint.port) },
+                            set: { endpoint.port = Int($0) ?? 0 }))
+                            .accessibilityIdentifier("connection-local-port-\(endpoint.id)")
+                        Button("移除此地址", role: .destructive) {
+                            let id = endpoint.id
+                            transportForm.localEndpoints.removeAll { $0.id == id }
+                        }
+                    }
+                }
+                Button("添加局域网地址", systemImage: "plus") {
+                    transportForm.localEndpoints.append(SSHLocalEndpoint())
+                }
+                .disabled(transportForm.localEndpoints.count >= 4)
+                .accessibilityIdentifier("connection-local-add")
+                Text("支持最多 4 个私有 IPv4 或 IPv6 地址，可分别设置 SSH 端口。Tailscale 仍使用上方选定的设备。")
+                    .font(.footnote).foregroundStyle(Ink.meta)
             }
         }
     }
