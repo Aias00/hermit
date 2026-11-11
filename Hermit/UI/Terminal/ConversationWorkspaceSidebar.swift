@@ -12,8 +12,10 @@ enum TerminalChrome {
 struct ConversationWorkspaceSidebar: View {
     let snapshot: TmuxSnapshot
     let hooks: [String: AgentHook]
+    let inbox: AgentInbox
     let selectSession: (String) -> Void
     let selectPane: (String) -> Void
+    let sendEscape: (String) -> Void
     let manage: () -> Void
     let create: () -> Void
     let collapse: () -> Void
@@ -32,7 +34,14 @@ struct ConversationWorkspaceSidebar: View {
             return left == right ? $0.index < $1.index : left.localizedStandardCompare(right) == .orderedAscending
         }
     }
+    private var orderedAgents: [PaneInfo] {
+        let ordered = agents
+        return ordered.filter { inbox.isPinned($0.id) } + ordered.filter { !inbox.isPinned($0.id) }
+    }
     private func workspaceID(of pane: PaneInfo) -> String? { snapshot.windows[pane.windowId]?.sessionId }
+    private func isUnread(in session: SessionInfo) -> Bool {
+        agents.contains { workspaceID(of: $0) == session.id && inbox.isUnread($0.id) }
+    }
     private func state(in session: SessionInfo) -> String? {
         let states = agents.filter { workspaceID(of: $0) == session.id }.compactMap { hooks[$0.id]?.state }
         return ["attention", "working", "done"].first { states.contains($0) }
@@ -46,11 +55,20 @@ struct ConversationWorkspaceSidebar: View {
             .overlay { Circle().stroke(color, lineWidth: 0.7) }
             .frame(width: 6, height: 6).accessibilityHidden(true)
     }
-    private func selectedLine(_ title: String, state: String?, selected: Bool) -> some View {
+    private func selectedLine(_ title: String, state: String?, selected: Bool,
+                              unread: Bool = false, pinned: Bool = false) -> some View {
         HStack(spacing: 6) {
             dot(state)
             Text(title).fontWeight(selected ? .semibold : .regular).lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 0)
+            if pinned {
+                Image(systemName: "pin.fill").font(.system(size: 10)).foregroundStyle(muted)
+                    .accessibilityHidden(true)
+            }
+            if unread {
+                Circle().fill(Color(red: 0.54, green: 0.71, blue: 0.97))
+                    .frame(width: 6, height: 6).accessibilityHidden(true)
+            }
         }
         .foregroundStyle(selected ? TerminalChrome.foreground : foreground)
         .padding(.horizontal, 10).frame(minHeight: 44)
@@ -83,7 +101,8 @@ struct ConversationWorkspaceSidebar: View {
                     ForEach(sessions) { session in
                         ContextListButton(menu: menu.map { show in { source, point in show(.workspace(session.id), source, point) } },
                                           action: { selectSession(session.id) }) {
-                            selectedLine(session.name, state: state(in: session), selected: snapshot.activeSessionId == session.id)
+                            selectedLine(session.name, state: state(in: session), selected: snapshot.activeSessionId == session.id,
+                                         unread: isUnread(in: session))
                         }
                         .buttonStyle(.plain).accessibilityIdentifier("workspace-\(session.id)")
                         .accessibilityAddTraits(snapshot.activeSessionId == session.id ? [.isSelected] : [])
@@ -92,17 +111,19 @@ struct ConversationWorkspaceSidebar: View {
                         Rectangle().fill(muted.opacity(0.18)).frame(height: 1)
                             .padding(.horizontal, 10).padding(.top, 8)
                         sectionHeader("Agents", count: agents.count)
-                        ForEach(agents) { pane in
+                        ForEach(orderedAgents) { pane in
                             let hook = hooks[pane.id]
                             let workspace = workspaceID(of: pane)
                             let name = workspace.flatMap { snapshot.sessions[$0]?.name } ?? pane.displayCommand
                             let siblings = agents.filter { workspaceID(of: $0) == workspace }
                             let ordinal = (siblings.firstIndex(where: { $0.id == pane.id }) ?? 0) + 1
-                            ContextListButton(menu: menu.map { show in { source, point in show(.pane(pane.id), source, point) } },
-                                              action: { selectPane(pane.id) }) {
+                            AgentInboxRow(paneID: pane.id, inbox: inbox, muted: muted,
+                                          menu: menu.map { show in { source, point in show(.pane(pane.id), source, point) } },
+                                          select: { selectPane(pane.id) }, sendEscape: { sendEscape(pane.id) }) {
                                 VStack(alignment: .leading, spacing: 0) {
                                     selectedLine(name + (siblings.count > 1 ? " · \(ordinal)" : ""),
-                                        state: hook?.state, selected: snapshot.activePaneId == pane.id)
+                                        state: hook?.state, selected: snapshot.activePaneId == pane.id,
+                                        unread: inbox.isUnread(pane.id), pinned: inbox.isPinned(pane.id))
                                     Text(hook?.agent ?? pane.displayCommand)
                                         .font(.system(size: 12, design: .monospaced)).foregroundStyle(muted)
                                         .lineLimit(1).padding(.leading, 22).padding(.trailing, 10).padding(.bottom, 8)
@@ -144,5 +165,108 @@ struct ConversationWorkspaceSidebar: View {
         .overlay(alignment: .trailing) { Rectangle().fill(muted.opacity(0.18)).frame(width: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("conversation-workspaces")
+    }
+}
+
+/// Each agent owns its swipe state so reordering pins keeps gestures with the pane.
+private struct AgentInboxRow<Label: View>: View {
+    let paneID: String
+    let inbox: AgentInbox
+    let muted: Color
+    let menu: ((UIView, CGPoint) -> Bool)?
+    let select: () -> Void
+    let sendEscape: () -> Void
+    @ViewBuilder let label: () -> Label
+
+    @State private var offset: CGFloat = 0
+    @State private var dragAxis: Axis?
+    @State private var crossedThreshold = false
+    @GestureState private var isDragging = false
+
+    private var inboxValue: Text {
+        if inbox.isUnread(paneID), inbox.isPinned(paneID) { return Text("Unread, pinned") }
+        if inbox.isUnread(paneID) { return Text("Unread") }
+        if inbox.isPinned(paneID) { return Text("Pinned") }
+        return Text(verbatim: "")
+    }
+
+    private func togglePin() {
+        inbox.togglePin(paneID)
+        inbox.markRead(paneID)
+    }
+
+    private func resetSwipe() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { offset = 0 }
+        dragAxis = nil
+        crossedThreshold = false
+    }
+
+    var body: some View {
+        ZStack {
+            HStack {
+                if offset > 0 {
+                    Image(systemName: inbox.isPinned(paneID) ? "pin.slash" : "pin.fill")
+                        .font(.system(size: 16))
+                }
+                Spacer(minLength: 0)
+                if offset < 0 {
+                    Text("esc").font(.system(size: 12, design: .monospaced))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(muted.opacity(0.18), in: Capsule())
+                }
+            }
+            .foregroundStyle(muted).padding(.horizontal, 14)
+            .allowsHitTesting(false).accessibilityHidden(true)
+
+            ContextListButton(menu: menu, action: select, label: label)
+                .background(TerminalChrome.background)
+                .offset(x: offset)
+                .accessibilityValue(inboxValue)
+                .accessibilityActions {
+                    Button("Send Esc", action: sendEscape)
+                    Button(action: togglePin) {
+                        if inbox.isPinned(paneID) { Text("Unpin") }
+                        else { Text("Pin") }
+                    }
+                    if inbox.isUnread(paneID) {
+                        Button("Mark as Read") { inbox.markRead(paneID) }
+                    }
+                }
+        }
+        .clipped()
+        .simultaneousGesture(DragGesture(minimumDistance: 16)
+            .updating($isDragging) { _, dragging, _ in dragging = true }
+            .onChanged { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if abs(dx) <= 1.5 * abs(dy) {
+                    dragAxis = .vertical
+                    offset = 0
+                    crossedThreshold = false
+                } else if dragAxis == nil {
+                    dragAxis = .horizontal
+                }
+                guard dragAxis == .horizontal else { return }
+                offset = min(90, max(-90, dx))
+                let crossed = abs(offset) > 56
+                if crossed, !crossedThreshold {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
+                crossedThreshold = crossed
+            }
+            .onEnded { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if dragAxis == .horizontal, abs(dx) > 1.5 * abs(dy), abs(dx) > 56 {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    if dx < 0 { sendEscape() }
+                    else { togglePin() }
+                }
+                resetSwipe()
+            })
+        .onChange(of: isDragging) { _, dragging in
+            // Gesture cancellation (including scrolling) need not call onEnded.
+            if !dragging { resetSwipe() }
+        }
     }
 }

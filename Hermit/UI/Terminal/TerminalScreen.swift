@@ -562,14 +562,19 @@ struct TerminalScreen: View {
             VStack(spacing: 0) {
                 topBar
                 HStack(spacing: 0) {
-                    if showsConversationSidebar, let snapshot = tmuxSnapshot {
+                    if showsConversationSidebar, let snapshot = tmuxSnapshot, let inbox = active?.agentInbox {
                         ConversationWorkspaceSidebar(snapshot: snapshot, hooks: multiplexerAgentHooks,
+                            inbox: inbox,
                             selectSession: { session in
                                 if let control = active?.herdrControl { control.selectSession(session) }
                                 else { active?.tmuxControl?.selectSession(session) }
                             }, selectPane: { pane in
+                                inbox.markRead(pane)
                                 if let control = active?.herdrControl { control.selectPane(pane) }
                                 else { active?.tmuxControl?.selectPane(pane) }
+                            }, sendEscape: { pane in
+                                if let control = active?.herdrControl { control.sendKey("esc", paneId: pane) }
+                                else { active?.tmuxControl?.sendInput(Data([0x1b]), paneId: pane) }
                             }, manage: { presentSheet { showSessionsSheet = true } },
                             create: {
                                 if let control = active?.herdrControl { control.newSession(named: nil) }
@@ -596,6 +601,18 @@ struct TerminalScreen: View {
             .onChange(of: router.paneRequest) {
                 claimPendingPaneRequestIfNeeded()
                 selectPendingPaneIfReady()
+            }
+            .onChange(of: multiplexerAgentHooks) {
+                guard multiplexerAgentHooksLoaded else { return }
+                active?.agentInbox.observe(hooks: multiplexerAgentHooks, activePaneId: tmuxSnapshot?.activePaneId)
+            }
+            .onChange(of: multiplexerAgentHooksLoaded) {
+                guard multiplexerAgentHooksLoaded else { return }
+                active?.agentInbox.observe(hooks: multiplexerAgentHooks, activePaneId: tmuxSnapshot?.activePaneId)
+            }
+            .onChange(of: tmuxSnapshot?.activePaneId) {
+                guard multiplexerAgentHooksLoaded else { return }
+                active?.agentInbox.observe(hooks: multiplexerAgentHooks, activePaneId: tmuxSnapshot?.activePaneId)
             }
 
             topBanner
@@ -667,6 +684,9 @@ struct TerminalScreen: View {
         .onAppear {
             clipboardHasImage = UIPasteboard.general.hasImages
             HardwareKeys.shared.install(owner: hardwareKeyOwner, hardwareKeyCommands)
+            if multiplexerAgentHooksLoaded {
+                active?.agentInbox.observe(hooks: multiplexerAgentHooks, activePaneId: tmuxSnapshot?.activePaneId)
+            }
         }
         // The change notification doesn't fire for copies made while we were
         // backgrounded — one metadata check per foreground return covers it.

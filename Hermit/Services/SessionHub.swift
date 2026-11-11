@@ -122,6 +122,7 @@ final class SessionHub {
         var presentationID = UUID()
         var composerDrafts = TerminalComposerDraftStore()
         var composerDraft: TerminalComposerDraft { composerDrafts.current }
+        let agentInbox = AgentInbox()
 
         var inputTarget: TerminalInputTarget? {
             if let herdr = herdrControl, connection.multiplexer == .herdr {
