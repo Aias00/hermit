@@ -490,6 +490,8 @@ actor MoshTransport {
         instruction.oldNum = old
         instruction.newNum = new
         instruction.ackNum = appliedHostNum
+        // Upstream mosh-server discards received states up to throwaway_num; 0 never frees them.
+        instruction.throwawayNum = serverAckedUserNum
         instruction.diff = events.isEmpty ? Data() : UserMessage(events: events).encoded()
 
         guard let compressed = try? MoshCompression.compress(instruction.encoded()) else { return }
