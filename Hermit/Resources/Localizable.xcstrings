@@ -4816,6 +4816,58 @@
         }
       }
     },
+    "After you enable reporting, Hermit periodically uploads structured connection and recovery records, along with app and iOS versions. Terminal content, commands, host addresses, and SSH credentials are never uploaded.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用后会定期上报 Hermit 的结构化连接与恢复记录，以及 App、iOS 版本。不会上传终端正文、命令、主机地址或 SSH 凭据。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有効にすると、Hermit の構造化された接続・復旧記録と、アプリおよび iOS のバージョンを定期的に送信します。ターミナルの内容、コマンド、ホストアドレス、SSH 認証情報は送信されません。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "啟用後會定期回報 Hermit 的結構化連線與恢復記錄，以及 App、iOS 版本。不會上傳終端機內容、指令、主機位址或 SSH 憑證。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보고를 활성화하면 Hermit이 구조화된 연결 및 복구 기록과 앱 및 iOS 버전을 주기적으로 업로드합니다. 터미널 내용, 명령어, 호스트 주소, SSH 자격 증명은 업로드하지 않습니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nach dem Aktivieren übermittelt Hermit regelmäßig strukturierte Verbindungs- und Wiederherstellungsdaten sowie App- und iOS-Versionen. Terminalinhalte, Befehle, Host-Adressen und SSH-Zugangsdaten werden nie übermittelt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Al activar el envío, Hermit envía periódicamente registros estructurados de conexión y recuperación, junto con las versiones de la app y de iOS. Nunca se envían el contenido del terminal, los comandos, las direcciones de los hosts ni las credenciales SSH."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une fois l’envoi activé, Hermit transmet régulièrement des données structurées de connexion et de rétablissement, ainsi que les versions de l’app et d’iOS. Le contenu du terminal, les commandes, les adresses des hôtes et les identifiants SSH ne sont jamais envoyés."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Depois que você ativa o envio, o Hermit envia periodicamente registros estruturados de conexão e recuperação, além das versões do app e do iOS. O conteúdo do terminal, os comandos, os endereços dos hosts e as credenciais SSH nunca são enviados."
+          }
+        }
+      }
+    },
     "Agent": {
       "localizations": {
         "de": {
@@ -6629,6 +6681,58 @@
         }
       }
     },
+    "Automatic diagnostic reporting": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动诊断上报"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "診断データの自動送信"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動診斷回報"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 진단 보고"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatische Diagnoseübermittlung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envío automático de diagnósticos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoi automatique de diagnostics"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envio automático de diagnósticos"
+          }
+        }
+      }
+    },
     "Automatic follows your system and keyboard languages. This choice applies to this recording only.": {
       "extractionState": "manual",
       "localizations": {
@@ -6642,6 +6746,214 @@
           "stringUnit": {
             "state": "translated",
             "value": "自动跟随系统和键盘语言。本次选择仅用于当前录音。"
+          }
+        }
+      }
+    },
+    "Automatic reporting": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动上报"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動送信"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動回報"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 보고"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatische Übermittlung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envío automático"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoi automatique"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envio automático"
+          }
+        }
+      }
+    },
+    "Automatic reporting is off. Records not yet uploaded have been deleted; no new records will be collected.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动上报已关闭。尚未上传的记录已删除，不会再采集新记录。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動送信はオフです。未送信の記録は削除され、新しい記録は収集されません。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動回報已關閉。尚未上傳的記錄已刪除，不會再收集新記錄。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 보고가 꺼졌습니다. 아직 업로드하지 않은 기록은 삭제되었으며 새 기록은 수집하지 않습니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die automatische Übermittlung ist deaktiviert. Noch nicht übermittelte Aufzeichnungen wurden gelöscht; neue werden nicht erfasst."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El envío automático está desactivado. Se han borrado los registros pendientes de envío y no se recopilarán nuevos registros."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’envoi automatique est désactivé. Les données pas encore envoyées ont été supprimées ; aucune nouvelle donnée ne sera collectée."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O envio automático está desativado. Os registros ainda não enviados foram apagados e nenhum novo registro será coletado."
+          }
+        }
+      }
+    },
+    "Automatic reporting: enabled": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动上报：已开启"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動送信：オン"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動回報：已開啟"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 보고: 켜짐"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatische Übermittlung: aktiviert"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envío automático: activado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoi automatique : activé"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envio automático: ativado"
+          }
+        }
+      }
+    },
+    "Automatic reporting: not enabled": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动上报：未开启"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動送信：オフ"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動回報：未開啟"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 보고: 꺼짐"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatische Übermittlung: nicht aktiviert"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envío automático: desactivado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoi automatique : désactivé"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envio automático: desativado"
           }
         }
       }
@@ -8347,6 +8659,58 @@
         }
       }
     },
+    "Check configuration": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查配置"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定を確認"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "檢查設定"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "설정 확인"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Konfiguration prüfen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comprobar configuración"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifier la configuration"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verificar configuração"
+          }
+        }
+      }
+    },
     "Check the Tailscale device address and SSH port in this connection.": {
       "localizations": {
         "en": {
@@ -8799,6 +9163,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "選擇裝置後，會自動填入下方的 SSH 位址。"
+          }
+        }
+      }
+    },
+    "Clear records and remove receiver configuration": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除记录并解除上报绑定"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "記録と送信先の設定を削除"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除記錄並解除回報綁定"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기록 및 수신 서버 설정 삭제"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aufzeichnungen und Empfängerkonfiguration löschen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Borrar registros y configuración del receptor"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effacer les données et la configuration du serveur de réception"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apagar registros e configuração do servidor de destino"
           }
         }
       }
@@ -9418,6 +9834,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "設定豆包"
+          }
+        }
+      }
+    },
+    "Confirm that this is your own receiver. Device credentials are stored only in this device’s Keychain.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请确认这是你自己的接收端。设备凭据仅保存于本机钥匙串。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自分の送信先であることを確認してください。デバイスの認証情報は、このデバイスのキーチェーンにのみ保存されます。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請確認這是你自己的接收端。裝置憑證只會儲存在本機鑰匙圈。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "본인의 수신 서버인지 확인하세요. 기기 자격 증명은 이 기기의 키체인에만 저장됩니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vergewissere dich, dass dies dein eigener Empfänger ist. Die Gerätezugangsdaten werden nur im Schlüsselbund dieses Geräts gespeichert."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirma que este receptor es tuyo. Las credenciales del dispositivo se guardan solo en el llavero de este dispositivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifiez qu’il s’agit bien de votre serveur de réception. Les identifiants de l’appareil sont stockés uniquement dans le trousseau de cet appareil."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirme que este é seu servidor de destino. As credenciais do dispositivo ficam apenas nas Chaves deste dispositivo."
           }
         }
       }
@@ -10950,6 +11418,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法連接豆包，請檢查網路後重新辨識這段錄音。"
+          }
+        }
+      }
+    },
+    "Could not remove credentials from iCloud: %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法从 iCloud 移除凭据：%@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud から認証情報を削除できませんでした：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法從 iCloud 移除憑證：%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud에서 자격 증명을 제거할 수 없습니다: %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zugangsdaten konnten nicht aus iCloud entfernt werden: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudieron eliminar las credenciales de iCloud: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de supprimer les identifiants d’iCloud : %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível remover as credenciais do iCloud: %@"
           }
         }
       }
@@ -13297,6 +13817,214 @@
         }
       }
     },
+    "Device reporting credential": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设备上报凭据"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デバイスの送信認証情報"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裝置回報憑證"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기기 보고 자격 증명"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gerätezugangsdaten für die Übermittlung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Credencial de envío del dispositivo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identifiant d’envoi de l’appareil"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Credencial de envio do dispositivo"
+          }
+        }
+      }
+    },
+    "Diagnostic receiver": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "诊断接收端"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "診断データの送信先"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "診斷接收端"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "진단 수신 서버"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnoseempfänger"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Receptor de diagnósticos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serveur de réception des diagnostics"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Servidor de destino dos diagnósticos"
+          }
+        }
+      }
+    },
+    "Diagnostic records have been uploaded.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "诊断记录已上报。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "診断記録を送信しました。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "診斷記錄已回報。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "진단 기록을 업로드했습니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnoseaufzeichnungen wurden übermittelt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se han enviado los registros de diagnóstico."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les données de diagnostic ont été envoyées."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os registros de diagnóstico foram enviados."
+          }
+        }
+      }
+    },
+    "Diagnostic reporting credentials are invalid or the receiver requires sign-in. Please configure it again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设备上报凭据失效或接收端需要登录，请重新配置。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "診断データ送信の認証情報が無効か、送信先へのログインが必要です。設定し直してください。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裝置回報憑證已失效，或接收端需要登入，請重新設定。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "진단 보고 자격 증명이 유효하지 않거나 수신 서버에 로그인이 필요합니다. 다시 설정하세요."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Zugangsdaten für die Diagnoseübermittlung sind ungültig oder der Empfänger erfordert eine Anmeldung. Richte die Übermittlung erneut ein."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las credenciales de envío de diagnósticos no son válidas o el receptor requiere iniciar sesión. Vuelve a configurarlo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les identifiants d’envoi des diagnostics sont invalides ou le serveur de réception exige une connexion. Veuillez le configurer à nouveau."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As credenciais de envio de diagnósticos são inválidas ou o servidor de destino exige login. Configure novamente."
+          }
+        }
+      }
+    },
     "Dictate commands instead of typing. Planned for a future update.": {
       "localizations": {
         "de": {
@@ -15537,6 +16265,110 @@
         }
       }
     },
+    "Enable automatic diagnostic reporting": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用自动诊断上报"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "診断データの自動送信を有効にする"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "啟用自動診斷回報"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 진단 보고 활성화"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatische Diagnoseübermittlung aktivieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activar envío automático de diagnósticos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activer l’envoi automatique de diagnostics"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativar envio automático de diagnósticos"
+          }
+        }
+      }
+    },
+    "Enabled": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已开启"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オン"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已開啟"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "켜짐"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiviert"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activé"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativado"
+          }
+        }
+      }
+    },
     "Engine preparation": {
       "localizations": {
         "en": {
@@ -15697,6 +16529,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "資源 ID 只能包含字母、數字、點、底線或連字號。"
+          }
+        }
+      }
+    },
+    "Enter a valid HTTPS receiver address and device credential. The address cannot contain a username, password, or query parameters.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入有效的 HTTPS 接收地址和设备凭据。地址中不能包含用户名、密码或查询参数。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有効な HTTPS 送信先アドレスとデバイスの認証情報を入力してください。アドレスにユーザー名、パスワード、クエリパラメータは含められません。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請輸入有效的 HTTPS 接收位址和裝置憑證。位址不能包含使用者名稱、密碼或查詢參數。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "올바른 HTTPS 수신 주소와 기기 자격 증명을 입력하세요. 주소에는 사용자 이름, 암호 또는 쿼리 매개변수를 포함할 수 없습니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gib eine gültige HTTPS-Empfängeradresse und gültige Gerätezugangsdaten ein. Die Adresse darf keinen Benutzernamen, kein Passwort und keine Abfrageparameter enthalten."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Introduce una dirección HTTPS válida del receptor y una credencial del dispositivo. La dirección no puede incluir un nombre de usuario, una contraseña ni parámetros de consulta."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saisissez une adresse HTTPS valide pour le serveur de réception et un identifiant d’appareil. L’adresse ne peut contenir ni nom d’utilisateur, ni mot de passe, ni paramètres de requête."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Insira um endereço HTTPS válido do servidor de destino e uma credencial do dispositivo. O endereço não pode conter nome de usuário, senha ou parâmetros de consulta."
           }
         }
       }
@@ -17089,6 +17973,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "主機"
+          }
+        }
+      }
+    },
+    "HTTPS receiver address": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HTTPS 接收地址"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HTTPS 送信先アドレス"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HTTPS 接收位址"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HTTPS 수신 주소"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HTTPS-Empfängeradresse"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dirección HTTPS del receptor"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adresse HTTPS du serveur de réception"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Endereço HTTPS do servidor de destino"
           }
         }
       }
@@ -20928,6 +21864,58 @@
         }
       }
     },
+    "Last successful upload": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近成功"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前回の送信成功"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次成功回報"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "최근 업로드 성공"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Letzte erfolgreiche Übermittlung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Último envío correcto"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernier envoi réussi"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Último envio bem-sucedido"
+          }
+        }
+      }
+    },
     "Last update": {
       "extractionState": "manual",
       "localizations": {
@@ -21489,6 +22477,110 @@
           "stringUnit": {
             "state": "translated",
             "value": "即時錄音統計停止後的等待，錄音重播統計現有音訊的處理時間。"
+          }
+        }
+      }
+    },
+    "Local diagnostic records and receiver configuration have been cleared.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地诊断记录和接收端绑定已清除。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "端末の診断記録と送信先の設定を削除しました。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本機診斷記錄和接收端綁定已清除。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기기의 진단 기록과 수신 서버 설정을 삭제했습니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokale Diagnoseaufzeichnungen und die Empfängerkonfiguration wurden gelöscht."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se han borrado los registros de diagnóstico locales y la configuración del receptor."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les données de diagnostic locales et la configuration du serveur de réception ont été effacées."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os registros de diagnóstico locais e a configuração do servidor de destino foram apagados."
+          }
+        }
+      }
+    },
+    "Local diagnostics are temporarily unavailable. Uploads will retry automatically later.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂时无法读取本地诊断，之后会自动重试。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "端末の診断記録を一時的に読み取れません。後で自動的に再試行します。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暫時無法讀取本機診斷記錄，之後會自動重試。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기기의 진단 기록을 일시적으로 읽을 수 없습니다. 나중에 자동으로 다시 시도합니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokale Diagnosedaten sind vorübergehend nicht verfügbar. Die Übermittlung wird später automatisch erneut versucht."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los diagnósticos locales no están disponibles temporalmente. Los envíos se reintentarán automáticamente más tarde."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les diagnostics locaux sont temporairement indisponibles. L’envoi sera réessayé automatiquement plus tard."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os diagnósticos locais estão temporariamente indisponíveis. O envio será repetido automaticamente mais tarde."
           }
         }
       }
@@ -22223,6 +23315,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "管理 Tailscale"
+          }
+        }
+      }
+    },
+    "Manual setup": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手动配置"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手動設定"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手動設定"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "수동 설정"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manuelle Einrichtung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configuración manual"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configuration manuelle"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configuração manual"
           }
         }
       }
@@ -25886,6 +27030,58 @@
         }
       }
     },
+    "Not enabled": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未开启"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オフ"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未開啟"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "꺼짐"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nicht aktiviert"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desactivado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactivé"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desativado"
+          }
+        }
+      }
+    },
     "Not installed": {
       "localizations": {
         "de": {
@@ -26860,6 +28056,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "線上"
+          }
+        }
+      }
+    },
+    "Only connection stages, error categories, network recovery, and app and iOS versions are uploaded. Terminal content, commands, host addresses, passwords, and tokens are excluded.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只上报连接阶段、错误分类、网络恢复、App 和 iOS 版本。终端内容、输入的命令、主机地址、密码和 Token 不进入诊断批次。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "送信するのは接続段階、エラー分類、ネットワークの復旧、アプリと iOS のバージョンのみです。ターミナルの内容、入力したコマンド、ホストアドレス、パスワード、トークンは診断データに含まれません。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只回報連線階段、錯誤分類、網路恢復、App 和 iOS 版本。終端機內容、輸入的指令、主機位址、密碼和 Token 不會納入診斷批次。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연결 단계, 오류 유형, 네트워크 복구 정보, 앱 및 iOS 버전만 업로드합니다. 터미널 내용, 명령어, 호스트 주소, 암호, 토큰은 포함하지 않습니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übermittelt werden nur Verbindungsphasen, Fehlerkategorien, die Wiederherstellung der Netzwerkverbindung sowie App- und iOS-Versionen. Terminalinhalte, Befehle, Host-Adressen, Passwörter und Tokens sind ausgeschlossen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solo se envían las etapas de conexión, las categorías de errores, la recuperación de red y las versiones de la app y de iOS. No se incluyen el contenido del terminal, los comandos, las direcciones de los hosts, las contraseñas ni los tokens."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seuls les étapes de connexion, les catégories d’erreurs, le rétablissement du réseau et les versions de l’app et d’iOS sont envoyés. Le contenu du terminal, les commandes, les adresses des hôtes, les mots de passe et les jetons sont exclus."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "São enviadas apenas as etapas de conexão, as categorias de erros, a recuperação da rede e as versões do app e do iOS. O conteúdo do terminal, os comandos, os endereços dos hosts, as senhas e os tokens não são incluídos."
           }
         }
       }
@@ -31273,6 +32521,58 @@
         }
       }
     },
+    "Receiver": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接收端"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "送信先"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接收端"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "수신 서버"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empfänger"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Receptor"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serveur de réception"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Servidor de destino"
+          }
+        }
+      }
+    },
     "Recent Log": {
       "localizations": {
         "de": {
@@ -31799,6 +33099,58 @@
         }
       }
     },
+    "Records are collected only while automatic reporting is on. Turning it off deletes records not yet uploaded. Uploads are checked every 5 minutes in the foreground, and pending batches are submitted when the app enters the background. iOS schedules background transfers; offline records are kept and retried with backoff. Uploads are limited to 1 MB per day; up to about 3 MB is kept locally for 7 days. Clearing local records does not delete records already received by the receiver.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅在自动上报开启时采集记录。关闭后会删除尚未上传的记录。前台每 5 分钟检查一次，进入后台时提交已有批次。后台传输由 iOS 调度；断网后保留记录并退避重试。每日日志内容最多上报 1 MB，本地最多保留约 3 MB、7 天。清除不会删除接收端已经收到的记录。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "記録は自動送信がオンの間だけ収集されます。オフにすると未送信の記録は削除されます。フォアグラウンドでは 5 分ごとに送信を確認し、バックグラウンドに移ると保留中のバッチを送信します。バックグラウンド転送は iOS が管理します。オフライン中の記録は保持し、間隔を延ばしながら再試行します。送信は 1 日 1 MB まで、端末には最大約 3 MB を 7 日間保持します。端末の記録を削除しても、送信先が受信済みの記録は削除されません。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "僅在自動回報開啟時收集記錄。關閉後會刪除尚未上傳的記錄。前景每 5 分鐘檢查一次，進入背景時提交待傳送的批次。背景傳輸由 iOS 排程；斷線後保留記錄，並逐步延長重試間隔。每天最多回報 1 MB，本機最多保留約 3 MB、7 天。清除本機記錄不會刪除接收端已收到的記錄。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 보고가 켜져 있을 때만 기록을 수집합니다. 끄면 아직 업로드하지 않은 기록이 삭제됩니다. 포그라운드에서는 5분마다 업로드를 확인하고, 앱이 백그라운드로 전환되면 대기 중인 배치를 전송합니다. 백그라운드 전송은 iOS가 관리합니다. 오프라인에서는 기록을 보관하고 재시도 간격을 점차 늘립니다. 하루 최대 1MB를 업로드하며, 기기에는 최대 약 3MB를 7일간 보관합니다. 기기의 기록을 지워도 수신 서버가 이미 받은 기록은 삭제되지 않습니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aufzeichnungen werden nur erfasst, solange die automatische Übermittlung aktiviert ist. Beim Deaktivieren werden noch nicht übermittelte Aufzeichnungen gelöscht. Im Vordergrund wird alle 5 Minuten nach ausstehenden Übermittlungen gesucht; beim Wechsel in den Hintergrund werden ausstehende Pakete gesendet. iOS plant die Hintergrundübertragungen. Ohne Netzwerk bleiben Aufzeichnungen gespeichert und werden in zunehmenden Abständen erneut gesendet. Pro Tag wird höchstens 1 MB übermittelt; lokal werden bis zu etwa 3 MB für 7 Tage gespeichert. Das Löschen lokaler Aufzeichnungen löscht keine bereits beim Empfänger eingegangenen Daten."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solo se recopilan registros mientras el envío automático está activado. Al desactivarlo, se borran los registros que aún no se han enviado. En primer plano se comprueba cada 5 minutos si hay envíos pendientes; al pasar a segundo plano se envían los lotes pendientes. iOS programa las transferencias en segundo plano. Sin conexión, los registros se conservan y se reintenta el envío a intervalos cada vez mayores. Se envía un máximo de 1 MB al día y se conservan localmente hasta unos 3 MB durante 7 días. Borrar los registros locales no elimina los que ya ha recibido el receptor."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les données sont collectées uniquement lorsque l’envoi automatique est activé. Le désactiver supprime les données pas encore envoyées. Au premier plan, les envois sont vérifiés toutes les 5 minutes ; les lots en attente sont envoyés au passage en arrière-plan. iOS planifie les transferts en arrière-plan. Hors ligne, les données sont conservées et l’envoi est réessayé à intervalles croissants. L’envoi est limité à 1 Mo par jour ; jusqu’à environ 3 Mo sont conservés sur l’appareil pendant 7 jours. Effacer les données locales ne supprime pas celles déjà reçues par le serveur de réception."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os registros são coletados apenas enquanto o envio automático está ativado. Ao desativá-lo, os registros ainda não enviados são apagados. Em primeiro plano, os envios são verificados a cada 5 minutos; ao entrar em segundo plano, os lotes pendentes são enviados. O iOS agenda as transferências em segundo plano. Sem conexão, os registros são mantidos e o envio é repetido em intervalos cada vez maiores. O limite é de 1 MB por dia, com até cerca de 3 MB armazenados no dispositivo por 7 dias. Apagar os registros locais não apaga os que já foram recebidos pelo servidor de destino."
+          }
+        }
+      }
+    },
     "Refresh devices": {
       "localizations": {
         "en": {
@@ -32223,6 +33575,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "移除 %@"
+          }
+        }
+      }
+    },
+    "Remove Credentials from iCloud": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从 iCloud 移除凭据"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud から認証情報を削除"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從 iCloud 移除憑證"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud에서 자격 증명 제거"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zugangsdaten aus iCloud entfernen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminar credenciales de iCloud"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer les identifiants d’iCloud"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remover credenciais do iCloud"
           }
         }
       }
@@ -36203,6 +37607,162 @@
         }
       }
     },
+    "Set up diagnostic reporting": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置诊断上报"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "診断データの送信を設定"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定診斷回報"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "진단 보고 설정"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnoseübermittlung einrichten"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurar envío de diagnósticos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurer l’envoi de diagnostics"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurar envio de diagnósticos"
+          }
+        }
+      }
+    },
+    "Set up my receiver": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配置我的接收端"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自分の送信先を設定"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定我的接收端"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "내 수신 서버 설정"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meinen Empfänger einrichten"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurar mi receptor"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurer mon serveur de réception"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurar meu servidor de destino"
+          }
+        }
+      }
+    },
+    "Set up receiver manually": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手动配置接收端"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "送信先を手動で設定"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手動設定接收端"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "수신 서버 수동 설정"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empfänger manuell einrichten"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurar receptor manualmente"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurer le serveur de réception manuellement"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurar servidor de destino manualmente"
+          }
+        }
+      }
+    },
     "Set up this host": {
       "localizations": {
         "de": {
@@ -37713,6 +39273,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "Small"
+          }
+        }
+      }
+    },
+    "Some credentials protected by Face ID were skipped. Use Sync Now to include them.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "部分受 Face ID 保护的凭据已跳过。点按“立即同步”可将其一并同步。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Face ID で保護された一部の認証情報をスキップしました。「今すぐ同期」でこれらも同期できます。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已略過部分受 Face ID 保護的憑證。點一下「立即同步」即可一併同步。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Face ID로 보호된 일부 자격 증명을 건너뛰었습니다. 함께 동기화하려면 ‘지금 동기화’를 누르세요."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einige mit Face ID geschützte Zugangsdaten wurden übersprungen. Tippe auf „Jetzt synchronisieren“, um sie ebenfalls zu synchronisieren."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se omitieron algunas credenciales protegidas con Face ID. Pulsa «Sincronizar ahora» para incluirlas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Certains identifiants protégés par Face ID ont été ignorés. Touchez « Synchroniser maintenant » pour les inclure."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Algumas credenciais protegidas pelo Face ID foram ignoradas. Toque em “Sincronizar agora” para incluí-las."
           }
         }
       }
@@ -39428,6 +41040,110 @@
           "stringUnit": {
             "state": "translated",
             "value": "App 回到前景或點一下「立即同步」時執行同步，不會在背景持續運作。受保護的 SSH 金鑰需透過「立即同步」授權。"
+          }
+        }
+      }
+    },
+    "Synced credentials were removed from iCloud. Local copies were kept, and credential sync is off.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已从 iCloud 移除同步的凭据。本机副本已保留，凭据同步已关闭。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期済みの認証情報を iCloud から削除しました。各デバイスのコピーは保持され、認証情報の同期はオフになっています。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已從 iCloud 移除同步的憑證。各裝置上的本機副本都已保留，憑證同步已關閉。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "동기화된 자격 증명을 iCloud에서 제거했습니다. 각 기기의 로컬 복사본은 유지되며 자격 증명 동기화는 꺼졌습니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchronisierte Zugangsdaten wurden aus iCloud entfernt. Lokale Kopien bleiben erhalten und die Synchronisierung von Zugangsdaten ist ausgeschaltet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se eliminaron de iCloud las credenciales sincronizadas. Las copias locales se conservaron y la sincronización de credenciales está desactivada."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les identifiants synchronisés ont été supprimés d’iCloud. Les copies locales ont été conservées et la synchronisation des identifiants est désactivée."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As credenciais sincronizadas foram removidas do iCloud. As cópias locais foram mantidas e a sincronização de credenciais está desativada."
+          }
+        }
+      }
+    },
+    "Synced passwords and private keys will be deleted from iCloud. This device and your other devices will keep their local copies. Credential sync will be turned off.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步的密码和私钥将从 iCloud 删除。此设备和其他设备上的本地副本都会保留，凭据同步也会关闭。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期済みのパスワードと秘密鍵を iCloud から削除します。このデバイスとほかのデバイスにあるコピーは保持されます。認証情報の同期はオフになります。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步的密碼和私密金鑰將從 iCloud 刪除。此裝置和其他裝置上的本機副本都會保留，憑證同步也會關閉。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "동기화된 암호와 개인 키가 iCloud에서 삭제됩니다. 이 기기와 다른 기기에 있는 로컬 복사본은 유지됩니다. 자격 증명 동기화는 꺼집니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchronisierte Passwörter und private Schlüssel werden aus iCloud gelöscht. Dieses Gerät und deine anderen Geräte behalten ihre lokalen Kopien. Die Synchronisierung von Zugangsdaten wird ausgeschaltet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las contraseñas y claves privadas sincronizadas se eliminarán de iCloud. Este dispositivo y tus otros dispositivos conservarán sus copias locales. Se desactivará la sincronización de credenciales."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les mots de passe et les clés privées synchronisés seront supprimés d’iCloud. Cet appareil et vos autres appareils conserveront leurs copies locales. La synchronisation des identifiants sera désactivée."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As senhas e chaves privadas sincronizadas serão apagadas do iCloud. Este dispositivo e seus outros dispositivos manterão as cópias locais. A sincronização de credenciais será desativada."
           }
         }
       }
@@ -43400,6 +45116,58 @@
         }
       }
     },
+    "The daily 1 MB upload limit has been reached. Uploads will resume automatically later.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已达到每日 1 MB 上报上限，之后自动补传。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 日の送信上限 1 MB に達しました。送信は後で自動的に再開されます。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已達到每日 1 MB 回報上限，之後會自動補傳。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "하루 업로드 한도인 1MB에 도달했습니다. 나중에 자동으로 업로드를 재개합니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das tägliche Übermittlungslimit von 1 MB ist erreicht. Die Übermittlung wird später automatisch fortgesetzt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se ha alcanzado el límite diario de envío de 1 MB. Los envíos se reanudarán automáticamente más tarde."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La limite d’envoi quotidienne de 1 Mo est atteinte. Les envois reprendront automatiquement plus tard."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O limite diário de envio de 1 MB foi atingido. Os envios serão retomados automaticamente mais tarde."
+          }
+        }
+      }
+    },
     "The hooks only stamp the tmux pane and exit 0 — the agent is never slowed, prompted, or interrupted.": {
       "localizations": {
         "de": {
@@ -44235,6 +46003,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "按下狀態和背景的淡色都由這一個顏色推導。"
+          }
+        }
+      }
+    },
+    "The receiver must support the Hermit diagnostic format. You can also open the app from the receiver’s protected pairing page.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接收端须支持 Hermit 诊断格式。也可以从接收端的受保护配对页面直接打开 App。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "送信先は Hermit の診断形式に対応している必要があります。送信先の保護されたペアリングページからアプリを開くこともできます。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接收端須支援 Hermit 診斷格式。也可以從接收端受保護的配對頁面直接開啟 App。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "수신 서버가 Hermit 진단 형식을 지원해야 합니다. 수신 서버의 보호된 페어링 페이지에서도 앱을 열 수 있습니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Empfänger muss das Hermit-Diagnoseformat unterstützen. Du kannst die App auch über die geschützte Kopplungsseite des Empfängers öffnen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El receptor debe admitir el formato de diagnóstico de Hermit. También puedes abrir la app desde la página de vinculación protegida del receptor."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le serveur de réception doit prendre en charge le format de diagnostic Hermit. Vous pouvez aussi ouvrir l’app depuis sa page de jumelage protégée."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O servidor de destino deve aceitar o formato de diagnóstico do Hermit. Você também pode abrir o app pela página protegida de emparelhamento do servidor de destino."
           }
         }
       }
@@ -46160,6 +47980,58 @@
         }
       }
     },
+    "This upload was not acknowledged. Records have been kept and will retry automatically later.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本次上报未确认，记录已保留，之后自动补传。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今回の送信は受信確認ができませんでした。記録は保持し、後で自動的に再送信します。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此次回報未收到確認，記錄已保留，之後會自動補傳。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이번 업로드의 수신 확인을 받지 못했습니다. 기록은 보관되며 나중에 자동으로 다시 전송합니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Übermittlung wurde nicht bestätigt. Die Aufzeichnungen bleiben gespeichert und werden später automatisch erneut übermittelt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se confirmó la recepción de este envío. Los registros se han conservado y se volverán a enviar automáticamente más tarde."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La réception de cet envoi n’a pas été confirmée. Les données sont conservées et seront renvoyées automatiquement plus tard."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O recebimento deste envio não foi confirmado. Os registros foram mantidos e serão reenviados automaticamente mais tarde."
+          }
+        }
+      }
+    },
     "This vocabulary stays on this device. It is not synced with iCloud or sent to Doubao.": {
       "localizations": {
         "en": {
@@ -46642,6 +48514,110 @@
         }
       }
     },
+    "Turn off automatic reporting": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止自动上报"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動送信をオフにする"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止自動回報"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 보고 끄기"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatische Übermittlung deaktivieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desactivar envío automático"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactiver l’envoi automatique"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desativar envio automático"
+          }
+        }
+      }
+    },
+    "Turn on automatic reporting": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启自动上报"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動送信をオンにする"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟自動回報"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 보고 켜기"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatische Übermittlung aktivieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activar envío automático"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activer l’envoi automatique"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativar envio automático"
+          }
+        }
+      }
+    },
     "Type a response…": {
       "localizations": {
         "de": {
@@ -47008,6 +48984,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "上傳中 %lld%%"
+          }
+        }
+      }
+    },
+    "Unable to save diagnostic reporting credentials. Unlock your device and try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法保存设备上报凭据，请解锁设备后重试。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "診断データ送信の認証情報を保存できません。デバイスのロックを解除して、もう一度お試しください。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法儲存裝置回報憑證，請解鎖裝置後再試一次。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "진단 보고 자격 증명을 저장할 수 없습니다. 기기의 잠금을 해제한 후 다시 시도하세요."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Zugangsdaten für die Diagnoseübermittlung konnten nicht gesichert werden. Entsperre dein Gerät und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudieron guardar las credenciales de envío de diagnósticos. Desbloquea el dispositivo e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’enregistrer les identifiants d’envoi des diagnostics. Déverrouillez votre appareil et réessayez."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível salvar as credenciais de envio de diagnósticos. Desbloqueie o dispositivo e tente novamente."
           }
         }
       }
@@ -47569,6 +49597,110 @@
           "stringUnit": {
             "state": "translated",
             "value": "上傳照片"
+          }
+        }
+      }
+    },
+    "Upload now": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "立即上报"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今すぐ送信"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "立即回報"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "지금 업로드"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jetzt übermitteln"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviar ahora"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoyer maintenant"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviar agora"
+          }
+        }
+      }
+    },
+    "Uploading diagnostic records…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在上报诊断记录…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "診断記録を送信中…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在回報診斷記錄…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "진단 기록 업로드 중…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnoseaufzeichnungen werden übermittelt …"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviando registros de diagnóstico…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoi des données de diagnostic…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviando registros de diagnóstico…"
           }
         }
       }
@@ -48851,55 +50983,54 @@
         }
       }
     },
-    "When enabled, saved hosts, SSH keys, themes, appearance and keyboard shortcuts sync through your private iCloud database. SSH passwords and portable private keys are included by default and stored in CloudKit encrypted fields. Turning credential sync off keeps existing cloud copies and local Keychain items.": {
-      "extractionState": "manual",
+    "When enabled, saved hosts, SSH keys, themes, appearance and keyboard shortcuts sync through your private iCloud database. Credential sync is off by default. If enabled, SSH passwords and portable private keys are stored in CloudKit encrypted fields. Turning it off keeps cloud copies; use Remove Credentials from iCloud to delete them. Local Keychain items are kept.": {
       "localizations": {
-        "de": {
+        "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wenn aktiviert, werden gespeicherte Hosts, SSH-Schlüssel, Designs, Darstellung und Tastaturkurzbefehle über deine private iCloud-Datenbank synchronisiert. SSH-Passwörter und übertragbare private Schlüssel sind standardmäßig enthalten und werden in verschlüsselten CloudKit-Feldern gespeichert. Wenn du die Synchronisierung der Zugangsdaten ausschaltest, bleiben vorhandene Cloud-Kopien und lokale Schlüsselbundobjekte erhalten."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Al activarla, los hosts, claves SSH, temas, apariencia y atajos guardados se sincronizan mediante tu base de datos privada de iCloud. Las contraseñas SSH y claves privadas transferibles se incluyen por defecto y se guardan en campos cifrados de CloudKit. Al desactivar la sincronización de credenciales, se conservan las copias existentes en la nube y los elementos locales del llavero."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Une fois activée, la synchronisation transfère les hôtes enregistrés, les clés SSH, les thèmes, l’apparence et les raccourcis via votre base de données iCloud privée. Les mots de passe SSH et les clés privées transférables sont inclus par défaut et stockés dans des champs CloudKit chiffrés. Désactiver la synchronisation des identifiants conserve les copies existantes dans le nuage et les éléments du trousseau local."
+            "value": "开启后，已保存的主机、SSH 密钥、主题、外观和键盘快捷键会通过你的 iCloud 私有数据库同步。凭据同步默认关闭。开启后，SSH 密码和可迁移的私钥会存储在 CloudKit 加密字段中。关闭凭据同步会保留云端副本；要删除它们，请点按“从 iCloud 移除凭据”。本地钥匙串中的内容会保留。"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "有効にすると、保存したホスト、SSH鍵、テーマ、外観、キーボードショートカットをプライベートiCloudデータベースで同期します。SSHパスワードと移行可能な秘密鍵はデフォルトで含まれ、CloudKitの暗号化フィールドに保存されます。認証情報の同期をオフにしても、既存のクラウド上のコピーとローカルキーチェーンの項目は残ります。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "켜면 저장된 호스트, SSH 키, 테마, 모양 및 키보드 단축키가 비공개 iCloud 데이터베이스를 통해 동기화됩니다. SSH 암호와 이전 가능한 개인 키는 기본으로 포함되며 CloudKit 암호화 필드에 저장됩니다. 자격 증명 동기화를 꺼도 기존 클라우드 복사본과 로컬 키체인 항목은 유지됩니다."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quando ativada, sincroniza hosts salvos, chaves SSH, temas, aparência e atalhos por meio do banco de dados privado do iCloud. Senhas SSH e chaves privadas transferíveis são incluídas por padrão e armazenadas em campos criptografados do CloudKit. Desativar a sincronização de credenciais mantém as cópias existentes na nuvem e os itens locais das Chaves."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "开启后，通过你的 iCloud 私有数据库同步已保存的主机、SSH 密钥、主题、外观和键盘快捷键。默认包含 SSH 密码及可迁移的私钥，并存储在 CloudKit 加密字段中。关闭凭据同步会保留已有云端副本和本地钥匙串内容。"
+            "value": "有効にすると、保存したホスト、SSH 鍵、テーマ、外観、キーボードショートカットをプライベート iCloud データベースで同期します。認証情報の同期はデフォルトではオフです。オンにすると、SSH パスワードと移行可能な秘密鍵を CloudKit の暗号化フィールドに保存します。オフにしてもクラウド上のコピーは残ります。削除するには「iCloud から認証情報を削除」を使ってください。ローカルのキーチェーン項目は保持されます。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "開啟後，透過你的 iCloud 私有資料庫同步已儲存的主機、SSH 金鑰、主題、外觀與鍵盤快捷鍵。預設包含 SSH 密碼及可移轉的私鑰，並儲存於 CloudKit 加密欄位。關閉憑證同步會保留既有雲端副本與本機鑰匙圈內容。"
+            "value": "開啟後，已儲存的主機、SSH 金鑰、主題、外觀與鍵盤快速鍵會透過你的 iCloud 私有資料庫同步。憑證同步預設為關閉。開啟後，SSH 密碼和可移轉的私密金鑰會儲存在 CloudKit 加密欄位中。關閉憑證同步會保留雲端副本；若要刪除，請點一下「從 iCloud 移除憑證」。本機鑰匙圈項目會保留。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "켜면 저장된 호스트, SSH 키, 테마, 모양 및 키보드 단축키가 비공개 iCloud 데이터베이스를 통해 동기화됩니다. 자격 증명 동기화는 기본적으로 꺼져 있습니다. 켜면 SSH 암호와 이전 가능한 개인 키가 CloudKit 암호화 필드에 저장됩니다. 꺼도 클라우드 복사본은 유지됩니다. 삭제하려면 ‘iCloud에서 자격 증명 제거’를 사용하세요. 로컬 키체인 항목은 유지됩니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wenn aktiviert, werden gespeicherte Hosts, SSH-Schlüssel, Designs, Darstellung und Tastaturkurzbefehle über deine private iCloud-Datenbank synchronisiert. Die Synchronisierung von Zugangsdaten ist standardmäßig ausgeschaltet. Wenn du sie einschaltest, werden SSH-Passwörter und übertragbare private Schlüssel in verschlüsselten CloudKit-Feldern gespeichert. Beim Ausschalten bleiben die Cloud-Kopien erhalten. Über „Zugangsdaten aus iCloud entfernen“ kannst du sie löschen. Lokale Schlüsselbundobjekte bleiben erhalten."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Al activarla, los hosts, claves SSH, temas, apariencia y atajos guardados se sincronizan mediante tu base de datos privada de iCloud. La sincronización de credenciales está desactivada por defecto. Si la activas, las contraseñas SSH y claves privadas transferibles se guardan en campos cifrados de CloudKit. Al desactivarla, se conservan las copias en la nube; usa «Eliminar credenciales de iCloud» para borrarlas. Los elementos locales del llavero se conservan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une fois activée, la synchronisation transfère les hôtes enregistrés, les clés SSH, les thèmes, l’apparence et les raccourcis via votre base de données iCloud privée. La synchronisation des identifiants est désactivée par défaut. Si vous l’activez, les mots de passe SSH et les clés privées transférables sont stockés dans des champs CloudKit chiffrés. La désactiver conserve les copies dans le nuage ; utilisez « Supprimer les identifiants d’iCloud » pour les supprimer. Les éléments du trousseau local sont conservés."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quando ativada, sincroniza hosts salvos, chaves SSH, temas, aparência e atalhos por meio do banco de dados privado do iCloud. A sincronização de credenciais fica desativada por padrão. Se ativada, senhas SSH e chaves privadas transferíveis são armazenadas em campos criptografados do CloudKit. Desativá-la mantém as cópias na nuvem; use “Remover credenciais do iCloud” para apagá-las. Os itens locais das Chaves são mantidos."
           }
         }
       }

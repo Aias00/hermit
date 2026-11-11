@@ -9,6 +9,7 @@ Each entry carries complete zh-Hans + ja translations inline; zh-Hant, ko, de, e
 fr and pt-BR live in scripts/gen/locales/<locale>.json (see STYLE.md there).
 Hermit/Resources/InfoPlist.xcstrings (permission texts) is written too.
 SAME = identical value in every language (brand names, protocol words, glyphs).
+Use --remove-key <English key> to retire an obsolete app catalog entry.
 """
 import json, os, re, sys
 
@@ -30,6 +31,23 @@ def plural_spec(key, en_one, zh, ja, en_other=None):
     if en_other:
         spec["en_other"] = en_other
     return spec
+
+# ---------- iCloud sync ----------
+add("Remove Credentials from iCloud", "从 iCloud 移除凭据", "iCloud から認証情報を削除")
+add("Some credentials protected by Face ID were skipped. Use Sync Now to include them.",
+    "部分受 Face ID 保护的凭据已跳过。点按“立即同步”可将其一并同步。",
+    "Face ID で保護された一部の認証情報をスキップしました。「今すぐ同期」でこれらも同期できます。")
+add("Synced credentials were removed from iCloud. Local copies were kept, and credential sync is off.",
+    "已从 iCloud 移除同步的凭据。本机副本已保留，凭据同步已关闭。",
+    "同期済みの認証情報を iCloud から削除しました。各デバイスのコピーは保持され、認証情報の同期はオフになっています。")
+add("Could not remove credentials from iCloud: %@",
+    "无法从 iCloud 移除凭据：%@", "iCloud から認証情報を削除できませんでした：%@")
+add("Synced passwords and private keys will be deleted from iCloud. This device and your other devices will keep their local copies. Credential sync will be turned off.",
+    "同步的密码和私钥将从 iCloud 删除。此设备和其他设备上的本地副本都会保留，凭据同步也会关闭。",
+    "同期済みのパスワードと秘密鍵を iCloud から削除します。このデバイスとほかのデバイスにあるコピーは保持されます。認証情報の同期はオフになります。")
+add("When enabled, saved hosts, SSH keys, themes, appearance and keyboard shortcuts sync through your private iCloud database. Credential sync is off by default. If enabled, SSH passwords and portable private keys are stored in CloudKit encrypted fields. Turning it off keeps cloud copies; use Remove Credentials from iCloud to delete them. Local Keychain items are kept.",
+    "开启后，已保存的主机、SSH 密钥、主题、外观和键盘快捷键会通过你的 iCloud 私有数据库同步。凭据同步默认关闭。开启后，SSH 密码和可迁移的私钥会存储在 CloudKit 加密字段中。关闭凭据同步会保留云端副本；要删除它们，请点按“从 iCloud 移除凭据”。本地钥匙串中的内容会保留。",
+    "有効にすると、保存したホスト、SSH 鍵、テーマ、外観、キーボードショートカットをプライベート iCloud データベースで同期します。認証情報の同期はデフォルトではオフです。オンにすると、SSH パスワードと移行可能な秘密鍵を CloudKit の暗号化フィールドに保存します。オフにしてもクラウド上のコピーは残ります。削除するには「iCloud から認証情報を削除」を使ってください。ローカルのキーチェーン項目は保持されます。")
 
 # ---------- Brand / protocol / glyphs (identical everywhere) ----------
 for k in ["Hermit", "Vibe Island", "MOSH", "SRTT", "REC",
@@ -104,6 +122,111 @@ add("Compress Output", "压缩输出", "出力を圧縮")
 add("Add Connection", "添加连接", "接続を追加")
 add("Edit Connection", "编辑连接", "接続を編集")
 add("Could not save", "无法保存", "保存できませんでした")
+
+# ---------- Automatic diagnostic reporting ----------
+add("Automatic reporting", "自动上报", "自動送信")
+add("Enabled", "已开启", "オン")
+add("Not enabled", "未开启", "オフ")
+add("Automatic reporting: enabled", "自动上报：已开启", "自動送信：オン")
+add("Automatic reporting: not enabled", "自动上报：未开启", "自動送信：オフ")
+add("Receiver", "接收端", "送信先")
+add("Last successful upload", "最近成功", "前回の送信成功")
+add(
+    "Only connection stages, error categories, network recovery, and app and iOS versions are uploaded. "
+    "Terminal content, commands, host addresses, passwords, and tokens are excluded.",
+    "只上报连接阶段、错误分类、网络恢复、App 和 iOS 版本。终端内容、输入的命令、主机地址、密码和 Token 不进入诊断批次。",
+    "送信するのは接続段階、エラー分類、ネットワークの復旧、アプリと iOS のバージョンのみです。ターミナルの内容、入力したコマンド、ホストアドレス、パスワード、トークンは診断データに含まれません。",
+)
+add("Set up my receiver", "配置我的接收端", "自分の送信先を設定")
+add("Set up receiver manually", "手动配置接收端", "送信先を手動で設定")
+add("Upload now", "立即上报", "今すぐ送信")
+add("Turn on automatic reporting", "开启自动上报", "自動送信をオンにする")
+add("Turn off automatic reporting", "停止自动上报", "自動送信をオフにする")
+add("Clear records and remove receiver configuration", "清除记录并解除上报绑定", "記録と送信先の設定を削除")
+add(
+    "Records are collected only while automatic reporting is on. Turning it off deletes records not yet "
+    "uploaded. Uploads are checked every 5 minutes in the foreground, and pending batches are submitted "
+    "when the app enters the background. iOS schedules background transfers; offline records are kept "
+    "and retried with backoff. Uploads are limited to 1 MB per day; up to about 3 MB is kept locally for "
+    "7 days. Clearing local records does not delete records already received by the receiver.",
+    "仅在自动上报开启时采集记录。关闭后会删除尚未上传的记录。前台每 5 分钟检查一次，进入后台时提交已有批次。后台传输由 iOS 调度；断网后保留记录并退避重试。每日日志内容最多上报 1 "
+    "MB，本地最多保留约 3 MB、7 天。清除不会删除接收端已经收到的记录。",
+    "記録は自動送信がオンの間だけ収集されます。オフにすると未送信の記録は削除されます。フォアグラウンドでは 5 "
+    "分ごとに送信を確認し、バックグラウンドに移ると保留中のバッチを送信します。バックグラウンド転送は iOS が管理します。オフライン中の記録は保持し、間隔を延ばしながら再試行します。送信は 1 日 1 "
+    "MB まで、端末には最大約 3 MB を 7 日間保持します。端末の記録を削除しても、送信先が受信済みの記録は削除されません。",
+)
+add("Automatic diagnostic reporting", "自动诊断上报", "診断データの自動送信")
+add("Diagnostic receiver", "诊断接收端", "診断データの送信先")
+add(
+    "Confirm that this is your own receiver. Device credentials are stored only in this device’s "
+    "Keychain.",
+    "请确认这是你自己的接收端。设备凭据仅保存于本机钥匙串。",
+    "自分の送信先であることを確認してください。デバイスの認証情報は、このデバイスのキーチェーンにのみ保存されます。",
+)
+add(
+    "After you enable reporting, Hermit periodically uploads structured connection and recovery records, "
+    "along with app and iOS versions. Terminal content, commands, host addresses, and SSH credentials "
+    "are never uploaded.",
+    "启用后会定期上报 Hermit 的结构化连接与恢复记录，以及 App、iOS 版本。不会上传终端正文、命令、主机地址或 SSH 凭据。",
+    "有効にすると、Hermit の構造化された接続・復旧記録と、アプリおよび iOS のバージョンを定期的に送信します。ターミナルの内容、コマンド、ホストアドレス、SSH 認証情報は送信されません。",
+)
+add("Enable automatic diagnostic reporting", "启用自动诊断上报", "診断データの自動送信を有効にする")
+add("Set up diagnostic reporting", "配置诊断上报", "診断データの送信を設定")
+add("HTTPS receiver address", "HTTPS 接收地址", "HTTPS 送信先アドレス")
+add("Device reporting credential", "设备上报凭据", "デバイスの送信認証情報")
+add("Check configuration", "检查配置", "設定を確認")
+add(
+    "Enter a valid HTTPS receiver address and device credential. The address cannot contain a username, "
+    "password, or query parameters.",
+    "请输入有效的 HTTPS 接收地址和设备凭据。地址中不能包含用户名、密码或查询参数。",
+    "有効な HTTPS 送信先アドレスとデバイスの認証情報を入力してください。アドレスにユーザー名、パスワード、クエリパラメータは含められません。",
+)
+add(
+    "The receiver must support the Hermit diagnostic format. You can also open the app from the "
+    "receiver’s protected pairing page.",
+    "接收端须支持 Hermit 诊断格式。也可以从接收端的受保护配对页面直接打开 App。",
+    "送信先は Hermit の診断形式に対応している必要があります。送信先の保護されたペアリングページからアプリを開くこともできます。",
+)
+add("Manual setup", "手动配置", "手動設定")
+add(
+    "Unable to save diagnostic reporting credentials. Unlock your device and try again.",
+    "无法保存设备上报凭据，请解锁设备后重试。",
+    "診断データ送信の認証情報を保存できません。デバイスのロックを解除して、もう一度お試しください。",
+)
+add(
+    "Automatic reporting is off. Records not yet uploaded have been deleted; no new records will be "
+    "collected.",
+    "自动上报已关闭。尚未上传的记录已删除，不会再采集新记录。",
+    "自動送信はオフです。未送信の記録は削除され、新しい記録は収集されません。",
+)
+add(
+    "Local diagnostic records and receiver configuration have been cleared.",
+    "本地诊断记录和接收端绑定已清除。",
+    "端末の診断記録と送信先の設定を削除しました。",
+)
+add(
+    "The daily 1 MB upload limit has been reached. Uploads will resume automatically later.",
+    "已达到每日 1 MB 上报上限，之后自动补传。",
+    "1 日の送信上限 1 MB に達しました。送信は後で自動的に再開されます。",
+)
+add("Uploading diagnostic records…", "正在上报诊断记录…", "診断記録を送信中…")
+add(
+    "Local diagnostics are temporarily unavailable. Uploads will retry automatically later.",
+    "暂时无法读取本地诊断，之后会自动重试。",
+    "端末の診断記録を一時的に読み取れません。後で自動的に再試行します。",
+)
+add("Diagnostic records have been uploaded.", "诊断记录已上报。", "診断記録を送信しました。")
+add(
+    "Diagnostic reporting credentials are invalid or the receiver requires sign-in. Please configure it "
+    "again.",
+    "设备上报凭据失效或接收端需要登录，请重新配置。",
+    "診断データ送信の認証情報が無効か、送信先へのログインが必要です。設定し直してください。",
+)
+add(
+    "This upload was not acknowledged. Records have been kept and will retry automatically later.",
+    "本次上报未确认，记录已保留，之后自动补传。",
+    "今回の送信は受信確認ができませんでした。記録は保持し、後で自動的に再送信します。",
+)
 
 # ---------- Settings ----------
 add("DISPLAY", "显示", "表示")
@@ -1412,7 +1535,7 @@ def entry(key, spec, english=None):
     return {"localizations": locs}
 
 
-def write_catalog(path, table, english=None):
+def write_catalog(path, table, english=None, removed_keys=()):
     """Merge the curated table INTO the existing catalog.
 
     Merge, not overwrite. Two things write this file: this script (the curated
@@ -1434,6 +1557,8 @@ def write_catalog(path, table, english=None):
             raise SystemExit(f"{path}: refusing to overwrite unreadable catalog ({exc})")
 
     existing = catalog.get("strings") or {}
+    for key in removed_keys:
+        existing.pop(key, None)
     merged = dict(existing)
     for key, spec in table.items():
         curated = entry(key, spec, (english or {}).get(key))
@@ -1576,7 +1701,8 @@ INFOPLIST_CATALOG = os.path.join(root, "Hermit/Resources/InfoPlist.xcstrings")
 if "--check" in sys.argv:
     raise SystemExit(check(CATALOGS + [INFOPLIST_CATALOG]))
 
-write_catalog(CATALOGS[0], S)
+REMOVED_APP_KEYS = [sys.argv[i + 1] for i, arg in enumerate(sys.argv[:-1]) if arg == "--remove-key"]
+write_catalog(CATALOGS[0], S, removed_keys=REMOVED_APP_KEYS)
 write_catalog(CATALOGS[1], ISLAND)
 write_catalog(CATALOGS[2], PUSH)
 write_catalog(CATALOGS[3], SHARE)
