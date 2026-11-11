@@ -306,13 +306,15 @@ final class FileVaultKeychainBackend: KeychainBackend, @unchecked Sendable {
         }
     }
 
-    private func loadStore() -> [String: Data] {
+    private func loadStore() throws -> [String: Data] {
         lock.lock(); defer { lock.unlock() }
-        guard
-            let data = try? Data(contentsOf: url),
-            let decoded = try? JSONDecoder().decode([String: Data].self, from: data)
-        else { return [:] }
-        return decoded
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return [:]
+        }
+        return try JSONDecoder().decode([String: Data].self, from: data)
     }
 
     private func saveStore(_ store: [String: Data]) throws {
@@ -321,13 +323,13 @@ final class FileVaultKeychainBackend: KeychainBackend, @unchecked Sendable {
     }
 
     func save(secret: Data, account: String, requireBiometry: Bool) throws {
-        var store = loadStore()
+        var store = try loadStore()
         store[account] = secret
         try saveStore(store)
     }
 
     func load(account: String, prompt: String) throws -> Data {
-        let store = loadStore()
+        let store = try loadStore()
         guard let data = store[account] else {
             throw KeychainError.notFound
         }
@@ -335,13 +337,13 @@ final class FileVaultKeychainBackend: KeychainBackend, @unchecked Sendable {
     }
 
     func delete(account: String) throws {
-        var store = loadStore()
+        var store = try loadStore()
         store.removeValue(forKey: account)
         try saveStore(store)
     }
 
     func exists(account: String) -> Bool {
-        loadStore()[account] != nil
+        (try? loadStore()[account]) != nil
     }
 }
 

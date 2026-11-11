@@ -8,7 +8,7 @@ import Citadel
 
 /// Persistence layer for the TOFU known-hosts map: `"host:port" -> fingerprint`.
 protocol KnownHostsStore: Sendable {
-    func read() -> [String: String]
+    func read() throws -> [String: String]
     func write(_ entries: [String: String])
 }
 
@@ -46,9 +46,14 @@ final class KeychainKnownHostsStore: KnownHostsStore, @unchecked Sendable {
         #endif
     }
 
-    func read() -> [String: String] {
-        guard let data = try? backend.load(account: account, prompt: "") else { return [:] }
-        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+    func read() throws -> [String: String] {
+        let data: Data
+        do {
+            data = try backend.load(account: account, prompt: "")
+        } catch KeychainError.notFound {
+            return [:]
+        }
+        return try JSONDecoder().decode([String: String].self, from: data)
     }
 
     func write(_ entries: [String: String]) {
@@ -73,9 +78,9 @@ final class UserDefaultsKnownHostsStore: KnownHostsStore, @unchecked Sendable {
         self.key = key
     }
 
-    func read() -> [String: String] {
+    func read() throws -> [String: String] {
         guard let data = defaults.data(forKey: key) else { return [:] }
-        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+        return try JSONDecoder().decode([String: String].self, from: data)
     }
 
     func write(_ entries: [String: String]) {
@@ -122,16 +127,18 @@ enum HostKeyDecision: Equatable {
 /// Trust-on-first-use host key store.
 ///
 /// The validator is an `actor` so concurrent SSH connection attempts mutate
-/// the known-hosts map serially. It is intentionally I/O-free: callers
-/// (typically `SSHService`) decide UI flow based on `HostKeyDecision` and
-/// then commit acceptance via `trust(...)`.
+/// the known-hosts map serially. Callers (typically `SSHService`) decide UI
+/// flow based on `HostKeyDecision` and commit acceptance via `trust(...)`.
 actor HostKeyValidator {
     private let store: KnownHostsStore
     private var cache: [String: String]
+    private var storeLoaded: Bool
 
     init(store: KnownHostsStore = KeychainKnownHostsStore()) {
         self.store = store
-        self.cache = store.read()
+        let entries = try? store.read()
+        self.cache = entries ?? [:]
+        self.storeLoaded = entries != nil
     }
 
     /// Test convenience.
@@ -139,9 +146,10 @@ actor HostKeyValidator {
         HostKeyValidator(store: InMemoryKnownHostsStore(seed: seed))
     }
 
-    /// Pure decision — no side effects, no I/O. SSH layer interprets and
+    /// Retry an unreadable store before deciding. SSH layer interprets and
     /// optionally calls `trust(...)` afterwards.
     func decide(host: String, port: Int, fingerprint: String) -> HostKeyDecision {
+        reloadIfNeeded()
         let key = Self.entryKey(host: host, port: port)
         guard let stored = cache[key] else {
             return .unknown
@@ -155,16 +163,25 @@ actor HostKeyValidator {
     /// Commit acceptance of a fingerprint (either after first-time prompt or
     /// after the user manually approves a host-key change).
     func trust(host: String, port: Int, fingerprint: String) {
+        reloadIfNeeded()
         let key = Self.entryKey(host: host, port: port)
         cache[key] = fingerprint
-        store.write(cache)
+        if storeLoaded { store.write(cache) }
     }
 
     /// Drop a stored fingerprint (e.g. user re-keys the server).
     func forget(host: String, port: Int) {
+        reloadIfNeeded()
         let key = Self.entryKey(host: host, port: port)
         cache.removeValue(forKey: key)
-        store.write(cache)
+        if storeLoaded { store.write(cache) }
+    }
+
+    private func reloadIfNeeded() {
+        // A failed read must never turn a session-only cache into the persisted map.
+        guard !storeLoaded, let entries = try? store.read() else { return }
+        cache = entries
+        storeLoaded = true
     }
 
     /// Snapshot for tests / UI.
