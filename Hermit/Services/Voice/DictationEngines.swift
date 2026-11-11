@@ -143,7 +143,7 @@ final class ModernDictationEngine: DictationEngine {
         }
     }
 
-    private let module: Module
+    private var module: Module
     private let contextualStrings: [String]
     private let updateContinuation: AsyncThrowingStream<DictationUpdate, Error>.Continuation
     /// Serializes converter, input delivery and termination against the tap.
@@ -152,7 +152,7 @@ final class ModernDictationEngine: DictationEngine {
     private var analyzer: SpeechAnalyzer?
     private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     private var analyzerFormat: AVAudioFormat?
-    private var resultsTask: Task<Void, Never>?
+    private var resultsTask: Task<Bool, Never>?
     private var acceptingAudio = false
     /// Set by `cancel()` so a torn-down results stream ends quietly instead
     /// of surfacing a cancellation as a user-visible error.
@@ -211,27 +211,50 @@ final class ModernDictationEngine: DictationEngine {
     }
 
     func start() async throws {
-        let analyzer = SpeechAnalyzer(modules: [module.speechModule])
-        let format = await SpeechAnalyzer.bestAvailableAudioFormat(
-            compatibleWith: [module.speechModule])
-        // Contextual vocabulary is supported by DictationTranscriber. Keep
-        // SpeechTranscriber first in the factory without implying this hint
-        // changes its model or silently switching engines to honor a word list.
-        if case .dictation = module, !contextualStrings.isEmpty {
-            let context = AnalysisContext()
-            context.contextualStrings[.general] = contextualStrings
-            try await analyzer.setContext(context)
+        let key = SpeechAnalyzerWarmup.Key(module: module, contextualStrings: contextualStrings)
+        var warmed: SpeechAnalyzerWarmup.Item?
+        if let key, let task = SpeechAnalyzerWarmup.shared.take(key: key) {
+            warmed = try? await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
         }
-        try Task.checkCancellation()
+        Log.voice.debug("speech analyzer warm \(warmed == nil ? "miss" : "hit", privacy: .public)")
+        let analyzer: SpeechAnalyzer
+        let format: AVAudioFormat?
+        if let warmed {
+            analyzer = warmed.analyzer
+            format = warmed.format
+        } else {
+            analyzer = SpeechAnalyzer(modules: [module.speechModule])
+            format = await SpeechAnalyzer.bestAvailableAudioFormat(
+                compatibleWith: [module.speechModule])
+            // Contextual vocabulary is supported by DictationTranscriber. Keep
+            // SpeechTranscriber first in the factory without implying this hint
+            // changes its model or silently switching engines to honor a word list.
+            if case .dictation = module, !contextualStrings.isEmpty {
+                let context = AnalysisContext()
+                context.contextualStrings[.general] = contextualStrings
+                try await analyzer.setContext(context)
+            }
+        }
         let (inputSequence, inputContinuation) = AsyncStream<AnalyzerInput>.makeStream()
-        try lock.withLock {
-            guard !cancelled else { throw CancellationError() }
-            self.analyzer = analyzer
-            analyzerFormat = format
-            self.inputContinuation = inputContinuation
-            acceptingAudio = true
-            // Subscribe before starting analysis so no early result is lost.
-            resultsTask = Task { [weak self] in await self?.consumeResults() }
+        do {
+            try Task.checkCancellation()
+            try lock.withLock {
+                guard !cancelled else { throw CancellationError() }
+                if let warmed { module = warmed.module }
+                self.analyzer = analyzer
+                analyzerFormat = format
+                self.inputContinuation = inputContinuation
+                acceptingAudio = true
+                // Subscribe before starting analysis so no early result is lost.
+                resultsTask = Task { [weak self] in await self?.consumeResults() ?? false }
+            }
+        } catch {
+            await analyzer.cancelAndFinishNow()
+            throw error
         }
         do {
             try await analyzer.start(inputSequence: inputSequence)
@@ -263,7 +286,7 @@ final class ModernDictationEngine: DictationEngine {
 
     func finishAudio() async {
         var failedAnalyzer: SpeechAnalyzer?
-        let work: (SpeechAnalyzer, Task<Void, Never>?)? = lock.withLock {
+        let work: (SpeechAnalyzer, Task<Bool, Never>?)? = lock.withLock {
             guard acceptingAudio, !cancelled, let analyzer, let inputContinuation else { return nil }
             acceptingAudio = false
             do {
@@ -282,15 +305,21 @@ final class ModernDictationEngine: DictationEngine {
         }
         if let failedAnalyzer { await failedAnalyzer.cancelAndFinishNow() }
         guard let (analyzer, resultsTask) = work else { return }
+        var finishedNormally = false
         do {
             try await analyzer.finalizeAndFinishThroughEndOfInput()
+            finishedNormally = true
         } catch {
             if !lock.withLock({ cancelled }), !(error is CancellationError) {
                 updateContinuation.finish(throwing: error)
             }
             await analyzer.cancelAndFinishNow()
         }
-        await resultsTask?.value
+        let resultsSucceeded = await resultsTask?.value ?? false
+        guard finishedNormally, resultsSucceeded, !Task.isCancelled,
+              !lock.withLock({ cancelled }),
+              let key = SpeechAnalyzerWarmup.Key(module: module, contextualStrings: contextualStrings) else { return }
+        await SpeechAnalyzerWarmup.shared.warm(key: key)
     }
 
     func cancel() {
@@ -324,7 +353,7 @@ final class ModernDictationEngine: DictationEngine {
         return analyzer
     }
 
-    private func consumeResults() async {
+    private func consumeResults() async -> Bool {
         do {
             switch module {
             case .advanced(let transcriber):
@@ -337,12 +366,14 @@ final class ModernDictationEngine: DictationEngine {
                 }
             }
             updateContinuation.finish()
+            return true
         } catch {
             if lock.withLock({ cancelled }) || error is CancellationError {
                 updateContinuation.finish()
             } else {
                 updateContinuation.finish(throwing: error)
             }
+            return false
         }
     }
 
