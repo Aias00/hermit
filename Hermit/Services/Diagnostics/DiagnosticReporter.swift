@@ -127,12 +127,24 @@ final class DiagnosticReporter: NSObject, URLSessionDataDelegate {
     @ObservationIgnored private var preparing = false
     @ObservationIgnored private var retryAt = Date.distantPast
     @ObservationIgnored private var failureCount = 0
+    @ObservationIgnored private var retriesPaused = UserDefaults.standard.bool(forKey: "hermit.diagnostics.retriesPaused")
+    @ObservationIgnored private var recordingSetup: Task<Void, Never>!
     @ObservationIgnored private var backgroundCompletion: (() -> Void)?
+    @ObservationIgnored private var backgroundEventsFinished = false
+    @ObservationIgnored private var pendingCompletions = 0
     @ObservationIgnored nonisolated private let responses = DiagnosticUploadResponses()
 
     private override init() {
         super.init()
         configuration = try? DiagnosticReceiverCredentials.load()
+        if retriesPaused {
+            statusMessage = String(localized: "Diagnostic reporting credentials are invalid or the receiver requires sign-in. Please configure it again.")
+        }
+        let enabled = isEnabled
+        recordingSetup = Task {
+            await DiagnosticJournal.shared.setRecording(enabled)
+            if !enabled { try? await DiagnosticJournal.shared.clear() }
+        }
         let settings = URLSessionConfiguration.background(withIdentifier: Self.sessionIdentifier)
         settings.sessionSendsLaunchEvents = true
         settings.isDiscretionary = false
@@ -144,7 +156,9 @@ final class DiagnosticReporter: NSObject, URLSessionDataDelegate {
         settings.httpCookieStorage = nil
         settings.urlCredentialStorage = nil
         settings.urlCache = nil
-        session = URLSession(configuration: settings, delegate: self, delegateQueue: nil)
+        // Register completion work synchronously on the main actor, in delegate
+        // callback order, before the finish-events callback can observe it.
+        session = URLSession(configuration: settings, delegate: self, delegateQueue: .main)
     }
 
     func offer(_ url: URL) -> Bool {
@@ -154,30 +168,39 @@ final class DiagnosticReporter: NSObject, URLSessionDataDelegate {
     }
 
     func enable(_ value: DiagnosticReceiverConfiguration) async {
+        await recordingSetup.value
         do {
             try DiagnosticReceiverCredentials.save(value)
+            await DiagnosticJournal.shared.setRecording(false)
+            try await DiagnosticJournal.shared.clear()
             for task in await session.allTasks { task.cancel() }
             configuration = value; isEnabled = true; isUploading = false; retryAt = .distantPast; failureCount = 0
+            retriesPaused = false
+            UserDefaults.standard.set(false, forKey: "hermit.diagnostics.retriesPaused")
             UserDefaults.standard.set(true, forKey: "hermit.diagnostics.enabled")
+            await DiagnosticJournal.shared.setRecording(true)
             await DiagnosticJournal.shared.append(DiagnosticRecord(kind: .lifecycle, code: "reporting-enabled"))
             startTimerIfNeeded()
             await flush(force: true)
-        } catch { statusMessage = "无法保存设备上报凭据，请解锁设备后重试。" }
+        } catch { statusMessage = String(localized: "Unable to save diagnostic reporting credentials. Unlock your device and try again.") }
     }
 
     func disable() async {
+        await recordingSetup.value
         isEnabled = false; timer?.cancel(); timer = nil
         UserDefaults.standard.set(false, forKey: "hermit.diagnostics.enabled")
+        await DiagnosticJournal.shared.setRecording(false)
+        try? await DiagnosticJournal.shared.clear(); pendingCount = 0
         for task in await session.allTasks { task.cancel() }
         isUploading = false
-        statusMessage = "自动上报已关闭。本地仅保留有限的结构化诊断记录。"
+        statusMessage = String(localized: "Automatic reporting is off. Records not yet uploaded have been deleted; no new records will be collected.")
     }
 
     func forget() async {
         await disable(); DiagnosticReceiverCredentials.delete(); configuration = nil
-        try? await DiagnosticJournal.shared.clear(); pendingCount = 0
+        retriesPaused = false; UserDefaults.standard.removeObject(forKey: "hermit.diagnostics.retriesPaused")
         lastSuccess = nil; UserDefaults.standard.removeObject(forKey: "hermit.diagnostics.lastSuccess")
-        statusMessage = "本地诊断记录和接收端绑定已清除。"
+        statusMessage = String(localized: "Local diagnostic records and receiver configuration have been cleared.")
     }
 
     func setForeground(_ active: Bool) {
@@ -205,7 +228,13 @@ final class DiagnosticReporter: NSObject, URLSessionDataDelegate {
     }
 
     func flush(force: Bool = false) async {
-        guard isEnabled, let configuration, !isUploading, !preparing, force || Date() >= retryAt else { return }
+        await recordingSetup.value
+        if force {
+            retriesPaused = false
+            UserDefaults.standard.set(false, forKey: "hermit.diagnostics.retriesPaused")
+        }
+        guard isEnabled, let configuration, !isUploading, !preparing,
+              !retriesPaused, force || Date() >= retryAt else { return }
         preparing = true
         defer { preparing = false }
         do {
@@ -222,7 +251,7 @@ final class DiagnosticReporter: NSObject, URLSessionDataDelegate {
                 defaults.set(today, forKey: "hermit.diagnostics.uploadDay"); defaults.set(0, forKey: "hermit.diagnostics.uploadBytes")
             }
             let used = defaults.integer(forKey: "hermit.diagnostics.uploadBytes")
-            guard used + size <= 1024 * 1024 else { statusMessage = "已达到每日 1 MB 上报上限，之后自动补传。"; return }
+            guard used + size <= 1024 * 1024 else { statusMessage = String(localized: "The daily 1 MB upload limit has been reached. Uploads will resume automatically later."); return }
             let uploadCopy = try await DiagnosticJournal.shared.stageUpload(file, configurationID: configuration.id)
             // No suspension after this check before handing the file to iOS.
             guard isEnabled, self.configuration?.id == configuration.id else {
@@ -235,13 +264,25 @@ final class DiagnosticReporter: NSObject, URLSessionDataDelegate {
             request.setValue("Bearer " + configuration.token, forHTTPHeaderField: "Authorization")
             let task = session.uploadTask(with: request, fromFile: uploadCopy)
             task.taskDescription = configuration.id.uuidString + ":" + file.lastPathComponent
-            defaults.set(used + size, forKey: "hermit.diagnostics.uploadBytes")
-            isUploading = true; statusMessage = "正在上报诊断记录…"
+            isUploading = true; statusMessage = String(localized: "Uploading diagnostic records…")
             task.resume()
-        } catch { statusMessage = "暂时无法读取本地诊断，之后会自动重试。" }
+        } catch { statusMessage = String(localized: "Local diagnostics are temporarily unavailable. Uploads will retry automatically later.") }
     }
 
-    func handleBackgroundEvents(completion: @escaping () -> Void) { backgroundCompletion = completion }
+    func handleBackgroundEvents(completion: @escaping () -> Void) {
+        let previous = backgroundCompletion
+        backgroundCompletion = nil
+        previous?()
+        backgroundCompletion = completion
+        finishBackgroundEventsIfReady()
+    }
+
+    private func finishBackgroundEventsIfReady() {
+        guard backgroundEventsFinished, pendingCompletions == 0 else { return }
+        let completion = backgroundCompletion
+        backgroundCompletion = nil
+        completion?()
+    }
 
     nonisolated func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         responses.append(data, task: dataTask.taskIdentifier)
@@ -254,7 +295,17 @@ final class DiagnosticReporter: NSObject, URLSessionDataDelegate {
         // delegate. Our receiver never redirects: any changed final endpoint
         // must preserve the local batch, even if a response looks like an ACK.
         let succeeded = error == nil && DiagnosticUploadResponses.sameEndpoint(request: task.originalRequest?.url, response: task.response?.url)
-        Task { @MainActor [weak self] in await self?.completed(description: description, status: status, data: data, succeeded: succeeded) }
+        MainActor.assumeIsolated {
+            backgroundEventsFinished = false
+            pendingCompletions += 1
+            Task { @MainActor in
+                defer {
+                    pendingCompletions -= 1
+                    finishBackgroundEventsIfReady()
+                }
+                await completed(description: description, status: status, data: data, succeeded: succeeded)
+            }
+        }
     }
     private func completed(description: String?, status: Int, data: Data, succeeded: Bool) async {
         guard let description else { return }
@@ -262,30 +313,45 @@ final class DiagnosticReporter: NSObject, URLSessionDataDelegate {
         guard components.count == 2, let configurationID = UUID(uuidString: components[0]),
               components[1].hasSuffix(".batch.json"),
               let batch = UUID(uuidString: String(components[1].dropLast(".batch.json".count))) else { return }
-        await DiagnosticJournal.shared.discardUpload(components[1], configurationID: configurationID)
+        let size = await DiagnosticJournal.shared.discardUpload(components[1], configurationID: configurationID)
         guard let configuration, configurationID == configuration.id else { return }
         isUploading = false
         guard isEnabled else { return }
         if succeeded, DiagnosticUploadResponses.accepted(data, status: status, batchID: batch.uuidString) {
+            let defaults = UserDefaults.standard
+            let today = Int(Date().timeIntervalSince1970 / 86400)
+            if defaults.integer(forKey: "hermit.diagnostics.uploadDay") != today {
+                defaults.set(today, forKey: "hermit.diagnostics.uploadDay"); defaults.set(0, forKey: "hermit.diagnostics.uploadBytes")
+            }
+            defaults.set(defaults.integer(forKey: "hermit.diagnostics.uploadBytes") + size, forKey: "hermit.diagnostics.uploadBytes")
             let root = await DiagnosticJournal.shared.root
             try? await DiagnosticJournal.shared.acknowledge(root.appendingPathComponent(components[1]))
             lastSuccess = Date(); UserDefaults.standard.set(lastSuccess, forKey: "hermit.diagnostics.lastSuccess")
-            statusMessage = "诊断记录已上报。"; failureCount = 0; retryAt = .distantPast
+            statusMessage = String(localized: "Diagnostic records have been uploaded."); failureCount = 0; retryAt = .distantPast
             pendingCount = max(0, pendingCount - 1)
             // Drain while foregrounded; do not build a chain of separate
             // background wakes that iOS progressively delays and throttles.
             if isEnabled, foreground { await flush() }
+        } else if succeeded, [400, 413].contains(status) {
+            let root = await DiagnosticJournal.shared.root
+            try? await DiagnosticJournal.shared.acknowledge(root.appendingPathComponent(components[1]))
+            pendingCount = max(0, pendingCount - 1)
+            failureCount = 0; retryAt = .distantPast
+            await flush()
+        } else if [401, 403].contains(status) {
+            retriesPaused = true
+            UserDefaults.standard.set(true, forKey: "hermit.diagnostics.retriesPaused")
+            statusMessage = String(localized: "Diagnostic reporting credentials are invalid or the receiver requires sign-in. Please configure it again.")
         } else {
             failureCount = min(failureCount + 1, 6)
             retryAt = Date().addingTimeInterval(min(3600, 60 * pow(2, Double(failureCount - 1))))
-            statusMessage = [401, 403].contains(status)
-                ? "设备上报凭据失效或接收端需要登录，请重新配置。"
-                : "本次上报未确认，记录已保留，之后自动补传。"
+            statusMessage = String(localized: "This upload was not acknowledged. Records have been kept and will retry automatically later.")
         }
     }
     nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
-        Task { @MainActor [weak self] in
-            let completion = self?.backgroundCompletion; self?.backgroundCompletion = nil; completion?()
+        MainActor.assumeIsolated {
+            backgroundEventsFinished = true
+            finishBackgroundEventsIfReady()
         }
     }
 }

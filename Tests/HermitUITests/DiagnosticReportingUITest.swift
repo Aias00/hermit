@@ -26,7 +26,7 @@ final class DiagnosticReportingUITest: XCTestCase {
         reveal(diagnostics, app: app); diagnostics.tap()
         let reset = app.buttons["diagnostics-forget"]
         reveal(reset, app: app); reset.tap()
-        XCTAssertTrue(app.staticTexts["本地诊断记录和接收端绑定已清除。"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Local diagnostic records and receiver configuration have been cleared."].waitForExistence(timeout: 5))
         // Exercise the same dedicated app link produced by the owner-only
         // setup page. No credential needs to be pasted into a password field.
         var link = URLComponents(); link.scheme = "hermit-diagnostics"; link.host = "diagnostics"; link.path = "/configure"
@@ -39,7 +39,7 @@ final class DiagnosticReportingUITest: XCTestCase {
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: enable)
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 10), .completed)
         // Opening a URL can bring a different navigation destination forward.
-        if !app.navigationBars["自动诊断上报"].exists {
+        if !app.navigationBars["Automatic diagnostic reporting"].exists {
             if app.buttons["home-settings"].exists, app.buttons["home-settings"].isHittable {
                 app.buttons["home-settings"].tap()
             }
@@ -53,7 +53,7 @@ final class DiagnosticReportingUITest: XCTestCase {
         reveal(forget, app: app); forget.tap()
         let disabled = app.descendants(matching: .any)["diagnostics-enabled-state"].firstMatch
         reveal(disabled, app: app)
-        let stopped = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "未开启"), object: disabled)
+        let stopped = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "not enabled"), object: disabled)
         XCTAssertEqual(XCTWaiter.wait(for: [stopped], timeout: 5), .completed)
     }
 

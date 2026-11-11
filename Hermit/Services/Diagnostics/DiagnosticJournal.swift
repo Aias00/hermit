@@ -55,6 +55,7 @@ actor DiagnosticJournal {
     private let retention: TimeInterval
     private var records: [DiagnosticRecord] = []
     private var loaded = false
+    private var isRecording = false
 
     init(root: URL, maxBytes: Int = 3 * 1024 * 1024, retention: TimeInterval = 7 * 86400) {
         self.root = root; self.maxBytes = maxBytes; self.retention = retention
@@ -99,7 +100,10 @@ actor DiagnosticJournal {
         try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
+    func setRecording(_ enabled: Bool) { isRecording = enabled }
+
     func append(_ record: DiagnosticRecord) {
+        guard isRecording else { return }
         do {
             try prepare()
             records.append(record)
@@ -162,10 +166,14 @@ actor DiagnosticJournal {
         return stage
     }
 
-    func discardUpload(_ filename: String, configurationID: UUID) {
+    /// Return the immutable upload's size so only acknowledged bytes are charged.
+    @discardableResult func discardUpload(_ filename: String, configurationID: UUID) -> Int {
         guard UUID(uuidString: String(filename.dropLast(".batch.json".count))) != nil,
-              filename.hasSuffix(".batch.json") else { return }
-        try? FileManager.default.removeItem(at: uploadCopy(filename, configurationID: configurationID))
+              filename.hasSuffix(".batch.json") else { return 0 }
+        let file = uploadCopy(filename, configurationID: configurationID)
+        let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        try? FileManager.default.removeItem(at: file)
+        return size
     }
 
     private func uploadCopy(_ filename: String, configurationID: UUID) -> URL {
@@ -174,7 +182,12 @@ actor DiagnosticJournal {
 
     func clear() throws {
         records.removeAll(); loaded = false
-        if FileManager.default.fileExists(atPath: root.path) { try FileManager.default.removeItem(at: root) }
+        guard FileManager.default.fileExists(atPath: root.path) else { return }
+        // The receiver binds its device credential to this installation identity.
+        for file in try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            where file.lastPathComponent != "installation-id" {
+            try FileManager.default.removeItem(at: file)
+        }
     }
 
     private func batchFiles() throws -> [URL] {

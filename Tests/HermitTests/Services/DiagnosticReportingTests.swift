@@ -23,6 +23,9 @@ struct DiagnosticReportingTests {
     func durableBatches() async throws {
         let root = root(); defer { try? FileManager.default.removeItem(at: root) }
         let journal = DiagnosticJournal(root: root)
+        await journal.append(DiagnosticRecord(kind: .network, code: "before-consent"))
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+        await journal.setRecording(true)
         await journal.append(DiagnosticRecord(kind: .network, code: "path-changed"))
         let restored = DiagnosticJournal(root: root)
         let first = try await restored.pending()
@@ -42,6 +45,7 @@ struct DiagnosticReportingTests {
     func boundedRetention() async throws {
         let root = root(); defer { try? FileManager.default.removeItem(at: root) }
         let journal = DiagnosticJournal(root: root, maxBytes: 1800, retention: 60)
+        await journal.setRecording(true)
         for _ in 0..<12 {
             await journal.append(DiagnosticRecord(kind: .health, code: "probe-timeout-confirmed"))
             _ = try await journal.pending()
@@ -52,14 +56,18 @@ struct DiagnosticReportingTests {
         #expect(!files.isEmpty)
         for file in files { try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-120)], ofItemAtPath: file.path) }
         #expect(try await journal.pending().isEmpty)
+        let identityURL = root.appendingPathComponent("installation-id")
+        let identity = try Data(contentsOf: identityURL)
         try await journal.clear()
-        #expect(!FileManager.default.fileExists(atPath: root.path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path) == ["installation-id"])
+        #expect(try Data(contentsOf: identityURL) == identity)
     }
 
     @Test("An in-flight upload keeps an immutable copy when the ring evicts its original batch")
     func inFlightCopy() async throws {
         let root = root(); defer { try? FileManager.default.removeItem(at: root) }
         let journal = DiagnosticJournal(root: root, maxBytes: 1100)
+        await journal.setRecording(true)
         await journal.append(DiagnosticRecord(kind: .health, code: "probe-failed"))
         let files = try await journal.pending()
         let first = try #require(files.first)
@@ -72,7 +80,7 @@ struct DiagnosticReportingTests {
         }
         #expect(try Data(contentsOf: stage) == original)
         #expect(!(try await journal.pending()).contains(stage))
-        await journal.discardUpload(first.lastPathComponent, configurationID: configuration)
+        #expect(await journal.discardUpload(first.lastPathComponent, configurationID: configuration) == original.count)
         #expect(!FileManager.default.fileExists(atPath: stage.path))
     }
 
