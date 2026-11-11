@@ -29,7 +29,7 @@ final class CloudSyncService {
             self.backend = CloudKitSyncBackend(containerIdentifier: container); available = true
         } else { self.backend = nil; available = false }
         enabled = defaults.bool(forKey: Self.enabledKey) && available
-        syncCredentials = defaults.object(forKey: Self.credentialsKey) as? Bool ?? true
+        syncCredentials = Self.credentialPreference(defaults)
         lastSync = defaults.object(forKey: "moshpit.icloud.lastSync.v1") as? Date
         if !available { message = CloudSyncError.unavailable.localizedDescription }
         accountObserver = NotificationCenter.default.addObserver(forName: .CKAccountChanged,
@@ -84,7 +84,7 @@ final class CloudSyncService {
             do { try local.requireReadable() }
             catch { message = error.localizedDescription; return }
             enabled = defaults.bool(forKey: Self.enabledKey)
-            syncCredentials = defaults.object(forKey: Self.credentialsKey) as? Bool ?? true
+            syncCredentials = Self.credentialPreference(defaults)
             lastSync = defaults.object(forKey: "moshpit.icloud.lastSync.v1") as? Date
             preferencesLoaded = true
         }
@@ -132,7 +132,8 @@ final class CloudSyncService {
                     pending[id]?.revision += 1
                 }
             }
-            let merged = CloudSyncMerge.merge(local: pending, remote: remote, journal: journal, includeCredentials: credentials)
+            let merged = CloudSyncMerge.merge(local: pending, remote: remote, journal: journal,
+                                             includeCredentials: credentials, lockedIDs: captured.lockedIDs)
             try ensureCurrent(operation)
             try await ensureAccount(account, backend: backend)
             try ensureCurrent(operation)
@@ -172,6 +173,9 @@ final class CloudSyncService {
             defaults.set(try JSONEncoder.cloudSync.encode(journal), forKey: Self.journalKey)
             let now = Date(); lastSync = now
             defaults.set(now, forKey: "moshpit.icloud.lastSync.v1")
+            if !manual && !captured.lockedIDs.isEmpty {
+                message = String(localized: "Some credentials protected by Face ID were skipped. Use Sync Now to include them.")
+            }
         } catch {
             // Errors contain no payloads, credential references, or server
             // record descriptions. CloudKit's localized description is safe
@@ -183,6 +187,76 @@ final class CloudSyncService {
             } else { message = error.localizedDescription }
         }
         await local.keychain.endSSHSyncExport()
+    }
+
+    func removeCloudCredentials() async {
+        guard available, enabled, !syncing, let backend, let local else { return }
+        setSyncCredentials(false)
+        syncing = true; message = nil
+        defer { syncing = false }
+        let operation = generation
+        do {
+            try local.requireReadable()
+            let account = CloudSyncObject.digest(Data(try await backend.accountIdentifier().utf8))
+            try ensureCurrent(operation)
+            var journal = try readJournal(account: account)
+            if journal.account != account {
+                guard defaults.bool(forKey: "moshpit.icloud.accountChanged.v1") else {
+                    accountChanged(); throw CloudSyncError.accountChanged
+                }
+                journal = CloudSyncJournal(account: account)
+                try local.requireReadable()
+                defaults.set(try JSONEncoder.cloudSync.encode(journal), forKey: Self.journalKey)
+            }
+            defaults.set(false, forKey: "moshpit.icloud.accountChanged.v1")
+            let writer = try await deviceIdentifier(keychain: local.keychain)
+            try ensureCurrent(operation)
+            let remote = try await backend.fetch()
+            try ensureCurrent(operation)
+            var tombstones: [CloudSyncObject] = []
+            for (id, object) in remote {
+                guard id == object.id else { throw CloudSyncError.invalidData }
+                _ = try object.validated()
+                guard object.domain == .credential, !object.deleted else { continue }
+                let revision = max(object.revision, journal.entries[id]?.revision ?? 0)
+                guard revision < Int64.max else { throw CloudSyncError.invalidData }
+                tombstones.append(CloudSyncObject(id: id, domain: .credential,
+                    revision: revision + 1, writer: writer, payload: nil))
+            }
+            try await ensureAccount(account, backend: backend)
+            try ensureCurrent(operation)
+            // Only cloud records change: never export, restore or delete SSH secrets.
+            try await backend.save(tombstones)
+            try ensureCurrent(operation)
+            try await ensureAccount(account, backend: backend)
+            try ensureCurrent(operation)
+            try local.requireReadable()
+            for object in tombstones {
+                journal.entries[object.id] = CloudSyncEntry(domain: .credential,
+                    revision: object.revision, writer: writer, deleted: true, localHash: nil)
+            }
+            defaults.set(try JSONEncoder.cloudSync.encode(journal), forKey: Self.journalKey)
+            message = String(localized: "Synced credentials were removed from iCloud. Local copies were kept, and credential sync is off.")
+        } catch {
+            if error is CancellationError {
+                message = defaults.bool(forKey: "moshpit.icloud.accountChanged.v1")
+                    ? CloudSyncError.accountChanged.localizedDescription
+                    : (enabled ? CloudSyncError.localChanged.localizedDescription : nil)
+            } else {
+                message = String(format: String(localized: "Could not remove credentials from iCloud: %@"),
+                                 error.localizedDescription)
+            }
+        }
+    }
+
+    private static func credentialPreference(_ defaults: UserDefaults) -> Bool {
+        if let value = defaults.object(forKey: credentialsKey) { return value as? Bool ?? false }
+        // Preserve the choice implicit in a journal from the previous default.
+        guard let data = defaults.data(forKey: journalKey),
+              let journal = try? JSONDecoder().decode(CloudSyncJournal.self, from: data),
+              journal.entries.values.contains(where: { $0.domain == .credential }) else { return false }
+        defaults.set(true, forKey: credentialsKey)
+        return true
     }
 
     private func ensureCurrent(_ operation: Int) throws {

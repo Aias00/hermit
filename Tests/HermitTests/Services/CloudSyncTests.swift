@@ -53,11 +53,11 @@ struct CloudSyncTests {
         func sync() async { service.setEnabled(true); await service.sync(manual: true) }
     }
 
-    @Test("main sync defaults off, credential sync defaults on, unsigned builds unavailable")
+    @Test("main sync and credential sync default off, unsigned builds unavailable")
     func defaultsAndEntitlements() {
         let fixture = Fixture(); defer { fixture.close() }
         #expect(!fixture.service.enabled)
-        #expect(fixture.service.syncCredentials)
+        #expect(!fixture.service.syncCredentials)
         let unavailable = CloudSyncService(defaults: fixture.defaults, discoverEntitlements: false)
         unavailable.setEnabled(true)
         #expect(!unavailable.available && !unavailable.enabled)
@@ -96,6 +96,7 @@ struct CloudSyncTests {
     func coldRestore() async throws {
         let cloud = Cloud(), a = Fixture(cloud), b = Fixture(cloud)
         defer { a.close(); b.close() }
+        a.service.setSyncCredentials(true); b.service.setSyncCredentials(true)
         let ref = a.keychain.generateRef()
         try await a.keychain.savePassword("fixture-password-only", forRef: ref, requireBiometry: false)
         let host = ServerConnection(name: "Mini", host: "mini.example", username: "test", keychainRef: ref)
@@ -164,6 +165,7 @@ struct CloudSyncTests {
     func credentialsSwitch() async throws {
         let cloud = Cloud(), a = Fixture(cloud), b = Fixture(cloud)
         defer { a.close(); b.close() }
+        a.service.setSyncCredentials(true)
         let ref = a.keychain.generateRef()
         try await a.keychain.savePassword("before", forRef: ref, requireBiometry: false)
         a.local.connections.add(ServerConnection(name: "Host", host: "host.example", username: "test", keychainRef: ref))
@@ -187,6 +189,7 @@ struct CloudSyncTests {
     func secretTombstone() async throws {
         let cloud = Cloud(), fixture = Fixture(cloud)
         defer { fixture.close() }
+        fixture.service.setSyncCredentials(true)
         let ref = fixture.keychain.generateRef()
         try await fixture.keychain.savePassword("local-only", forRef: ref, requireBiometry: false)
         fixture.local.connections.add(ServerConnection(name: "Host", host: "host.example", username: "test", keychainRef: ref))
@@ -251,6 +254,7 @@ struct CloudSyncTests {
     @Test("credential journal uses a device-keyed digest, not a public password verifier")
     func keyedCredentialDigest() async throws {
         let fixture = Fixture(); defer { fixture.close() }
+        fixture.service.setSyncCredentials(true)
         let ref = fixture.keychain.generateRef()
         try await fixture.keychain.savePassword("guessable-fixture", forRef: ref, requireBiometry: false)
         fixture.local.connections.add(ServerConnection(name: "Host", host: "host.example", keychainRef: ref))
@@ -268,6 +272,7 @@ struct CloudSyncTests {
     func deviceBackupRestore() async throws {
         let cloud = Cloud(), source = Fixture(cloud), restored = Fixture(cloud)
         defer { source.close(); restored.close() }
+        source.service.setSyncCredentials(true); restored.service.setSyncCredentials(true)
         let ref = source.keychain.generateRef()
         try await source.keychain.savePassword("restore-fixture", forRef: ref, requireBiometry: false)
         source.local.connections.add(ServerConnection(name: "Host", host: "host.example", keychainRef: ref))

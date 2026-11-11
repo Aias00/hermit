@@ -7,6 +7,7 @@ struct iCloudSyncView: View {
     @Environment(ThemeStore.self) private var themes
     @Environment(AppThemeStore.self) private var appThemes
     @Environment(ShortcutStore.self) private var shortcuts
+    @State private var confirmingCredentialRemoval = false
 
     var body: some View {
         Form {
@@ -20,8 +21,22 @@ struct iCloudSyncView: View {
                 Toggle("Sync SSH Credentials", isOn: Binding(get: { sync.syncCredentials }, set: sync.setSyncCredentials))
                     .disabled(!sync.available)
                     .accessibilityIdentifier("icloud-sync-credentials")
+                Button("Remove Credentials from iCloud", role: .destructive) {
+                    confirmingCredentialRemoval = true
+                }
+                .disabled(!sync.available || !sync.enabled || sync.syncing)
+                .accessibilityIdentifier("icloud-remove-credentials")
+                .confirmationDialog("Remove Credentials from iCloud", isPresented: $confirmingCredentialRemoval,
+                                    titleVisibility: .visible) {
+                    Button("Remove Credentials from iCloud", role: .destructive) {
+                        Task { await sync.removeCloudCredentials() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Synced passwords and private keys will be deleted from iCloud. This device and your other devices will keep their local copies. Credential sync will be turned off.")
+                }
             } footer: {
-                Text("When enabled, saved hosts, SSH keys, themes, appearance and keyboard shortcuts sync through your private iCloud database. SSH passwords and portable private keys are included by default and stored in CloudKit encrypted fields. Turning credential sync off keeps existing cloud copies and local Keychain items.")
+                Text("When enabled, saved hosts, SSH keys, themes, appearance and keyboard shortcuts sync through your private iCloud database. Credential sync is off by default. If enabled, SSH passwords and portable private keys are stored in CloudKit encrypted fields. Turning it off keeps cloud copies; use Remove Credentials from iCloud to delete them. Local Keychain items are kept.")
             }
 
             Section {

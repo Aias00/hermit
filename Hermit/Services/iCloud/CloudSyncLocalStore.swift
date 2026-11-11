@@ -186,9 +186,12 @@ final class CloudSyncLocalStore {
                     exported[ref] = try await keychain.exportSSHSecret(ref: ref, allowAuthentication: allowAuthentication)
                 } catch KeychainError.notFound {
                     result.unknownIDs.insert(CloudSyncDomain.credential.rawValue + "/" + ref)
+                } catch let error as KeychainError where !allowAuthentication &&
+                    [.interactionNotAllowed, .authenticationFailed, .userCanceled].contains(error) {
+                    result.lockedIDs.insert(CloudSyncDomain.credential.rawValue + "/" + ref)
                 } catch { throw CloudSyncError.locked }
             }
-            if !refs.isEmpty {
+            if !refs.isEmpty && (!exported.isEmpty || result.lockedIDs.isEmpty) {
                 // A restored device backup carries metadata/journal but no
                 // ThisDeviceOnly keys. When ALL referenced SSH secrets are
                 // absent there is no local password edit to misclassify; a new

@@ -71,6 +71,9 @@ struct CloudSyncCapture: Equatable {
     /// Referenced credentials that have not arrived on this device yet are
     /// unknown, not deleted. Disabling credentials excludes the whole domain.
     var unknownIDs: Set<String> = []
+    /// Existing credentials that this pass cannot read without authentication.
+    /// Exclude them from reconciliation so remote values cannot replace them.
+    var lockedIDs: Set<String> = []
     var includesCredentials: Bool
 }
 
@@ -78,7 +81,8 @@ enum CloudSyncMerge {
     static func prepare(_ capture: CloudSyncCapture, journal: CloudSyncJournal,
                         writer: String) throws -> [String: CloudSyncObject] {
         var result: [String: CloudSyncObject] = [:]
-        for (id, var value) in capture.values {
+        for (id, var value) in capture.values
+            where !capture.unknownIDs.contains(id) && !capture.lockedIDs.contains(id) {
             let hash = capture.hashes[id] ?? (value.domain == .credential ? nil : value.payload.map(CloudSyncObject.digest))
             guard value.domain != .credential || hash != nil else { throw CloudSyncError.invalidData }
             if let previous = journal.entries[id] {
@@ -95,7 +99,7 @@ enum CloudSyncMerge {
         }
         for (id, previous) in journal.entries where result[id] == nil {
             guard previous.domain != .credential || capture.includesCredentials,
-                  !capture.unknownIDs.contains(id) else { continue }
+                  !capture.unknownIDs.contains(id), !capture.lockedIDs.contains(id) else { continue }
             let changed = previous.localHash != nil
             guard !changed || previous.revision < Int64.max else { throw CloudSyncError.invalidData }
             result[id] = CloudSyncObject(id: id, domain: previous.domain,
@@ -106,10 +110,12 @@ enum CloudSyncMerge {
     }
 
     static func merge(local: [String: CloudSyncObject], remote: [String: CloudSyncObject],
-                      journal: CloudSyncJournal, includeCredentials: Bool) -> [String: CloudSyncObject] {
-        var result = local
+                      journal: CloudSyncJournal, includeCredentials: Bool,
+                      lockedIDs: Set<String> = []) -> [String: CloudSyncObject] {
+        var result = local.filter { !lockedIDs.contains($0.key) }
         for (id, cloud) in remote {
-            guard cloud.domain != .credential || includeCredentials else { continue }
+            guard cloud.domain != .credential || includeCredentials,
+                  !lockedIDs.contains(id) else { continue }
             // A fresh install has no history for fixed IDs (appearance and
             // toolbar). Its shipped defaults must not overwrite iCloud.
             if journal.entries[id] == nil || result[id] == nil || cloud.succeeds(result[id]!)
