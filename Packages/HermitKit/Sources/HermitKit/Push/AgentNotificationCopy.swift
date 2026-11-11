@@ -104,8 +104,9 @@ public enum AgentNotificationCopy {
     }
 
     /// The needs-you card. `standingCount` is how many prompts are waiting
-    /// INCLUDING this one; above one it renders as a "+N" on the name, so one
-    /// card carries the whole wait ("claude +2 needs you"). `edge` is whether
+    /// INCLUDING this one; above one the "+N" rides on the workspace name, or
+    /// on the agent name when there is no usable workspace name, so one card
+    /// carries the whole wait. `edge` is whether
     /// this is the moment "nobody is waiting" became "someone is" — only that
     /// edge rings and may pierce Focus; everything else updates the card
     /// silently at `.passive`.

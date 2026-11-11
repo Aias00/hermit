@@ -84,9 +84,9 @@ struct PushStandingTests {
 @Suite("Quiet-notification rendering")
 struct QuietRenderingTests {
 
-    private func status(state: String, dur: Int? = nil) -> PushSealedBox.Status {
+    private func status(state: String, dur: Int? = nil, sess: String = "work") -> PushSealedBox.Status {
         PushSealedBox.Status(conn: "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
-                             host: "m1-pro", sess: "work", pane: "%3",
+                             host: "m1-pro", sess: sess, pane: "%3",
                              agent: "claude", state: state, title: "Bash: make",
                              ts: Int(Date().timeIntervalSince1970), dur: dur)
     }
@@ -104,8 +104,14 @@ struct QuietRenderingTests {
                                      attentionEdge: false, standingCount: 3)
         #expect(update.sound == nil, "a count changing is not worth a sound")
         #expect(update.interruptionLevel == .passive)
-        #expect(update.title == "claude +2 needs you",
-                "further prompts ride on the name as +N — one card for the whole wait")
+        #expect(update.title == "work +2 needs you",
+                "further prompts ride on the workspace name as +N — one card for the whole wait")
+
+        let numericWorkspace = UNMutableNotificationContent()
+        PushRemoteNotification.apply(status(state: "attention", sess: "3"), to: numericWorkspace,
+                                     attentionEdge: false, standingCount: 3)
+        #expect(numericWorkspace.title == "claude +2 needs you",
+                "a numeric workspace name falls back to the agent")
     }
 
     @Test("a finished short turn is information, not an interruption")
