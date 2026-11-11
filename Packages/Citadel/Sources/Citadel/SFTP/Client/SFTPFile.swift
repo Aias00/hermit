@@ -45,7 +45,7 @@ public final class SFTPFile {
         }
     }
     
-    /// Read the attributes of the file. This is equivalent to the `stat()` system call.
+    /// Read the attributes of the open file. This is equivalent to the `fstat()` system call.
     ///
     /// - Returns: File attributes including size, permissions, etc
     /// - Throws: SFTPError if the file handle is invalid or request fails
@@ -62,9 +62,9 @@ public final class SFTPFile {
     public func readAttributes() async throws -> SFTPFileAttributes {
         guard self.isActive else { throw SFTPError.fileHandleInvalid }
         
-        guard case .attributes(let attributes) = try await self.client.sendRequest(.stat(.init(
+        guard case .attributes(let attributes) = try await self.client.sendRequest(.fstat(.init(
             requestId: self.client.allocateRequestId(),
-            path: path
+            handle: self.handle
         ))) else {
             self.logger.warning("SFTP server returned bad response to read file request, this is a protocol error")
             throw SFTPError.invalidResponse

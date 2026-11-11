@@ -9754,6 +9754,58 @@
         }
       }
     },
+    "Completed paths stay in the original pane's draft. Upload history is kept until cleared, disconnected, or the app closes. Removing a record does not delete the remote file or draft path. Interrupted uploads resume from where they stopped when retried.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已完成的路径保留在原窗格的草稿中。上传记录会保留到清除、断开连接或退出 App。移除记录不会删除远端文件或草稿路径。上传中断后，重试会从上次停止的位置继续。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アップロード済みのパスは元のペインの下書きに残ります。履歴は、消去するか、接続を切るか、アプリを終了するまで保持されます。履歴を削除しても、リモートファイルや下書き内のパスは削除されません。中断したアップロードは、再試行すると中断した位置から再開します。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已完成的路徑會保留在原窗格的草稿中。上傳記錄會保留到清除記錄、中斷連線或結束 App。移除記錄不會刪除遠端檔案或草稿中的路徑。上傳中斷後，重試時會從上次停止的位置繼續。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "업로드가 완료된 경로는 원래 패널의 초안에 남습니다. 업로드 기록은 직접 지우거나 연결을 해제하거나 앱을 종료할 때까지 유지됩니다. 기록을 삭제해도 원격 파일이나 초안의 경로는 삭제되지 않습니다. 중단된 업로드는 다시 시도하면 멈춘 지점부터 이어서 업로드됩니다."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Pfade abgeschlossener Uploads bleiben im Entwurf des ursprünglichen Panels. Der Upload-Verlauf bleibt erhalten, bis du ihn leerst, die Verbindung trennst oder die App schließt. Wenn du einen Eintrag entfernst, bleiben die Datei auf dem Server und der Pfad im Entwurf erhalten. Unterbrochene Uploads werden bei einem erneuten Versuch an der Stelle fortgesetzt, an der sie angehalten wurden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las rutas de los archivos subidos quedan en el borrador del panel original. El historial de subidas se conserva hasta que lo borres, te desconectes o cierres la app. Eliminar un registro no borra el archivo remoto ni la ruta del borrador. Al reintentar una subida interrumpida, se reanuda desde donde se detuvo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les chemins des fichiers envoyés restent dans le brouillon du panneau d’origine. L’historique des envois est conservé jusqu’à ce que vous l’effaciez, vous déconnectiez ou fermiez l’app. Supprimer une entrée ne supprime ni le fichier distant ni son chemin dans le brouillon. Un envoi interrompu reprend là où il s’est arrêté lorsque vous réessayez."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os caminhos dos arquivos enviados ficam no rascunho do painel original. O histórico de envios é mantido até você limpá-lo, desconectar ou fechar o app. Remover um registro não apaga o arquivo remoto nem o caminho no rascunho. Ao tentar novamente, um envio interrompido continua de onde parou."
+          }
+        }
+      }
+    },
     "Compress Output": {
       "localizations": {
         "de": {
@@ -57848,28 +57900,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "清空上傳記錄"
-          }
-        }
-      }
-    },
-    "Completed paths stay in this connection's draft. Upload history is kept until cleared or the app closes.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Completed paths stay in this connection's draft. Upload history is kept until cleared or the app closes."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已完成的路径保留在此连接的草稿中。上传记录保留到手动清空或退出 App。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已完成的路徑保留在此連線的草稿中。上傳記錄保留到手動清空或退出 App。"
           }
         }
       }

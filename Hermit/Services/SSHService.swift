@@ -481,9 +481,9 @@ actor SSHSession {
     ///
     /// Hosts with `Subsystem sftp` disabled fall back to landing the bytes
     /// over exec channels alone (base64 chunks appended to a temp file, one
-    /// decode at the end — see ``ExecUploadCommands``). The fallback runs on
-    /// ANY SFTP failure rather than trying to classify Citadel's errors; if
-    /// both paths fail, the exec error is the one surfaced, and SFTP is only
+    /// decode at the end — see ``ExecUploadCommands``). Only failures before
+    /// writing or verifying partial bytes can fall back to exec. Later SFTP
+    /// failures keep the hidden partial so a retry can resume. SFTP is only
     /// remembered as unavailable once exec has actually succeeded.
     ///
     /// The home directory is resolved with `realpath .` because SFTP starts
@@ -511,14 +511,17 @@ actor SSHSession {
         try scope.checkCancellation()
         guard !closed else { throw SSHError.sessionClosed }
         if !sftpKnownUnavailable {
+            let attempt = DraftSFTPUploadAttempt()
             do {
-                return try await sftpUpload(data, named: filename, progress: progress, scope: scope)
+                return try await sftpUpload(data, named: filename, progress: progress,
+                                            scope: scope, attempt: attempt)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
                 // Cancellation must never start an exec fallback.
                 try Task.checkCancellation()
                 try scope.checkCancellation()
+                guard await attempt.canUseExec else { throw error }
                 // Fall through to the exec path; its error wins if it also fails.
             }
         }
@@ -527,11 +530,18 @@ actor SSHSession {
         return path
     }
 
+    private actor DraftSFTPUploadAttempt {
+        private(set) var canUseExec = true
+
+        func requireSFTPRetry() { canUseExec = false }
+    }
+
     private func sftpUpload(
         _ data: Data,
         named filename: String,
         progress: (@Sendable (Double) -> Void)?,
-        scope: SSHChildChannelScope) async throws -> String {
+        scope: SSHChildChannelScope,
+        attempt: DraftSFTPUploadAttempt) async throws -> String {
         // SFTPFileAttributes' public init doesn't take permissions — set the
         // field after construction.
         @Sendable func attributes(permissions: UInt32) -> SFTPFileAttributes {
@@ -554,30 +564,163 @@ actor SSHSession {
                 try? await sftp.createDirectory(
                     atPath: uploads, attributes: attributes(permissions: 0o700))
                 let path = uploads + "/" + filename
-                let file = try await sftp.openFile(
-                    filePath: path,
-                    flags: [.write, .create, .truncate],
-                    attributes: attributes(permissions: 0o600))
+                let partial = uploads + "/." + filename + ".partial"
+                if try await Self.draftUploadIsPublished(
+                    using: sftp, partial: partial, final: path, size: data.count) {
+                    await attempt.requireSFTPRetry()
+                    progress?(1)
+                    return path
+                }
+                let (file, start) = try await Self.openDraftUploadPartial(
+                    using: sftp, at: partial, data: data, scope: scope, attempt: attempt)
                 try await SSHResourceScope.withCleanup(operation: {
+                    if start > 0 {
+                        progress?(Double(start) / Double(data.count))
+                        try await file.setAttributes(to: attributes(permissions: 0o600))
+                    }
                     // Chunked so a cancel lands between writes and progress
                     // moves during the transfer, not just at its end.
                     let chunkSize = 128 * 1024
-                    var offset = 0
+                    var offset = start
+                    // A failed write may have landed some of Citadel's smaller
+                    // requests, even if the first 128 KB write never returns.
+                    await attempt.requireSFTPRetry()
                     while offset < data.count {
                         try Task.checkCancellation()
+                        try scope.checkCancellation()
                         let end = min(offset + chunkSize, data.count)
                         try await file.write(
                             ByteBuffer(bytes: data[offset..<end]), at: UInt64(offset))
                         offset = end
                         progress?(Double(offset) / Double(data.count))
                     }
+                    try Task.checkCancellation()
+                    try scope.checkCancellation()
+                    guard try await file.readAttributes().size == UInt64(data.count) else {
+                        throw DraftSFTPUploadError.sizeMismatch
+                    }
                 }, cleanup: { try await file.close() })
+                try await Self.publishDraftUpload(
+                    using: sftp, partial: partial, final: path, size: data.count, scope: scope)
+                progress?(1)
                 return path
             }, cleanup: { try await sftp.close() })
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             throw SSHError.underlying(error)
+        }
+    }
+
+    private enum DraftSFTPUploadError: Error {
+        case sizeMismatch
+    }
+
+    private static func draftUploadAttributes(
+        using sftp: SFTPClient, at path: String) async throws -> SFTPFileAttributes? {
+        do { return try await sftp.getAttributes(at: path) }
+        catch where isMissingDraftUploadFile(error) { return nil }
+    }
+
+    private static func isMissingDraftUploadFile(_ error: Error) -> Bool {
+        if let status = error as? SFTPMessage.Status { return status.errorCode == .noSuchFile }
+        if case SFTPError.errorStatus(let status) = error { return status.errorCode == .noSuchFile }
+        return false
+    }
+
+    private static func isRegularDraftUploadFile(_ attributes: SFTPFileAttributes) -> Bool {
+        // S_IFMT / S_IFREG; missing file type information is not resumable.
+        attributes.permissions.map { $0 & 0o170000 == 0o100000 } ?? false
+    }
+
+    private static func removeDraftUploadFile(using sftp: SFTPClient, at path: String) async throws {
+        do { try await sftp.remove(at: path) }
+        catch where isMissingDraftUploadFile(error) { }
+    }
+
+    private static func openDraftUploadPartial(
+        using sftp: SFTPClient, at path: String, data: Data,
+        scope: SSHChildChannelScope, attempt: DraftSFTPUploadAttempt
+    ) async throws -> (SFTPFile, Int) {
+        if let attributes = try await draftUploadAttributes(using: sftp, at: path),
+           isRegularDraftUploadFile(attributes), let size = attributes.size,
+           size > 0, size <= UInt64(data.count) {
+            let file = try await sftp.openFile(filePath: path, flags: [.read, .write])
+            do {
+                let opened = try await file.readAttributes()
+                if isRegularDraftUploadFile(opened), opened.size == size,
+                   try await verifyDraftUploadPartial(
+                    file, data: data, size: Int(size), scope: scope, attempt: attempt) {
+                    return (file, Int(size))
+                }
+            } catch {
+                try? await file.close()
+                try Task.checkCancellation()
+                try scope.checkCancellation()
+                if error is CancellationError { throw error }
+                // Unverifiable partials are replaced below.
+            }
+            try await file.close()
+        }
+
+        try Task.checkCancellation()
+        try scope.checkCancellation()
+        // Unlink first: a late write on an old handle cannot reach our new inode.
+        try await removeDraftUploadFile(using: sftp, at: path)
+        var attributes = SFTPFileAttributes()
+        attributes.permissions = 0o600
+        let file = try await sftp.openFile(
+            filePath: path, flags: [.write, .create, .forceCreate], attributes: attributes)
+        return (file, 0)
+    }
+
+    private static func verifyDraftUploadPartial(
+        _ file: SFTPFile, data: Data, size: Int,
+        scope: SSHChildChannelScope, attempt: DraftSFTPUploadAttempt
+    ) async throws -> Bool {
+        let sampleSize = min(64 * 1024, size)
+        for range in [0..<sampleSize, (size - sampleSize)..<size] {
+            var offset = range.lowerBound
+            // SFTP reads may return fewer bytes than requested.
+            while offset < range.upperBound {
+                try Task.checkCancellation()
+                try scope.checkCancellation()
+                let bytes = try await file.read(
+                    from: UInt64(offset), length: UInt32(range.upperBound - offset))
+                let end = offset + bytes.readableBytes
+                guard end > offset, end <= range.upperBound,
+                      bytes.readableBytesView.elementsEqual(data[offset..<end]) else { return false }
+                await attempt.requireSFTPRetry()
+                offset = end
+            }
+        }
+        return true
+    }
+
+    private static func draftUploadIsPublished(
+        using sftp: SFTPClient, partial: String, final: String, size: Int
+    ) async throws -> Bool {
+        guard let attributes = try await draftUploadAttributes(using: sftp, at: final),
+              isRegularDraftUploadFile(attributes), attributes.size == UInt64(size) else { return false }
+        return try await draftUploadAttributes(using: sftp, at: partial) == nil
+    }
+
+    private static func publishDraftUpload(
+        using sftp: SFTPClient, partial: String, final: String, size: Int,
+        scope: SSHChildChannelScope
+    ) async throws {
+        try Task.checkCancellation()
+        try scope.checkCancellation()
+        // SFTP v3 rename cannot replace a target from an earlier attempt.
+        try await removeDraftUploadFile(using: sftp, at: final)
+        do { try await sftp.rename(at: partial, to: final) }
+        catch {
+            try Task.checkCancellation()
+            try scope.checkCancellation()
+            // The rename may have succeeded before its reply was lost.
+            if (try? await draftUploadIsPublished(
+                using: sftp, partial: partial, final: final, size: size)) == true { return }
+            throw error
         }
     }
 

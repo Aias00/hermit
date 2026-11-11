@@ -73,7 +73,7 @@ struct FileUploadQueueView: View {
                         .padding(.vertical, 6)
                     }
                 } footer: {
-                    Text("已完成的路径保留在原窗格的草稿中。上传记录会保留到清除、断开连接或退出 App。移除记录不会删除远端文件或草稿路径。取消后，已写入远端的内容可能保留。")
+                    Text("Completed paths stay in the original pane's draft. Upload history is kept until cleared, disconnected, or the app closes. Removing a record does not delete the remote file or draft path. Interrupted uploads resume from where they stopped when retried.")
                 }
                 Section {
                     if queue.isRunning {

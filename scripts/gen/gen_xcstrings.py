@@ -1180,6 +1180,9 @@ add("READY TO INSERT", "可以插入", "挿入できます")
 add("Reading the selected images…", "正在读取选中的图片…", "選択した画像を読み込み中…")
 add("UPLOAD FAILED", "上传失败", "アップロード失敗")
 add("UPLOADING %lld%%", "上传中 %lld%%", "アップロード中 %lld%%")
+add("Completed paths stay in the original pane's draft. Upload history is kept until cleared, disconnected, or the app closes. Removing a record does not delete the remote file or draft path. Interrupted uploads resume from where they stopped when retried.",
+    "已完成的路径保留在原窗格的草稿中。上传记录会保留到清除、断开连接或退出 App。移除记录不会删除远端文件或草稿路径。上传中断后，重试会从上次停止的位置继续。",
+    "アップロード済みのパスは元のペインの下書きに残ります。履歴は、消去するか、接続を切るか、アプリを終了するまで保持されます。履歴を削除しても、リモートファイルや下書き内のパスは削除されません。中断したアップロードは、再試行すると中断した位置から再開します。")
 
 # ---------- Host path preview (RemotePreview) ----------
 add("OPENING…", "打开中…", "開いています…")
