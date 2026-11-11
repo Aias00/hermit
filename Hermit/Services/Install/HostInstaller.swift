@@ -105,6 +105,10 @@ struct HostInstaller {
     /// ever calls the sender — a host that looks paired and pushes nothing.
     func installPairing(_ pairing: PushPairing,
                         state: InstallState) async throws -> InstallReport {
+        // Reject malformed cached credentials before writing a sourced shell config.
+        guard pairing.sendToken.utf8.count == 64,
+              pairing.sendToken.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) })
+        else { throw PushRelayClient.Failure.malformedResponse }
         var report = InstallReport(facts: state.facts)
 
         guard state.facts.canPush else {
@@ -175,13 +179,13 @@ struct HostInstaller {
         // up. A pairing missing them (isReadyToInstall == false) must never get
         // here; the empty fields it would produce make the sender skip the conf.
         """
-        RELAY_URL=\(pairing.relayURL)
-        SEND_TOKEN=\(pairing.sendToken)
-        SECRET=\(pairing.secretHex)
-        CONN=\(pairing.connectionId.uuidString)
-        APNS_TOKEN=\(pairing.apnsToken ?? "")
-        APNS_ENV=\(pairing.apnsEnv ?? "production")
-        SEND_IAT=\(Int((pairing.sendTokenIssuedAt ?? Date(timeIntervalSince1970: 0)).timeIntervalSince1970))
+        RELAY_URL=\(HostCommands.quote(pairing.relayURL))
+        SEND_TOKEN=\(HostCommands.quote(pairing.sendToken))
+        SECRET=\(HostCommands.quote(pairing.secretHex))
+        CONN=\(HostCommands.quote(pairing.connectionId.uuidString))
+        APNS_TOKEN=\(HostCommands.quote(pairing.apnsToken ?? ""))
+        APNS_ENV=\(HostCommands.quote(pairing.apnsEnv ?? "production"))
+        SEND_IAT=\(HostCommands.quote(String(Int((pairing.sendTokenIssuedAt ?? Date(timeIntervalSince1970: 0)).timeIntervalSince1970))))
 
         """
     }

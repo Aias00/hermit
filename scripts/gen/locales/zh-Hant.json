@@ -577,6 +577,7 @@
   "The manifest on this host names a config path Hermit won't run a command against: %@": "這台主機上的清單指向了一個 Hermit 不會對它執行指令的設定路徑：%@",
   "Couldn't save the pairing on this phone, so nothing was installed on the host. The diagnostics log has the reason.": "配對資訊沒能存到這部手機上，所以主機那邊什麼都沒裝。原因在診斷記錄裡。",
   "Relay refused to mint a send token (%lld): %@": "中繼伺服器拒絕核發傳送權杖（%lld）：%@",
+  "The relay sent back an invalid send token, so nothing was installed on the host.": "中繼伺服器回傳的傳送權杖無效，所以主機那邊什麼都沒裝。",
   "That relay address isn't a valid URL.": "這個中繼伺服器位址不是有效的 URL。",
   "iOS hasn't issued a push token to this phone yet — check that notifications are allowed, then try again.": "iOS 還沒發推播權杖給這部手機。確認已允許通知，再試一次。",
   "Restart didn't take — on the host, run: herdr server stop && herdr": "重新啟動沒生效。到主機上執行：herdr server stop && herdr",

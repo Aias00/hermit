@@ -167,6 +167,8 @@ send_one() {
   # connect (it re-checks every conf against its own copy byte for byte).
   [ -n "${APNS_TOKEN:-}" ] || return 0
   case "$SEND_IAT" in *[!0-9]*|"") return 0 ;; esac
+  case "$SEND_TOKEN" in *[!0-9a-f]*|"") return 0 ;; esac
+  [ ${#SEND_TOKEN} -eq 64 ] || return 0
   if [ -n "$TESTCONN" ] && [ "$CONN" != "$TESTCONN" ]; then return 0; fi
 
   PLAIN=$(printf '{"conn":"%s","host":"%s","sess":"%s","pane":"%s","agent":"%s","state":"%s","title":"%s","ts":%s%s}' \

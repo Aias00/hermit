@@ -44255,6 +44255,58 @@
         }
       }
     },
+    "The relay sent back an invalid send token, so nothing was installed on the host.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Relay hat ein ungültiges Sende-Token zurückgegeben, deshalb wurde auf dem Host nichts installiert."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El relay devolvió un token de envío no válido, así que no se instaló nada en el host."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le relais a renvoyé un jeton d’envoi non valide : rien n’a été installé sur l’hôte."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リレーから返された送信トークンが無効なため、ホストには何もインストールされていません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "릴레이가 잘못된 전송 토큰을 반환해 호스트에는 아무것도 설치하지 않았습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O relay devolveu um token de envio inválido, então nada foi instalado no host."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中转服务器返回的发送令牌无效，所以主机那边什么都没装。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中繼伺服器回傳的傳送權杖無效，所以主機那邊什麼都沒裝。"
+          }
+        }
+      }
+    },
     "The saved Tailcat client identity is invalid. Restore its credentials before connecting.": {
       "localizations": {
         "en": {

@@ -952,6 +952,9 @@ add("Couldn't save the pairing on this phone, so nothing was installed on the ho
     "配对信息没能保存到这台手机上，所以主机那边什么都没装。原因在诊断日志里。",
     "この iPhone にペアリングを保存できなかったため、ホストには何もインストールされていません。理由は診断ログにあります。")
 add("Relay refused to mint a send token (%lld): %@", "中转服务器拒绝签发发送令牌（%lld）：%@", "リレーが送信トークンの発行を拒否しました（%lld）：%@")
+add("The relay sent back an invalid send token, so nothing was installed on the host.",
+    "中转服务器返回的发送令牌无效，所以主机那边什么都没装。",
+    "リレーから返された送信トークンが無効なため、ホストには何もインストールされていません。")
 add("That relay address isn't a valid URL.", "这个中转服务器地址不是合法的 URL。", "このリレーのアドレスは有効な URL ではありません。")
 add("iOS hasn't issued a push token to this phone yet — check that notifications are allowed, then try again.",
     "iOS 还没给这台手机发推送令牌。确认已允许通知，再试一次。",

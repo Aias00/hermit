@@ -577,6 +577,7 @@
   "The manifest on this host names a config path Hermit won't run a command against: %@": "El manifiesto de este host indica una ruta de configuración sobre la que Hermit no ejecuta comandos: %@",
   "Couldn't save the pairing on this phone, so nothing was installed on the host. The diagnostics log has the reason.": "No se pudo guardar el emparejamiento en este teléfono, así que no se instaló nada en el host. El motivo está en el registro de diagnóstico.",
   "Relay refused to mint a send token (%lld): %@": "El relay se negó a emitir un token de envío (%lld): %@",
+  "The relay sent back an invalid send token, so nothing was installed on the host.": "El relay devolvió un token de envío no válido, así que no se instaló nada en el host.",
   "That relay address isn't a valid URL.": "Esa dirección de relay no es una URL válida.",
   "iOS hasn't issued a push token to this phone yet — check that notifications are allowed, then try again.": "iOS aún no ha emitido un token push para este teléfono. Comprueba que las notificaciones estén permitidas y vuelve a intentarlo.",
   "Restart didn't take — on the host, run: herdr server stop && herdr": "El reinicio no surtió efecto. En el host, ejecuta: herdr server stop && herdr",

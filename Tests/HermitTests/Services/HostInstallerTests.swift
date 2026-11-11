@@ -238,13 +238,13 @@ struct HostInstallerTests {
     @Test("push.conf is exactly the seven lines the sender parses")
     func pushConfBytes() {
         #expect(HostInstaller.pushConf(Self.pairing) == """
-            RELAY_URL=https://push.example.org
-            SEND_TOKEN=\(String(repeating: "cd", count: 32))
-            SECRET=\(String(repeating: "ab", count: 32))
-            CONN=3F2504E0-4F89-11D3-9A0C-0305E82C3301
-            APNS_TOKEN=\(String(repeating: "ef", count: 32))
-            APNS_ENV=production
-            SEND_IAT=1756000000
+            RELAY_URL='https://push.example.org'
+            SEND_TOKEN='\(String(repeating: "cd", count: 32))'
+            SECRET='\(String(repeating: "ab", count: 32))'
+            CONN='3F2504E0-4F89-11D3-9A0C-0305E82C3301'
+            APNS_TOKEN='\(String(repeating: "ef", count: 32))'
+            APNS_ENV='production'
+            SEND_IAT='1756000000'
 
             """)
     }

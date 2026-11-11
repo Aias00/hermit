@@ -577,6 +577,7 @@
   "The manifest on this host names a config path Hermit won't run a command against: %@": "이 호스트의 매니페스트가 가리키는 설정 경로에는 Hermit이 명령을 실행하지 않습니다: %@",
   "Couldn't save the pairing on this phone, so nothing was installed on the host. The diagnostics log has the reason.": "페어링 정보를 이 휴대폰에 저장할 수 없어 호스트에는 아무것도 설치하지 않았습니다. 이유는 진단 로그에 있습니다.",
   "Relay refused to mint a send token (%lld): %@": "릴레이가 전송 토큰 발급을 거부했습니다(%lld): %@",
+  "The relay sent back an invalid send token, so nothing was installed on the host.": "릴레이가 잘못된 전송 토큰을 반환해 호스트에는 아무것도 설치하지 않았습니다.",
   "That relay address isn't a valid URL.": "릴레이 주소가 올바른 URL이 아닙니다.",
   "iOS hasn't issued a push token to this phone yet — check that notifications are allowed, then try again.": "iOS가 아직 이 휴대폰에 푸시 토큰을 발급하지 않았습니다. 알림이 허용되어 있는지 확인한 뒤 다시 시도하세요.",
   "Restart didn't take — on the host, run: herdr server stop && herdr": "재시작이 적용되지 않았습니다. 호스트에서 실행하세요: herdr server stop && herdr",

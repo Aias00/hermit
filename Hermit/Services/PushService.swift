@@ -414,6 +414,7 @@ enum PushRelayClient {
         case badURL
         case couldNotSave
         case noDeviceToken
+        case malformedResponse
         case status(Int, String)
 
         var errorDescription: String? {
@@ -428,6 +429,8 @@ enum PushRelayClient {
                 return String(localized: "Couldn't save the pairing on this phone, so nothing was installed on the host. The diagnostics log has the reason.")
             case .noDeviceToken:
                 return String(localized: "iOS hasn't issued a push token to this phone yet — check that notifications are allowed, then try again.")
+            case .malformedResponse:
+                return String(localized: "The relay sent back an invalid send token, so nothing was installed on the host.")
             case let .status(code, body):
                 return String(localized: "Relay refused to mint a send token (\(code)): \(body)")
             }
@@ -471,6 +474,10 @@ enum PushRelayClient {
             let iat: Int64
         }
         let minted = try JSONDecoder().decode(Minted.self, from: data)
+        guard minted.sendToken.utf8.count == 64,
+              minted.sendToken.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+              minted.iat > 0
+        else { throw Failure.malformedResponse }
         return (minted.sendToken, Date(timeIntervalSince1970: TimeInterval(minted.iat)))
     }
 }
