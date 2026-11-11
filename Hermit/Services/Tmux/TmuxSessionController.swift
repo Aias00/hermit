@@ -332,6 +332,7 @@ final class TmuxSessionController: MultiplexerControlling {
         channelWatchdogTask = nil
         await client.reset()
         snapshot.isAttached = false
+        abandonPendingCallbacks()
         // Replies for anything still queued will never arrive, so nothing
         // would ever release a parked resync — drop the holds rather than
         // leave the panes permanently unable to repaint.
@@ -707,12 +708,14 @@ final class TmuxSessionController: MultiplexerControlling {
         final class Box { var clients: Set<String> = [] }
         let box = Box()
         sendCommand("list-clients -F '#{client_name}'") { response in
+            guard !response.isError else { return }
             box.clients = Set(response.lines.map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty })
         }
         sendCommand("show-options -wqv -t \(windowId) @moshpit_size_owner") { [weak self] response in
             guard let self else { return }
             self.sizeLeaseProbesInFlight.remove(windowId)
+            guard !response.isError else { return }
             let raw = response.lines.first?.trimmingCharacters(in: .whitespaces) ?? ""
             if let lease = SizeLease(parsing: raw, clients: box.clients) {
                 self.sizeLeases[windowId] = .held(lease)
@@ -1066,6 +1069,7 @@ final class TmuxSessionController: MultiplexerControlling {
     func countNonControlClients(_ completion: @escaping (Int) -> Void) {
         guard snapshot.isAttached else { completion(-1); return }
         sendCommand("list-clients -F '#{client_control_mode}'") { response in
+            guard !response.isError else { completion(-1); return }
             completion(response.lines.filter {
                 $0.trimmingCharacters(in: .whitespaces) == "0"
             }.count)
@@ -1118,6 +1122,7 @@ final class TmuxSessionController: MultiplexerControlling {
             // without touching clients on other sessions (e.g. the user's
             // desktop tmux).
             sendCommand("list-clients -F '#{client_control_mode}|#{client_session}|#{client_name}'") { [weak self] response in
+                guard !response.isError else { return }
                 guard let self else { return }
                 for line in response.lines {
                     let parts = line.split(separator: "|", maxSplits: 2)
@@ -1451,6 +1456,7 @@ final class TmuxSessionController: MultiplexerControlling {
         guard snapshot.isAttached,
               let paneId = snapshot.activePaneId ?? snapshot.activePanes.first?.id else { return }
         sendCommand("display-message -p -t \(paneId) '#{mouse_any_flag} #{alternate_on}'") { [weak self] response in
+            guard !response.isError else { return }
             let flags = response.lines.first?
                 .trimmingCharacters(in: .whitespaces)
                 .split(separator: " ") ?? []
@@ -1589,6 +1595,7 @@ final class TmuxSessionController: MultiplexerControlling {
     /// driver can enter copy-mode with `prefix [` on the mosh-rendered client.
     func queryPrefixKey(_ completion: @escaping (String) -> Void) {
         sendCommand("show-options -gqv prefix") { response in
+            guard !response.isError else { return }
             completion(response.lines.first ?? "C-b")
         }
     }
@@ -1640,6 +1647,7 @@ final class TmuxSessionController: MultiplexerControlling {
         guard snapshot.isAttached,
               let pane = snapshot.activePaneId ?? snapshot.activePanes.first?.id else { return }
         sendCommand("display-message -p -t \(pane) '#{pane_in_mode}'") { [weak self] resp in
+            guard !resp.isError else { return }
             guard let self,
                   resp.lines.first?.trimmingCharacters(in: .whitespaces) == "1" else { return }
             self.send(rawCommand: "send-keys -t \(pane) -X cancel")
@@ -1914,6 +1922,7 @@ final class TmuxSessionController: MultiplexerControlling {
         // Full re-discovery so the button visibly reflects sessions created or
         // killed elsewhere — not just windows/panes of the current session.
         sendCommand("list-sessions -F '#{session_id} #{session_attached} #{session_name}'") { [weak self] response in
+            guard !response.isError else { return }
             self?.parseListSessions(response.lines)
         }
         refreshWindowsAndPanes()
@@ -1993,6 +2002,7 @@ final class TmuxSessionController: MultiplexerControlling {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             var resumed = false
             func fire() { if !resumed { resumed = true; continuation.resume() } }
+            // An error also releases teardown; the timeout shares the once-guard.
             sendCommand("display-message -p ok") { _ in fire() }
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
@@ -2018,6 +2028,7 @@ final class TmuxSessionController: MultiplexerControlling {
     private func ensureImmersiveZoom() {
         guard let windowId = snapshot.activeWindowId else { return }
         sendCommand("display-message -p -t '\(windowId)' '\(Self.pristineProbeFormat)'") { [weak self] response in
+            guard !response.isError else { return }
             guard let self, let line = response.lines.first else { return }
             let fields = line.split(separator: " ").map(String.init)
             // Same reply, two jobs: the pane count and zoom flag this needs,
@@ -2098,6 +2109,7 @@ final class TmuxSessionController: MultiplexerControlling {
             self.selectSession(id)
         }
         sendCommand("list-sessions -F '#{session_id} #{session_attached} #{session_name}'") { [weak self] response in
+            guard !response.isError else { return }
             self?.parseListSessions(response.lines)
         }
     }
@@ -2118,6 +2130,7 @@ final class TmuxSessionController: MultiplexerControlling {
         guard !trimmed.isEmpty else { return }
         sendSurfacingErrors("rename-session -t \(sessionId) \(tmuxQuote(trimmed))", verb: "rename")
         sendCommand("list-sessions -F '#{session_id} #{session_attached} #{session_name}'") { [weak self] response in
+            guard !response.isError else { return }
             self?.parseListSessions(response.lines)
         }
     }
@@ -2145,6 +2158,7 @@ final class TmuxSessionController: MultiplexerControlling {
             snapshot.activeSessionId = snapshot.sessions.keys.sorted().first
         }
         sendCommand("list-sessions -F '#{session_id} #{session_attached} #{session_name}'") { [weak self] response in
+            guard !response.isError else { return }
             self?.parseListSessions(response.lines)
         }
         // Re-list windows/panes for every surviving session so the tree is
@@ -2185,6 +2199,7 @@ final class TmuxSessionController: MultiplexerControlling {
     private func refreshWindowsAndPanes(isFreshAttach: Bool = false,
                                         then completion: (() -> Void)? = nil) {
         sendCommand("list-windows -a -F '#{session_id} #{window_id} #{window_index} #{window_layout} #{window_active} #{window_panes} #{window_name}'") { [weak self] response in
+            guard !response.isError else { return }
             self?.parseListWindows(response.lines)
         }
         // `alternate_on` and `pane_in_mode` ride along here, ahead of the
@@ -2195,6 +2210,7 @@ final class TmuxSessionController: MultiplexerControlling {
         // `-MOSHPIT_CC_TAP`. list-panes already runs and already round-trips;
         // two more format fields on it cost nothing.
         sendCommand("list-panes -a -F \(Self.paneDiscoveryFormat)") { [weak self] response in
+            guard !response.isError else { return }
             guard let self else { return }
             self.parseListPanes(response.lines)
             self.ensureTerminalsForAllPanes(isFreshAttach: isFreshAttach)
@@ -2564,6 +2580,7 @@ final class TmuxSessionController: MultiplexerControlling {
         } else {
             sendCommand("display-message -p -t \(paneId) '#{alternate_on} #{pane_in_mode}'") { [weak self] resp in
                 guard let self else { return }
+                guard !resp.isError else { self.finishBackfill(paneId); return }
                 let fields = resp.lines.first?.split(separator: " ").map(String.init) ?? []
                 let state = ScreenState(isAlternate: fields.first == "1",
                                         isInCopyMode: fields.count >= 2 && fields[1] == "1")
@@ -2614,6 +2631,7 @@ final class TmuxSessionController: MultiplexerControlling {
             // Whatever this reply turns out to hold, the dump is over —
             // release any resync that was waiting behind it.
             defer { self.finishBackfill(paneId) }
+            guard !response.isError else { return }
             var lines = response.lines
             while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
                 lines.removeLast()
@@ -2748,6 +2766,8 @@ final class TmuxSessionController: MultiplexerControlling {
     }
 
     private func resyncPane(_ paneId: String, reveal: Bool = true) {
+        // Error callbacks can release deferred resyncs after the session exits.
+        guard snapshot.isAttached else { return }
         // Never race this pane's own backfill — see `backfillsInFlight`. A
         // parked request coalesces with any earlier one, and a `reveal: true`
         // request wins: the single capture that eventually runs is the only
@@ -2805,6 +2825,7 @@ final class TmuxSessionController: MultiplexerControlling {
         // it rides the same FIFO the reveal-bearing frame does.
         let sentAt = ContinuousClock.now
         sendCommand("capture-pane -p -e -t \(paneId)") { [weak self] response in
+            guard !response.isError else { return }
             guard let self else { return }
             let elapsed = ContinuousClock.now - sentAt
             self.lastResyncRoundTrip = Double(elapsed.components.seconds)
@@ -2863,6 +2884,7 @@ final class TmuxSessionController: MultiplexerControlling {
             // The cursor is the SECOND half of the pair, so this is where the
             // resync is actually over.
             defer { self.finishResync(paneId) }
+            guard !resp.isError else { return }
             let parts = resp.lines.first?.split(separator: " ").compactMap { Int($0) } ?? []
             let (col, row) = parts.count == 2 ? (parts[0], parts[1]) : (0, 0)
             // CUP is 1-based; cursor_x/y are 0-based.
@@ -3122,6 +3144,7 @@ final class TmuxSessionController: MultiplexerControlling {
             resyncPane(paneId)
         case .exit:
             snapshot.isAttached = false
+            abandonPendingCallbacks()
         case .commandResponse(let response):
             handleCommandResponse(response)
         }
@@ -3241,12 +3264,15 @@ final class TmuxSessionController: MultiplexerControlling {
         if attachedAt == nil { attachedAt = Date() }
 
         sendCommand("list-sessions -F '#{session_id} #{session_attached} #{session_name}'") { [weak self] response in
+            guard !response.isError else { return }
             self?.parseListSessions(response.lines)
         }
         sendCommand("list-windows -a -F '#{session_id} #{window_id} #{window_index} #{window_layout} #{window_active} #{window_panes} #{window_name}'") { [weak self] response in
+            guard !response.isError else { return }
             self?.parseListWindows(response.lines)
         }
         sendCommand("list-panes -a -F \(Self.paneDiscoveryFormat)") { [weak self] response in
+            guard !response.isError else { return }
             guard let self else { return }
             self.parseListPanes(response.lines)
             self.ensureTerminalsForAllPanes(isFreshAttach: true)
@@ -3851,9 +3877,11 @@ final class TmuxSessionController: MultiplexerControlling {
         }
         // Re-list so we pick up name, index, layout, and any new panes.
         sendCommand("list-windows -a -F '#{session_id} #{window_id} #{window_index} #{window_layout} #{window_active} #{window_panes} #{window_name}'") { [weak self] response in
+            guard !response.isError else { return }
             self?.parseListWindows(response.lines)
         }
         sendCommand("list-panes -a -F \(Self.paneDiscoveryFormat)") { [weak self] response in
+            guard !response.isError else { return }
             guard let self else { return }
             self.parseListPanes(response.lines)
             self.ensureTerminalsForAllPanes()
@@ -3940,16 +3968,19 @@ final class TmuxSessionController: MultiplexerControlling {
             // callback, FIFO behind these) can defer to a device that is
             // using it instead of yanking it to our grid.
             sendCommand("display-message -p '#{client_name}'") { [weak self] response in
+                guard !response.isError else { return }
                 let name = response.lines.first?.trimmingCharacters(in: .whitespaces) ?? ""
                 if !name.isEmpty { self?.ourClientName = name }
             }
             final class Box { var clients: Set<String> = [] }
             let box = Box()
             sendCommand("list-clients -F '#{client_name}'") { response in
+                guard !response.isError else { return }
                 box.clients = Set(response.lines.map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty })
             }
             sendCommand("show-options -wqv @moshpit_size_owner") { [weak self] response in
+                guard !response.isError else { return }
                 let raw = response.lines.first?.trimmingCharacters(in: .whitespaces) ?? ""
                 if let lease = SizeLease(parsing: raw, clients: box.clients) {
                     self?.pendingAttachLease = .held(lease)
@@ -3966,6 +3997,7 @@ final class TmuxSessionController: MultiplexerControlling {
         // window list lands (initial attach / session switch).
         pendingImmersiveZoom = true
         sendCommand("list-sessions -F '#{session_id} #{session_attached} #{session_name}'") { [weak self] response in
+            guard !response.isError else { return }
             self?.parseListSessions(response.lines)
         }
         refreshWindowsAndPanes(isFreshAttach: isFreshAttach)
@@ -3975,6 +4007,22 @@ final class TmuxSessionController: MultiplexerControlling {
         // showed the bare command, then grew the agent — and with the island
         // and notifications both off they never arrived at all.
         if isFreshAttach { pollAgentHooks() }
+    }
+
+    /// A control session's unanswered commands cannot carry into its successor.
+    private func abandonPendingCallbacks() {
+        let entries = pendingCallbacks
+        pendingCallbacks.removeAll()
+        ccTapLine("ABANDON count=\(entries.count)")
+        let response = TmuxCommandResponse(
+            commandId: 0,
+            commandNum: 0,
+            isError: true,
+            lines: [])
+        // Clear first: callbacks may send commands or release deferred work.
+        for entry in entries {
+            entry.callback?(response)
+        }
     }
 
     private func handleCommandResponse(_ response: TmuxCommandResponse) {
