@@ -732,7 +732,7 @@
   "NSMicrophoneUsageDescription": "O Hermit usa o microfone para entrada de voz. Apple e Whisper reconhecem neste aparelho. Ao escolher Doubao, parar ou tentar novamente envia a gravação à Volcengine para reconhecimento.",
   "NSSpeechRecognitionUsageDescription": "Ao escolher Apple, o Hermit usa o reconhecimento no aparelho. Doubao é uma opção de nuvem separada que envia gravações à Volcengine ao parar ou tentar novamente.",
   "NSLocalNetworkUsageDescription": "O Hermit conecta por SSH e mosh (UDP) aos servidores da sua rede local. Sem esta permissão, conexões a hosts como 192.168.x.x falham.",
-  "NSCameraUsageDescription": "A câmera serve para fotografar quadros brancos, rascunhos ou telas e anexar a uma sessão de terminal. As fotos perdem os dados de localização neste aparelho e só são enviadas ao seu próprio servidor.",
+  "NSCameraUsageDescription": "A câmera serve para escanear códigos QR de pareamento do Relay ou fotografar quadros brancos, rascunhos ou telas e anexar a uma sessão de terminal. As fotos perdem os dados de localização neste aparelho e só são enviadas ao seu próprio servidor.",
   "Open a GitHub Issue": "Abrir uma issue no GitHub",
   "Bug reports and feature requests, in the open": "Bugs e pedidos de recurso, às claras",
   "It leaves this list for good: its public key can't be copied again or picked for a new connection. Connections already using it keep working.": "Ela sai desta lista de vez: você não poderá mais copiar a chave pública nem escolhê-la para uma nova conexão. As conexões que já a usam continuam funcionando.",

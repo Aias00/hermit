@@ -6,7 +6,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mit der Kamera fotografierst du etwa Whiteboards, Skizzen oder Bildschirme und hängst sie an eine Terminalsitzung an. Fotos werden auf diesem Gerät von Ortsdaten befreit und nur auf deinen eigenen Server geladen."
+            "value": "Mit der Kamera scannst du QR-Codes zum Koppeln mit einem Relay oder fotografierst etwa Whiteboards, Skizzen oder Bildschirme und hängst sie an eine Terminalsitzung an. Fotos werden auf diesem Gerät von Ortsdaten befreit und nur auf deinen eigenen Server geladen."
           }
         },
         "en": {
@@ -18,31 +18,31 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "La cámara sirve para fotografiar pizarras, bocetos o pantallas y adjuntarlos a una sesión de terminal. Las fotos pierden los datos de ubicación en este dispositivo y solo se suben a tu propio servidor."
+            "value": "La cámara sirve para escanear códigos QR de emparejamiento con Relay o fotografiar pizarras, bocetos o pantallas y adjuntarlos a una sesión de terminal. Las fotos pierden los datos de ubicación en este dispositivo y solo se suben a tu propio servidor."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L’appareil photo sert à photographier un tableau blanc, un croquis ou un écran pour le joindre à une session de terminal. Les photos sont débarrassées de leurs données de localisation sur cet appareil et ne sont envoyées qu’à votre propre serveur."
+            "value": "L’appareil photo sert à scanner les codes QR de jumelage Relay ou à photographier un tableau blanc, un croquis ou un écran pour le joindre à une session de terminal. Les photos sont débarrassées de leurs données de localisation sur cet appareil et ne sont envoyées qu’à votre propre serveur."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "カメラでホワイトボードやスケッチ、画面などを撮影し、ターミナルセッションに添付できます。写真はこの端末上で位置情報を取り除き、あなた自身のサーバーにのみアップロードされます。"
+            "value": "Relay のペアリング用 QR コードを読み取ったり、ホワイトボードやスケッチ、画面などを撮影してターミナルセッションに添付したりできます。写真はこの端末上で位置情報を取り除き、あなた自身のサーバーにのみアップロードされます。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "카메라로 화이트보드, 스케치, 화면 등을 찍어 터미널 세션에 첨부합니다. 사진은 이 기기에서 위치 정보를 제거한 뒤 사용자의 서버에만 업로드됩니다."
+            "value": "카메라로 Relay 페어링 QR 코드를 스캔하거나 화이트보드, 스케치, 화면 등을 찍어 터미널 세션에 첨부합니다. 사진은 이 기기에서 위치 정보를 제거한 뒤 사용자의 서버에만 업로드됩니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "A câmera serve para fotografar quadros brancos, rascunhos ou telas e anexar a uma sessão de terminal. As fotos perdem os dados de localização neste aparelho e só são enviadas ao seu próprio servidor."
+            "value": "A câmera serve para escanear códigos QR de pareamento do Relay ou fotografar quadros brancos, rascunhos ou telas e anexar a uma sessão de terminal. As fotos perdem os dados de localização neste aparelho e só são enviadas ao seu próprio servidor."
           }
         },
         "zh-Hans": {

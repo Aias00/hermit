@@ -732,7 +732,7 @@
   "NSMicrophoneUsageDescription": "Hermit은 음성 입력에 마이크를 사용합니다. Apple과 Whisper는 기기에서 인식합니다. Doubao를 선택하면 중지하거나 다시 시도할 때 녹음이 Volcengine으로 전송되어 인식됩니다.",
   "NSSpeechRecognitionUsageDescription": "Apple을 선택하면 Hermit은 기기 내 음성 인식을 사용합니다. Doubao는 중지하거나 다시 시도할 때 녹음을 Volcengine으로 보내는 별도의 클라우드 옵션입니다.",
   "NSLocalNetworkUsageDescription": "Hermit은 SSH와 mosh(UDP)로 로컬 네트워크의 서버에 연결합니다. 이 권한이 없으면 192.168.x.x 같은 내부 호스트에 연결할 수 없습니다.",
-  "NSCameraUsageDescription": "카메라로 화이트보드, 스케치, 화면 등을 찍어 터미널 세션에 첨부합니다. 사진은 이 기기에서 위치 정보를 제거한 뒤 사용자의 서버에만 업로드됩니다.",
+  "NSCameraUsageDescription": "카메라로 Relay 페어링 QR 코드를 스캔하거나 화이트보드, 스케치, 화면 등을 찍어 터미널 세션에 첨부합니다. 사진은 이 기기에서 위치 정보를 제거한 뒤 사용자의 서버에만 업로드됩니다.",
   "Open a GitHub Issue": "GitHub에 이슈 열기",
   "Bug reports and feature requests, in the open": "버그 신고와 기능 제안, 공개된 자리에서",
   "It leaves this list for good: its public key can't be copied again or picked for a new connection. Connections already using it keep working.": "목록에서 완전히 사라지며, 공개 키를 다시 복사하거나 새 연결에 고를 수 없습니다. 이미 이 키를 쓰는 연결은 그대로 작동합니다.",
