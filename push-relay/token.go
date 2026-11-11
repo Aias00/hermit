@@ -26,9 +26,9 @@ import (
 //
 //   - apnsToken — the token authorizes pushing to ONE device. A host cannot
 //     redirect its credential at someone else's phone.
-//   - conn — the phone's random per-connection id. Keeps tokens per host, so
-//     the throttle's per-device ceiling cannot be reset by a host swapping
-//     credentials with another, and log fingerprints distinguish hosts.
+//   - conn — the phone's random per-connection id. Keeps credentials and log
+//     fingerprints distinct per host. The throttle keys on the APNs device
+//     token, so swapping or re-minting credentials cannot reset its ceiling.
 //   - iat — mint time, seconds. Tokens EXPIRE (default 45 days; the app
 //     re-mints and rewrites the host's conf long before that). Expiry is the
 //     revocation story a stateless design has: v1 could delete a row the
@@ -75,8 +75,8 @@ func verifySendToken(master []byte, presented, apnsToken, conn string,
 	return hmac.Equal(p, w)
 }
 
-// SendTokenHash survives from v1 as the throttle's key and the log handle: the
-// journal correlates a host's pushes without ever containing the credential.
+// SendTokenHash survives from v1 as the log handle: the journal correlates a
+// host's pushes without ever containing the credential.
 func SendTokenHash(sendToken string) string {
 	sum := sha256.Sum256([]byte(sendToken))
 	return hex.EncodeToString(sum[:])

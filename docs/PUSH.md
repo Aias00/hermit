@@ -261,9 +261,10 @@ in seconds.
 ## Pairing, and everything else installed on a host
 
 Per **connection**, not per device. Each host gets its own secret and its own
-send token, which buys three things: unpairing one server cannot break the
-others, a compromised host cannot forge notifications appearing to come from a
-different one, and rate limiting is per host.
+send token, so unpairing one server cannot break the others, a compromised host
+cannot forge notifications appearing to come from a different one, and log
+fingerprints distinguish host credentials. Relay rate limits are shared across
+all credentials for a device.
 
 Nothing is pasted into a shell. `HostInstaller` (`Hermit/Services/Install/`)
 runs everything over the same SSH exec channel image attachment uses —
@@ -525,13 +526,24 @@ Only `attention` and `done` are ever pushed. `working` fires on every tool call
 and stays on the tmux bridge, where it costs nothing — that alone removes most
 of the volume.
 
-Beyond that: the relay enforces a 3-second floor between pushes per host and a
-120/hour cap, and sets `apns-collapse-id` so a re-prompt **replaces** its
-predecessor rather than stacking a second card for one question. The collapse id
-is deliberately the same string the app uses as its local notification
+Beyond that: the relay enforces a 3-second floor between pushes per device and
+thread (collapse id), and a 120/hour cap per device across all send tokens.
+Minting another token cannot reset either limit. It sets `apns-collapse-id` so
+a re-prompt **replaces** its predecessor rather than stacking a second card for
+one question. The collapse id is deliberately the same string the app uses as
+its local notification
 identifier, which buys two more behaviours for free — a push replaces the local
 notification for that pane instead of buzzing twice, and the app's existing
 "revoke a prompt that has moved on" sweep removes the pushed copy too.
+
+The in-memory throttle holds at most 100,000 buckets: one hourly bucket per
+device and one floor bucket per device and thread. Buckets idle for more than
+two hours are pruned at most once a minute during normal requests. If new keys
+would exceed capacity, the relay forces a prune only if at least five seconds
+have passed since the last prune of either kind, then refuses the request with
+HTTP 429 and a roughly 60-second retry if it still cannot fit both keys.
+No partial entry is inserted; existing keys continue to work. Capacity refusals
+are logged at most once a minute using bucket counts only.
 
 ## Running the relay
 

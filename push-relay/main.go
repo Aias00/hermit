@@ -324,12 +324,13 @@ func (r *relay) handleNotify(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Floor per PANE, cap per device. Keying the floor on the device alone meant
-	// a `done` could swallow the `attention` that followed it two seconds later
-	// — "you replied from the lock screen, the agent immediately asked for
+	// Floor per device+pane, cap per device, shared across send tokens. Keying
+	// the floor on the device alone meant a `done` could swallow the `attention`
+	// that followed it two seconds later — "you replied from the lock screen,
+	// the agent immediately asked for
 	// permission" is exactly that sequence, and it dropped the one notification
 	// in the pair that mattered. Two agents asking at once had the same problem.
-	if wait, ok := r.throttle.allow(hash, body.Thread, r.now()); !ok {
+	if wait, ok := r.throttle.allow(device.APNsToken, body.Thread, r.now()); !ok {
 		w.Header().Set("retry-after", strconv.Itoa(int(wait.Seconds())+1))
 		httpError(w, http.StatusTooManyRequests, "slow down")
 		return
@@ -513,8 +514,10 @@ func (r *relay) buildPayload(category string, body notifyRequest) ([]byte, error
 // decision here; the hourly cap only stops a runaway loop from burning a user's
 // attention (and our APNs standing) overnight.
 type throttle struct {
-	mu   sync.Mutex
-	seen map[string]*bucket
+	mu          sync.Mutex
+	seen        map[string]*bucket
+	lastPrune   time.Time
+	lastFullLog time.Time
 }
 
 type bucket struct {
@@ -526,13 +529,15 @@ type bucket struct {
 const (
 	minInterval = 3 * time.Second
 	hourlyCap   = 120
+	maxBuckets  = 100_000
 )
 
 func newThrottle() *throttle { return &throttle{seen: map[string]*bucket{}} }
 
-// allow applies the per-pane floor and the per-device hourly cap.
+// allow applies the per-device+thread floor and the per-device hourly cap.
 //
-// `device` bounds how much a runaway host can spend of a user's attention;
+// `device` is the normalized APNs token, so minting or swapping send tokens
+// cannot reset how much a runaway host can spend of a user's attention;
 // `thread` (the collapse id, one per pane) is what the floor is measured
 // against, so one pane going quiet cannot silence another.
 //
@@ -543,12 +548,24 @@ func newThrottle() *throttle { return &throttle{seen: map[string]*bucket{}} }
 func (t *throttle) allow(device, thread string, now time.Time) (time.Duration, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	// Buckets that stopped being used are dead weight in a process meant to run
-	// for months. Pruned opportunistically rather than on a timer: the map is
-	// only ever touched from here.
-	for k, v := range t.seen {
-		if now.Sub(v.last) > 2*time.Hour {
-			delete(t.seen, k)
+	// Prune idle buckets at most once a minute unless capacity forces a scan.
+	if t.lastPrune.IsZero() || now.Sub(t.lastPrune) >= time.Minute {
+		t.prune(now)
+	}
+	floorKey := device + "\x00" + thread
+	// Check both keys before inserting either, so a capacity refusal cannot
+	// leave a partial entry. Pruning may remove either key; recheck afterwards.
+	if !t.hasCapacity(device, floorKey) {
+		// Wait five seconds after any prune before forcing another.
+		if now.Sub(t.lastPrune) >= 5*time.Second {
+			t.prune(now)
+		}
+		if !t.hasCapacity(device, floorKey) {
+			if t.lastFullLog.IsZero() || now.Sub(t.lastFullLog) >= time.Minute {
+				log.Printf("throttle capacity reached: buckets=%d max=%d", len(t.seen), maxBuckets)
+				t.lastFullLog = now
+			}
+			return time.Minute, false
 		}
 	}
 	hourly := t.bucket(device, now)
@@ -558,7 +575,7 @@ func (t *throttle) allow(device, thread string, now time.Time) (time.Duration, b
 	if hourly.count >= hourlyCap {
 		return hourly.hour.Add(time.Hour).Sub(now), false
 	}
-	floor := t.bucket(device+"\x00"+thread, now)
+	floor := t.bucket(floorKey, now)
 	if !floor.last.IsZero() && now.Sub(floor.last) < minInterval {
 		return minInterval - now.Sub(floor.last), false
 	}
@@ -566,6 +583,25 @@ func (t *throttle) allow(device, thread string, now time.Time) (time.Duration, b
 	hourly.last = now
 	hourly.count++
 	return 0, true
+}
+
+func (t *throttle) prune(now time.Time) {
+	t.lastPrune = now
+	for key, b := range t.seen {
+		if now.Sub(b.last) > 2*time.Hour {
+			delete(t.seen, key)
+		}
+	}
+}
+
+func (t *throttle) hasCapacity(keys ...string) bool {
+	needed := 0
+	for _, key := range keys {
+		if _, ok := t.seen[key]; !ok {
+			needed++
+		}
+	}
+	return len(t.seen)+needed <= maxBuckets
 }
 
 func (t *throttle) bucket(key string, now time.Time) *bucket {
