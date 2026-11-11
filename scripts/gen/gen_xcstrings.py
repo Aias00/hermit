@@ -161,9 +161,6 @@ add("Dictate commands instead of typing. Planned for a future update.",
 add("Enable Voice Input", "启用语音输入", "音声入力を有効化")
 add("Coming soon", "即将推出", "近日公開")
 add("Adds a mic key to the terminal bar", "在快捷键栏上加一个麦克风键", "ショートカットバーにマイクキーを追加します")
-add("Dictate commands and prompts from the mic key on the terminal bar. Speech is transcribed entirely on-device — your voice never leaves this device, and nothing is typed until you tap Insert.",
-    "按快捷键栏上的麦克风键，把命令和提示词说出来。转写全部在本机完成，语音不会离开这台手机。不点「插入」，什么都不会输进终端。",
-    "ショートカットバーのマイクキーからコマンドやプロンプトを音声入力できます。書き起こしは完全に端末内で行われ、音声がこの端末を離れることはなく、「挿入」をタップするまで何も入力されません。")
 
 # ---------- Voice input · engine + model (Whisper) ----------
 add("Recognition", "识别引擎", "認識エンジン")
@@ -174,9 +171,6 @@ add("No download. One language per session.", "无需下载。每次会话只识
 add("Downloads a model. Around 100 languages, and copes with a sentence that mixes two.",
     "需下载模型。覆盖约 100 种语言，一句话里混用两种也能听准。",
     "モデルのダウンロードが必要。約 100 言語に対応し、1 つの文に 2 言語が混在しても処理できます。")
-add("Both engines run entirely on this device — your voice is never uploaded. Whisper additionally needs its model downloaded once over the network before it can be used.",
-    "两种引擎都只在本机运行，语音不会上传。Whisper 要先联网下载一次模型。",
-    "どちらのエンジンも完全にこの端末で動作し、音声がアップロードされることはありません。Whisper は利用前に一度だけモデルをネットワーク経由でダウンロードする必要があります。")
 add("SETUP", "准备", "セットアップ")
 add("Download a model", "下载模型", "モデルをダウンロード")
 add("Whisper can't transcribe until one is on the device",
@@ -1140,7 +1134,6 @@ add("ECDSA-sk")
 add("ED25519")
 add("FEEDBACK", "反馈", "フィードバック")
 add("Feedback", "反馈", "フィードバック")
-add("Mail goes to support@cluas.eu.org through your own Mail app and leaves only when you tap Send there. Issues are public and sit next to the code; keep security reports to mail.", "邮件通过你自己的邮件 app 发到 support@cluas.eu.org，在邮件里点发送之前什么都不会发出。Issue 是公开的，就在代码旁边；安全问题请走邮件。", "メールはお使いのメールアプリから support@cluas.eu.org に送られ、そこで送信するまで何も送られません。Issue は公開され、コードのすぐ隣にあります。セキュリティの問題はメールでお知らせください。")
 add("Hide keyboard", "收起键盘", "キーボードを隠す")
 add("INCLUDE", "附带", "含める")
 add("Install mosh", "安装 mosh", "mosh をインストール")
@@ -1295,16 +1288,16 @@ INFOPLIST_ZH_JA = {
         "用 Face ID 解锁 SSH 密钥",
         "Face ID で SSH キーをロック解除します"),
     "NSMicrophoneUsageDescription": (
-        "语音输入要用麦克风，这样你可以把命令和提示词直接说进终端。音频在这台设备上转写，用 Apple 的语音模型或你下载的 Whisper 模型，不会上传到任何地方。",
-        "音声入力はマイクを使い、コマンドやプロンプトをターミナルに向けて話せるようにします。音声はこの端末上で、Apple の音声モデルまたはダウンロードした Whisper モデルによって書き起こされ、どこにもアップロードされません。"),
+        "Hermit 使用麦克风录入语音。Apple 和 Whisper 在本机识别；选择豆包后，停止转写或重试会将录音发送到火山引擎识别。",
+        "Hermit は音声入力にマイクを使用します。Apple と Whisper は端末内で認識します。Doubao を選ぶと、停止または再試行時に録音を Volcengine に送信して認識します。"),
     "NSSpeechRecognitionUsageDescription": (
-        "听写在本机做语音识别。你的语音和转写文字都不会离开这台设备，Hermit 不使用服务器端识别。",
-        "音声入力は端末内で音声認識を行います。音声も書き起こしもこの端末を離れず、Hermit はサーバー側の認識を使いません。"),
+        "选择 Apple 时，Hermit 使用 Apple 的设备端语音识别。豆包是单独的云识别选项，会在停止转写或重试时将录音发送到火山引擎。",
+        "Apple を選択すると、Hermit は端末内の音声認識を使います。Doubao は別のクラウドオプションで、停止または再試行時に録音を Volcengine に送信します。"),
     "NSLocalNetworkUsageDescription": (
         "Hermit 通过 SSH 和 mosh（UDP）连接你局域网里的服务器。没有这个权限，连 192.168.x.x 这类内网主机会失败。",
         "Hermit は SSH と mosh（UDP）でローカルネットワーク上のサーバーに接続します。この許可がないと、192.168.x.x のような LAN 上のホストへの接続は失敗します。"),
     "NSCameraUsageDescription": (
-        "相机用来拍点东西，比如白板、草图、屏幕，然后附到终端会话里。照片会在这台设备上去掉位置信息，只上传到你自己的服务器。",
+        "相机可扫描 Relay 配对二维码，也可拍摄白板、草图或屏幕并附到终端会话里。照片会在本机去掉位置信息，只上传到你自己的服务器。",
         "カメラでホワイトボードやスケッチ、画面などを撮影し、ターミナルセッションに添付できます。写真はこの端末上で位置情報を取り除き、あなた自身のサーバーにのみアップロードされます。"),
 }
 
@@ -1428,24 +1421,40 @@ def write_catalog(path, table, english=None):
     Xcode had found — silently, since the file is generated and nobody reads the
     diff — and the next IDE build put the keys back untranslated, which is why
     this file was permanently dirty. Curated entries win; anything else is left
-    exactly as it was.
+    exactly as it was. Preserve existing key, field and locale order; insert new
+    keys before their first greater neighbour.
     """
-    existing = {}
-    if os.path.exists(path):
+    catalog = {"sourceLanguage": "en", "strings": {}, "version": "1.0"}
+    exists = os.path.exists(path)
+    if exists:
         try:
             with open(path, encoding="utf-8") as f:
-                existing = json.load(f).get("strings") or {}
+                catalog = json.load(f)
         except (json.JSONDecodeError, OSError) as exc:
             raise SystemExit(f"{path}: refusing to overwrite unreadable catalog ({exc})")
 
+    existing = catalog.get("strings") or {}
     merged = dict(existing)
     for key, spec in table.items():
-        merged[key] = entry(key, spec, (english or {}).get(key))
+        curated = entry(key, spec, (english or {}).get(key))
+        if key in merged:
+            merged[key].setdefault("localizations", {}).update(curated["localizations"])
+        else:
+            merged[key] = curated
 
-    catalog = {"sourceLanguage": "en", "strings": merged, "version": "1.0"}
+    new_keys = sorted(set(table) - set(existing), reverse=True)
+    ordered = {}
+    for key in existing:
+        while new_keys and new_keys[-1] < key:
+            new_key = new_keys.pop()
+            ordered[new_key] = merged[new_key]
+        ordered[key] = merged[key]
+    for key in reversed(new_keys):
+        ordered[key] = merged[key]
+    catalog["strings"] = ordered
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(catalog, f, ensure_ascii=False, indent=2, sort_keys=True)
+        json.dump(catalog, f, ensure_ascii=False, indent=2, sort_keys=not exists)
         f.write("\n")
     kept = len(merged) - len(table)
     print(f"{path}: {len(table)} curated + {kept} kept = {len(merged)} keys")
